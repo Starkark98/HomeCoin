@@ -1,0 +1,18 @@
+# personal data and backups: never in the repository
+data/
+# demo version: recreated at every start
+demo-data/
+# local Python environment
+.venv/
+__pycache__/
+*.pyc
+
+# internal work notes: kept local only
+docs/WORKLOG-*.md
+docs/STORIA-SVILUPPO.md
+
+# unencrypted exports downloaded into the program folder by mistake
+*.csv
+*.xlsx
+*.hcbackup
+homecoin-backup-*.json
