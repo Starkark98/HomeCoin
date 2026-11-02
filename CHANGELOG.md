@@ -2,6 +2,26 @@
 
 All notable changes to HomeCoin are listed here, newest first.
 
+## 1.2.1 — 2026-11-02
+
+**Updates from HomeCoin**
+- Settings → **Updates**: checks GitHub for a new published release (automatically once a day after sign-in, can be turned off, or with *Check now*) and installs it with one click. The installed version runs the new installer silently and reopens; the ZIP version replaces its program files in place (keeping a copy of the old ones, installing new libraries from `requirements.lock` first) and restarts.
+- Every release is signed by the maintainer (Ed25519 manifest with the size and SHA-256 of each file): HomeCoin refuses unsigned or altered releases, older versions and downloads from anywhere but GitHub, and saves an encrypted database backup before installing. The data folder is never part of an update; a development copy (git) never updates itself.
+- A new version shows a small label at the top and a dot on Settings, nothing more.
+
+**Cleaner interface**
+- The menu is grouped: Everyday, Planning, Wealth, Tools. Group titles hide themselves when a space has none of their tabs.
+- The top bar keeps only what you use every day (hide amounts, lock, new transaction); theme, help, support and *Close HomeCoin* are in the **⋯** menu.
+- Settings in five tabs: General, Spaces, Security, Backup & data, Updates. The import code moved to Security → Advanced.
+- Better layout on narrow screens (settings rows and top bar wrap).
+
+**Demo**
+- Much richer sample data, so every feature can be seen at work: cash and an archived account, a fixed-rate car loan next to the mixed-rate mortgage, a variable bill linked by keyword, categorization rules and transactions still to categorize, an excluded transaction, notes, budgets in both spaces, four goals, a credit card paid off monthly, a money market fund, gold, a partial sale with realized gain, coupons, interest and fees, a pension fund valued from statements, a saved rebalancing target, an activity log and the backup reminder.
+- Import → **Try it with a sample bank statement** loads a made-up statement (some rows already present, to see duplicate detection).
+
+**Fixes**
+- Sign-in, password changes and other operations could rarely fail with an error on Windows when the key file was being read at the same moment (`keystore.json` cannot be replaced while open). Reads and writes of the key file are now serialized and briefly retried.
+
 ## 1.2.0 — 2026-11-02
 
 **Installer**

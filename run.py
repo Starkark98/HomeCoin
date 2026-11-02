@@ -6,6 +6,7 @@ import argparse
 import socket
 import sys
 import threading
+import time
 import webbrowser
 
 from waitress import serve
@@ -35,9 +36,14 @@ def main():
     p.add_argument("--port", type=int, default=8765)
     p.add_argument("--no-browser", action="store_true", help="do not open the browser at startup")
     p.add_argument("--background", action="store_true", help="start locked without opening the browser (start with Windows)")
+    p.add_argument("--wait-port", action="store_true", help=argparse.SUPPRESS)  # after an update: the old process is exiting
     args = p.parse_args()
     url = f"http://127.0.0.1:{args.port}/"
     browser = not (args.no_browser or args.background)
+    for _ in range(150 if args.wait_port else 0):
+        if not port_in_use(args.port):
+            break
+        time.sleep(0.2)
 
     if port_in_use(args.port):  # already running (e.g. the shortcut clicked again): just open the page
         tell(f"HomeCoin seems to be already running at {url}")

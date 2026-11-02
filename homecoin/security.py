@@ -97,17 +97,44 @@ def unseal(dek, box):
 
 # ------------------------------------------------------------------ keystore
 
+# On Windows a file cannot be replaced while another thread has it open (PermissionError): reads and writes of the
+# keystore go through one lock, and a parsed copy is kept while the file is unchanged (it is read on every request).
+# Short retries cover other programs (antivirus, backup tools) that open the file for a moment.
+_KS_LOCK = threading.RLock()
+_ks_cache = (None, None)  # (stat signature, parsed keystore)
+
+
+def _retry(fn, tries=20):
+    for i in range(tries):
+        try:
+            return fn()
+        except PermissionError:
+            if i == tries - 1:
+                raise
+            time.sleep(0.05)
+
+
 def read_keystore():
-    if not KEYSTORE.exists():
-        return None
-    return json.loads(KEYSTORE.read_text("utf-8"))
+    global _ks_cache
+    with _KS_LOCK:
+        try:
+            st = KEYSTORE.stat()
+        except FileNotFoundError:
+            return None
+        sig = (st.st_mtime_ns, st.st_size)
+        if _ks_cache[0] != sig:
+            _ks_cache = (sig, json.loads(_retry(lambda: KEYSTORE.read_text("utf-8"))))
+        return json.loads(json.dumps(_ks_cache[1]))  # callers modify it before writing
 
 
 def write_keystore(ks):
-    KEYSTORE.parent.mkdir(parents=True, exist_ok=True)
-    tmp = KEYSTORE.with_suffix(".tmp")
-    tmp.write_text(json.dumps(ks, indent=1), "utf-8")
-    os.replace(tmp, KEYSTORE)
+    global _ks_cache
+    with _KS_LOCK:
+        KEYSTORE.parent.mkdir(parents=True, exist_ok=True)
+        tmp = KEYSTORE.with_suffix(".tmp")
+        tmp.write_text(json.dumps(ks, indent=1), "utf-8")
+        _retry(lambda: os.replace(tmp, KEYSTORE))
+        _ks_cache = (None, None)
 
 
 def check_password(pw):
@@ -308,10 +335,11 @@ class Vault:
 
     def lock_now(self):
         with self.lock:
+            if self.dek is not None and dbm._key == self.dek:  # only the key this vault opened (tests run many vaults)
+                dbm.set_key(None)
             self.dek = None
             self.sessions.clear()
             self.import_token = None
-            dbm.set_key(None)
             for cb in self.on_lock:
                 cb()
 

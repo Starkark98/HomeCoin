@@ -22,10 +22,11 @@ from .services import (Categorizer, account_balances, count_past_occurrences, pr
                        recurring_view, upcoming)
 from . import split as splitm
 from . import tools
+from . import updater
 from . import util
 from .util import FREQUENCIES, add_months, months_between, parse_date, parse_number, rule_matches
 
-VERSION = "1.2.0"
+VERSION = "1.2.1"
 STATIC_DIR = dbm.BASE_DIR / "static"
 KINDS = ("expense", "income", "transfer")
 ACCOUNT_TYPES = ("corrente", "risparmio", "credito", "prepagata", "contanti", "investimenti", "altro")
@@ -348,9 +349,9 @@ def create_app(port):
         if request.path.startswith("/api/") and request.path not in public_api:
             if vault.valid(request.cookies.get(COOKIE)):
                 return None
-            # local import script with a temporary code: never for the security functions, nor for taking the
-            # data out in bulk (backup, restore, unencrypted exports)
-            if not request.path.startswith(("/api/auth/", "/api/backup", "/api/restore", "/api/export/")) and \
+            # local import script with a temporary code: never for the security functions and updates, nor for
+            # taking the data out in bulk (backup, restore, unencrypted exports)
+            if not request.path.startswith(("/api/auth/", "/api/update", "/api/backup", "/api/restore", "/api/export/")) and \
                     vault.valid_import_token(request.headers.get("X-HomeCoin-Token")):
                 return None
             return jsonify(error="HomeCoin is locked: enter the password", locked=True), 401
@@ -557,6 +558,115 @@ def create_app(port):
     def auth_settings():
         vault.set_auto_lock(as_int(body().get("auto_lock"), "auto-lock"))
         return jsonify(ok=True, auto_lock=vault.auto_lock_minutes())
+
+    # --------------------------------------------------------- updates (signed GitHub releases, see updater.py)
+
+    UPDATE_KEYS = ("update_auto", "update_checked", "update_info")
+    update_busy = threading.Lock()
+
+    def save_setting(db, key, value):
+        db.execute("INSERT INTO settings(key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                   (key, value))
+
+    def update_status(db, error=None):
+        s = dict(db.execute("SELECT key, value FROM settings WHERE key IN (?, ?, ?)", UPDATE_KEYS).fetchall())
+        try:
+            info = json.loads(s.get("update_info") or "{}")
+        except ValueError:
+            info = {}
+        latest = updater.parse_version(info.get("latest"))
+        available = bool(latest) and latest > updater.parse_version(VERSION)
+        kind = updater.install_kind()
+        return {"current": VERSION, "auto": s.get("update_auto", "1") == "1", "checked": s.get("update_checked"),
+                "latest": info.get("latest") if latest else None, "available": available,
+                "notes": str(info.get("notes") or "") if available else "",
+                "url": info.get("url") if available else updater.RELEASE_PAGE, "kind": kind, "demo": DEMO,
+                "can_apply": available and kind in ("installer", "zip") and not DEMO, "error": error}
+
+    @app.get("/api/update")
+    def update_get():
+        """Update status. ?check=1 asks GitHub now; ?auto=1 asks only if automatic checks are on and the last check
+        was more than 20 hours ago (the client calls it after every sign-in). Never in the demo."""
+        db = get_db()
+        st = update_status(db)
+        force, auto = request.args.get("check") == "1", request.args.get("auto") == "1"
+        if DEMO or not (force or auto):
+            return jsonify(st)
+        if not force:
+            try:
+                last = dt.datetime.fromisoformat(st["checked"] or "")
+            except ValueError:
+                last = None
+            if not st["auto"] or (last and dt.datetime.now() - last < dt.timedelta(hours=20)):
+                return jsonify(st)
+        error = None
+        try:
+            info = updater.check(VERSION)
+            info.pop("manifest", None)
+            save_setting(db, "update_info", json.dumps(info))
+        except updater.UpdateError as e:
+            error = str(e)
+        save_setting(db, "update_checked", dt.datetime.now().isoformat(timespec="seconds"))
+        db.commit()
+        return jsonify(update_status(db, error))
+
+    @app.put("/api/update/settings")
+    def update_settings():
+        auto = body().get("auto")
+        if not isinstance(auto, bool):
+            raise ApiError("Invalid value")
+        db = get_db()
+        save_setting(db, "update_auto", "1" if auto else "0")
+        db.commit()
+        return jsonify(update_status(db))
+
+    @app.post("/api/update/apply")
+    def update_apply():
+        """Download the latest signed release, verify it, back up the database, install it and restart HomeCoin."""
+        if DEMO:
+            raise ApiError("Updates are disabled in the demo version")
+        kind = updater.install_kind()
+        if kind == "dev":
+            raise ApiError("This is a development copy (git): update it with git, not from here")
+        if kind not in ("installer", "zip"):
+            raise ApiError("Automatic updates are not available for this installation: download the new version from GitHub")
+        if not update_busy.acquire(blocking=False):
+            raise ApiError("An update is already in progress", 409)
+        try:
+            try:
+                info = updater.check(VERSION)  # again, signed: never trust an earlier answer
+                if not info["available"]:
+                    raise ApiError("HomeCoin is already up to date", 409)
+                path = updater.download(info["manifest"], kind)
+                dbm.backup_now("update")
+                if kind == "installer":
+                    updater.launch_installer(path)  # it closes this process and reopens HomeCoin
+                else:
+                    updater.apply_zip(path)
+                    (app.config.get("HC_RESTART") or updater.restart)(port=port)
+            except updater.UpdateError as e:
+                raise ApiError(str(e), 502)
+            try:  # logged now: the database is closed before exiting
+                audit.write("security", "HomeCoin updated", f"{VERSION} → {info['latest']} ({'installer' if kind == 'installer' else 'ZIP'})")
+            except Exception:
+                pass
+            vault.lock_now()
+            threading.Timer(0.8, app.config.get("HC_EXIT") or (lambda: os._exit(0))).start()
+        except Exception:
+            update_busy.release()
+            raise
+        resp = jsonify(ok=True, version=info["latest"], kind=kind)
+        resp.delete_cookie(COOKIE, path="/")
+        return resp
+
+    @app.get("/api/demo/statement.csv")
+    def demo_statement():
+        """Demo only: a made-up bank statement to try the Import page with."""
+        if not DEMO:
+            abort(404)
+        from . import demo as demom
+        return Response(demom.sample_statement(), mimetype="text/csv",
+                        headers={"Content-Disposition": 'attachment; filename="sample-bank-statement.csv"'})
 
     @app.errorhandler(HTTPException)
     def http_error(e):

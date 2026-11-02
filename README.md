@@ -2,8 +2,8 @@
 
 # HomeCoin *by Starkark98*
 
-![Version](https://img.shields.io/badge/version-1.2.0-8b5cf6)
-![Python](https://img.shields.io/badge/Python-3.12%20%7C%203.13-3776AB?logo=python&logoColor=white)
+![Version](https://img.shields.io/badge/version-1.2.1-8b5cf6)
+![Python](https://img.shields.io/badge/Python-3.12%20%7C%203.13%20%7C%203.14-3776AB?logo=python&logoColor=white)
 ![Platform](https://img.shields.io/badge/platform-Windows-0078D6)
 ![Data](https://img.shields.io/badge/data-encrypted%2C%20on%20your%20PC-16a34a)
 ![License](https://img.shields.io/badge/license-MIT%20%2B%20Commons%20Clause-d97706)
@@ -19,14 +19,30 @@ Track expenses, income, accounts, recurring payments, budgets, a mortgage and in
 
 ---
 
+## Why it exists
+
+Money is personal, and understanding your own shouldn't be a privilege.
+
+There are plenty of banks, apps and advisors ready to tell you what to do with your money. Far fewer simply help you *see* it: where it goes, what you are really saving, how long the mortgage still has to run, whether the household split is fair, what your investments have actually returned. That clarity usually comes with a subscription, an account in someone else's cloud, or a vocabulary you have to learn first.
+
+HomeCoin is my attempt to change that, one household at a time. It is free. It runs on your own PC, and your data stays there, encrypted. It speaks plainly: income, spending, savings, goals. The tools that usually sit behind a paywall or a financial advisor's desk are there for anyone: mortgage schedules, fair splits, rebalancing, XIRR.
+
+No ads, no tracking, nobody selling your habits. Just your numbers, clear enough to decide for yourself.
+
+**Financial power, free and in everyone's hands.** That's the whole idea.
+
+---
+
 ## Contents
 
+- [Why it exists](#why-it-exists)
 - [Why HomeCoin](#why-homecoin)
 - [Screenshots](#screenshots)
 - [Features](#features)
 - [Requirements](#requirements)
 - [Install (recommended)](#install-recommended)
 - [Quick start with the ZIP](#quick-start-with-the-zip)
+- [Updates](#updates)
 - [Demo version](#demo-version)
 - [Security and privacy](#security-and-privacy)
 - [Limitations](#limitations)
@@ -44,7 +60,7 @@ Track expenses, income, accounts, recurring payments, budgets, a mortgage and in
 
 ## Why HomeCoin
 
-- **Your data stays yours.** A local server, an encrypted database, encrypted backups. The only online feature (optional) sends nothing but security tickers to Yahoo Finance to update prices.
+- **Your data stays yours.** A local server, an encrypted database, encrypted backups. HomeCoin goes online only for two optional things: price updates (it sends nothing but the tickers to Yahoo Finance) and the update check (it asks GitHub for the latest version).
 - **For the household and for you.** Separate *spaces* (household, personal, business…) with transfers between them, a fair split of shared expenses, a mortgage planner and shared goals.
 - **Little manual work.** Bank statement import, recurring payments recorded automatically, categories and fields suggested from your history.
 - **Clear at a glance.** Dashboard, reports, a calendar of upcoming payments with projected cash, light and dark theme.
@@ -86,7 +102,10 @@ All taken from the demo version, with made-up data.
 | **Categories** | Colors and icons, monthly budgets, automatic rules |
 | **Activity log** | Important events of the last 12 months, filterable: sign-ins (including failed attempts), security, changes, deletions, imports and exports; no noise |
 | **Optional tabs** | Always present: Dashboard, Transactions, Accounts, Recurring, Import, Categories, Reports, Activity log, Settings. Per space you turn on the others: Budgets, Goals, Emergency fund, Calendar, Mortgage, Fair split, Investments, Savings. Hiding a tab never deletes its data |
-| **Settings** | Light/dark theme, reference currency (€ or $), security check, encrypted backup and restore, export |
+| **Settings** | Five tabs: *General* (theme, reference currency € or $, help), *Spaces*, *Security* (security check, password, recovery key, auto-lock), *Backup & data* (encrypted backup and restore, export, data folder) and *Updates* |
+| **Updates** | Settings → Updates checks GitHub for a new release (automatically once a day, or on demand) and installs it with one click, after verifying the maintainer's signature and every file's SHA-256 — see [Updates](#updates) |
+
+The menu groups the tabs by what you do with them: **Everyday** (transactions, accounts, recurring, calendar), **Planning** (budgets, goals, emergency fund, mortgage, fair split), **Wealth** (investments, savings, reports) and **Tools** (import, categories, activity log, settings). Less frequent actions (theme, help, support, close) are in the **⋯** menu at the top right.
 
 The interface is in English. The **reference currency** is euro or US dollar (Settings), for the whole installation: it is a label, amounts are never converted, so choose the currency your accounts are kept in. The number format follows it: in euro `1.234,56 €`, which is also how you type them (`1.500` = 1,500 €, `1.234,56`, `1234.56`); in dollars `$1,234.56` (`1,500` = $1,500, `1.5` = $1.50).
 
@@ -103,9 +122,9 @@ Version history is in [CHANGELOG.md](CHANGELOG.md).
 1. Download **`HomeCoin-Setup-<version>.exe`** from the latest release and run it. No administrator rights are needed: HomeCoin is installed for your Windows user only, in `%LOCALAPPDATA%\Programs\HomeCoin`, with its own private copy of Python. Windows may warn that the file comes from an unknown publisher (the installer is not code-signed yet): check the SHA-256 published with the release, then choose *More info → Run anyway*.
 2. Choose whether you want a desktop shortcut and whether HomeCoin should start with Windows (locked, without opening the browser).
 3. HomeCoin opens in the browser and guides you through the first start: your **password**, the **recovery key** (keep it safe: without the password and the recovery key the data cannot be recovered by anyone), the **currency** and your first space and account.
-4. HomeCoin runs in the background, without a window. Open it from the Start menu or the desktop shortcut; close it with **⏻** at the top right. **❔** opens this documentation and **☕** the Ko-fi page to support the project.
+4. HomeCoin runs in the background, without a window. Open it from the Start menu or the desktop shortcut; close it from the **⋯** menu at the top right (*Close HomeCoin*), where you also find this documentation (*Help*) and the Ko-fi page to support the project.
 
-To update, run the new installer: your data is never touched. Uninstalling removes the program and keeps the data (it tells you where it is). Already using the ZIP version? Download an encrypted backup there (Settings → Backup), install, and restore it in Settings → Restore with the password it was made with.
+To update, use Settings → Updates (see [Updates](#updates)) or run the new installer: your data is never touched. Uninstalling removes the program and keeps the data (it tells you where it is). Already using the ZIP version? Download an encrypted backup there (Settings → Backup), install, and restore it in Settings → Restore with the password it was made with.
 
 ## Quick start with the ZIP
 
@@ -121,9 +140,27 @@ After an update, run `setup.ps1` again for any new dependency.
 
 Options: `HomeCoin.cmd --port 9000`, `HomeCoin.cmd --no-browser`.
 
+## Updates
+
+When a new version is published, a small **⬆ HomeCoin x.y.z is available** label appears at the top and a dot on Settings. Settings → **Updates** shows what's new and installs it with one click:
+
+- **Installed version:** the new installer runs by itself in the background and HomeCoin reopens; the open page reloads on its own.
+- **ZIP version:** the program files are replaced in place (a copy of the previous ones is kept, and any new library is installed with `requirements.lock` first); HomeCoin restarts.
+
+How it stays safe:
+- only **published releases** are offered, never test builds or single commits, and never an older version;
+- every release carries a **manifest signed by the maintainer** (Ed25519). HomeCoin checks the signature with the public key built into the program and refuses anything else, even if it comes from GitHub;
+- every downloaded byte is checked against the **SHA-256** in the signed manifest before anything is installed; downloads come only from GitHub;
+- an encrypted **backup** of the database is saved first, and the data folder is never part of an update;
+- nothing is installed until you click **Update**.
+
+The automatic check runs at most once a day after you sign in and sends nothing about you or your data; you can turn it off in Settings → Updates. A development copy (a git working tree) never updates itself.
+
 ## Demo version
 
 Two sample spaces with 18 months of **made-up data**, in a separate folder (`demo-data` in the program folder) recreated at every start, on port 8766 (it can run next to HomeCoin). You enter with one click, online features are off, and your real data is never read or touched. It is meant for trying HomeCoin out, for screenshots and for testing changes, so the installer creates no shortcut for it.
+
+The demo shows every feature with realistic data: a household space (joint account, grocery card, cash, an archived account, a mixed-rate mortgage and a fixed-rate car loan, a variable water bill, fair split between two people, budgets, goals, rules and a few transactions still to categorize) and a personal space (salary, credit card, deposit account, a broker with ETFs, a money market fund, gold, an investment plan, a partial sale, coupons and fees, a pension fund valued from statements, a saved rebalancing target). On the Import page, **Try it with a sample bank statement** loads a made-up statement to see column detection, rules and duplicate detection at work.
 
 - **ZIP version:** double-click **`HomeCoin-Demo.cmd`**.
 - **Installed version:** run `"%LOCALAPPDATA%\Programs\HomeCoin\python\pythonw.exe" "%LOCALAPPDATA%\Programs\HomeCoin\demo.py"` (for example from *Win + R*); close it with **⏻**.
@@ -134,13 +171,14 @@ Two sample spaces with 18 months of **made-up data**, in a separate folder (`dem
 - **Keys:** the data key is random and stored in `keystore.json` (data folder) only in encrypted form — one copy protected by the password, one by the recovery key, both with **scrypt N=2^17** (≈128 MB per attempt). The password is never stored. **Without the password or the recovery key the data cannot be recovered.** When you copy the `data` folder, always copy `keystore.json` too.
 - **Passwords:** at least 8 characters; trivial ones are refused (e.g. "password123", "12345678", one repeated character).
 - **Sessions:** the server starts locked — no data is reachable until you enter the password; the session is an HttpOnly/SameSite=Strict cookie with a different name per instance (HomeCoin and the demo do not interfere); one active session; auto-lock after inactivity (5 minutes to 2 hours); growing delay after 3 wrong passwords, **kept across server restarts**.
-- **Backups and exports:** downloadable backups (`.hcbackup`) are encrypted and restore with the password or recovery key valid when the backup was made. CSV/Excel exports are **unencrypted**: HomeCoin reminds you before every download, and texts that would start with `=` `+` `-` `@` are written as text (no active formulas in Excel).
+- **Backups and exports:** downloadable backups (`.hcbackup`) are encrypted (AES-256-GCM with the data key) and open only in HomeCoin, with the password or recovery key valid when the backup was made; the file carries the data key only in its password-protected form, so keep backups as safe as the password is strong. CSV/Excel exports are **unencrypted**: HomeCoin reminds you before every download, and texts that would start with `=` `+` `-` `@` are written as text (no active formulas in Excel).
 - **Database hygiene:** temporary tables in memory only, deleted rows overwritten (`secure_delete`).
 - **Data folder:** Settings → Security check also verifies who can access the data folder; *Restrict to my user* makes it accessible only to your Windows user (plus SYSTEM and administrators), with automatic verification and rollback if something goes wrong.
 - **Network:** the server listens only on `127.0.0.1` and does not disclose its name or version; requests with a different Host are refused (DNS rebinding protection) and requests the browser marks as coming from other sites (`Sec-Fetch-Site: cross-site`) are rejected. Writes require a dedicated header and a local origin (CSRF protection); strict Content-Security-Policy, no iframes, a Permissions-Policy that denies camera, microphone, location, payments and devices.
 - **Temporary import code:** for your own local import scripts; it cannot use the security functions or take data out in bulk (backup, restore, exports), and it is revoked when HomeCoin restarts or locks.
 - **Activity log:** important events (sign-ins, failed attempts, changes, deletions, exports) in the encrypted database, kept for 12 months.
-- **No external resources:** Chart.js is bundled in `static\vendor`. The only deliberate exception is *Update prices* in Investments, which sends only the tickers to Yahoo Finance. The ❔ Help and ☕ Donate links open GitHub and Ko-fi in a new tab only when you click them.
+- **No external resources:** Chart.js is bundled in `static\vendor`. The two deliberate, optional exceptions are *Update prices* in Investments, which sends only the tickers to Yahoo Finance, and the update check, which asks the GitHub API for the latest release. The *Help* and *Support* links open GitHub and Ko-fi in a new tab only when you click them.
+- **Signed updates:** see [Updates](#updates). The signing key never leaves the maintainer's PC; the program contains only the public key.
 - **Dependencies:** installed only from ready-made packages at exact versions, each checked against its SHA-256 (`requirements.lock`), and checked for known vulnerabilities before every release.
 - To use a different data folder, set the environment variable `HOMECOIN_DATA_DIR` (it is never moved automatically).
 
@@ -174,7 +212,7 @@ Contributions are welcome: see [CONTRIBUTING.md](CONTRIBUTING.md).
 homecoin/   app.py (Flask API) · db.py (encrypted schema, backups) · security.py (password, keys, data folder)
             services.py (balances, recurring items, categorization) · forecast.py (estimates) · split.py (fair split)
             tools.py (mortgage, investments, prices) · importer.py (CSV/Excel) · audit.py (activity log)
-            demo.py (sample data) · util.py (amounts, dates)
+            updater.py (signed updates) · demo.py (sample data) · util.py (amounts, dates)
 static/     index.html · css/app.css · js/app.js · js/theme.js · img/logo.svg · vendor/chart.umd.min.js
 icon/       app icons
 docs/       images used by this README
@@ -227,4 +265,4 @@ Because of the Commons Clause, HomeCoin is **source-available** software, not "o
 
 ---
 
-*HomeCoin by **Starkark98** · v1.2.0 · see the [changelog](CHANGELOG.md)*
+*HomeCoin by **Starkark98** · v1.2.1 · see the [changelog](CHANGELOG.md)*

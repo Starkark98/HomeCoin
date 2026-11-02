@@ -29,22 +29,26 @@
       <div class="pf-switch" id="pf-switch"></div>
       <nav class="nav" id="nav">
         <a href="#/dashboard" data-route="dashboard"><span class="ni">📊</span><span>Dashboard</span></a>
+        <div class="nav-group">Everyday</div>
         <a href="#/movimenti" data-route="movimenti"><span class="ni">💸</span><span>Transactions</span></a>
         <a href="#/conti" data-route="conti"><span class="ni">🏦</span><span>Accounts</span></a>
         <a href="#/ricorrenti" data-route="ricorrenti"><span class="ni">🔁</span><span>Recurring</span></a>
         <a href="#/calendario" data-route="calendario"><span class="ni">📅</span><span>Calendar</span></a>
-        <a href="#/import" data-route="import"><span class="ni">📥</span><span>Import</span></a>
+        <div class="nav-group">Planning</div>
         <a href="#/budget" data-route="budget"><span class="ni">🎯</span><span>Budgets</span></a>
-        <a href="#/report" data-route="report"><span class="ni">📑</span><span>Reports</span></a>
-        <a href="#/ripartizione" data-route="ripartizione"><span class="ni">⚖️</span><span>Fair split</span></a>
-        <a href="#/mutuo" data-route="mutuo"><span class="ni">🔑</span><span>Mortgage</span></a>
-        <a href="#/investimenti" data-route="investimenti"><span class="ni">📈</span><span>Investments</span></a>
-        <a href="#/risparmio" data-route="risparmio"><span class="ni">🐷</span><span>Savings</span></a>
         <a href="#/obiettivi" data-route="obiettivi"><span class="ni">🏁</span><span>Goals</span></a>
         <a href="#/emergenza" data-route="emergenza"><span class="ni">🛟</span><span>Emergency fund</span></a>
+        <a href="#/mutuo" data-route="mutuo"><span class="ni">🔑</span><span>Mortgage</span></a>
+        <a href="#/ripartizione" data-route="ripartizione"><span class="ni">⚖️</span><span>Fair split</span></a>
+        <div class="nav-group">Wealth</div>
+        <a href="#/investimenti" data-route="investimenti"><span class="ni">📈</span><span>Investments</span></a>
+        <a href="#/risparmio" data-route="risparmio"><span class="ni">🐷</span><span>Savings</span></a>
+        <a href="#/report" data-route="report"><span class="ni">📑</span><span>Reports</span></a>
+        <div class="nav-group">Tools</div>
+        <a href="#/import" data-route="import"><span class="ni">📥</span><span>Import</span></a>
         <a href="#/categorie" data-route="categorie"><span class="ni">🏷️</span><span>Categories</span></a>
         <a href="#/registro" data-route="registro"><span class="ni">📜</span><span>Activity log</span></a>
-        <a href="#/impostazioni" data-route="impostazioni"><span class="ni">⚙️</span><span>Settings</span></a>
+        <a href="#/impostazioni" data-route="impostazioni"><span class="ni">⚙️</span><span>Settings</span><span class="nav-dot hidden" id="nav-update-dot" title="Update available"></span></a>
       </nav>
       <div class="sidebar-foot">
         <span class="lock">🔒 Local and encrypted</span>
@@ -60,12 +64,20 @@
           <p id="page-sub" class="muted"></p>
         </div>
         <div class="topbar-actions">
+          <a class="update-chip hidden" id="update-chip" href="#/impostazioni?tab=updates" title="A new version of HomeCoin is available: open Settings → Updates"></a>
           <button class="icon-btn" id="privacy-toggle" title="Hide amounts" aria-pressed="false"></button>
-          <button class="icon-btn" id="theme-toggle" title="Light/dark theme">🌓</button>
-          <a class="icon-btn" href="https://github.com/Starkark98/HomeCoin#readme" target="_blank" rel="noopener noreferrer" title="Help: the HomeCoin documentation on GitHub (opens in a new tab)">❔</a>
-          <a class="icon-btn" href="https://ko-fi.com/starkark98" target="_blank" rel="noopener noreferrer" title="Support HomeCoin on Ko-fi (opens in a new tab)">☕</a>
           <button class="icon-btn" id="lock-now" title="Lock HomeCoin">🔒</button>
-          <button class="icon-btn" id="quit-app" title="Close HomeCoin (lock and stop it)">⏻</button>
+          <div class="more">
+            <button class="icon-btn" id="more-btn" title="More" aria-haspopup="menu" aria-expanded="false">⋯</button>
+            <div class="more-menu hidden" id="more-menu" role="menu">
+              <button role="menuitem" id="theme-toggle">🌓 Light / dark theme</button>
+              <a role="menuitem" href="https://github.com/Starkark98/HomeCoin#readme" target="_blank" rel="noopener noreferrer">❔ Help <small>GitHub, new tab</small></a>
+              <a role="menuitem" href="https://ko-fi.com/starkark98" target="_blank" rel="noopener noreferrer">☕ Support HomeCoin <small>Ko-fi, new tab</small></a>
+              <a role="menuitem" href="#/impostazioni">⚙️ Settings</a>
+              <hr>
+              <button role="menuitem" id="quit-app">⏻ Close HomeCoin</button>
+            </div>
+          </div>
           <button class="btn btn-primary" id="quick-add" title="New transaction (N)">＋ New transaction</button>
         </div>
       </header>

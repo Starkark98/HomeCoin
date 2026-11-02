@@ -3,6 +3,7 @@ HomeCoin without opening your own data. Used by demo.py / HomeCoin-Demo.cmd with
 recreated at every start: nothing done in the demo is kept, and the real data is never touched.
 """
 import datetime as dt
+import json
 import random
 
 from . import db as dbm
@@ -28,9 +29,46 @@ def _rec(conn, **r):
     return conn.execute(f"INSERT INTO recurring({cols}) VALUES ({','.join('?' * len(r))})", tuple(r.values())).lastrowid
 
 
-def _tx(conn, date, amount, kind, account, category=None, desc="", to=None):
-    conn.execute("INSERT INTO transactions(date, amount, kind, account_id, to_account_id, category_id, description) "
-                 "VALUES (?,?,?,?,?,?,?)", (date.isoformat(), amount, kind, account, to, category, desc))
+def _tx(conn, date, amount, kind, account, category=None, desc="", to=None, notes="", excluded=0, source="manual"):
+    conn.execute("INSERT INTO transactions(date, amount, kind, account_id, to_account_id, category_id, description, notes, "
+                 "excluded, source) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                 (date.isoformat(), amount, kind, account, to, category, desc, notes, excluded, source))
+
+
+def _holding(conn, account, ticker, name, cls):
+    return conn.execute("INSERT INTO holdings(account_id, ticker, name, asset_class) VALUES (?,?,?,?)",
+                        (account, ticker, name, cls)).lastrowid
+
+
+def _trade(conn, account, holding, date, kind, qty=0, price=None, amount=0, fees=0, notes=""):
+    conn.execute("INSERT INTO trades(account_id, holding_id, date, kind, quantity, price, amount, fees, notes) "
+                 "VALUES (?,?,?,?,?,?,?,?,?)", (account, holding, date.isoformat(), kind, qty, price, amount, fees, notes))
+
+
+def _setting(conn, key, value):
+    conn.execute("INSERT INTO settings(key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                 (key, str(value)))
+
+
+def sample_statement(today=None):
+    """A made-up bank statement of the joint account (Italian bank format, last 5 weeks) for trying Import in the demo:
+    some rows are already in HomeCoin (recognized as duplicates), the others are new and partly match the rules."""
+    today = today or dt.date.today()
+    rnd = random.Random(7)
+    rows = []
+    for i in range(14):
+        d = today - dt.timedelta(days=2 + i * 2 + rnd.randint(0, 1))
+        desc, amount = rnd.choice([("PAGAMENTO POS SUPERMARKET CENTRALE", -rnd.randint(2500, 9000)),
+                                   ("PAGAMENTO POS PHARMACY SAN MARCO", -rnd.randint(800, 3500)),
+                                   ("ADDEBITO SDD STREAMING FAMILY", -1599), ("PAGAMENTO POS PIZZERIA DA LUIGI", -rnd.randint(3000, 6500)),
+                                   ("PRELIEVO BANCOMAT", -10000), ("BONIFICO A FAVORE DI SAMPLE HOME RIMBORSO", rnd.randint(2000, 8000)),
+                                   ("PAGAMENTO POS FUEL STATION A1", -rnd.randint(4000, 7000))])
+        rows.append((d, desc, amount))
+    out = ["Data operazione;Data valuta;Descrizione;Importo;Divisa"]
+    for d, desc, cents in sorted(rows, reverse=True):
+        amt = f"{cents / 100:.2f}".replace(".", ",")
+        out.append(f"{d:%d/%m/%Y};{d:%d/%m/%Y};{desc};{amt};EUR")
+    return "\n".join(out) + "\n"
 
 
 def build(today=None):
@@ -61,10 +99,35 @@ def build(today=None):
              category_id=_cat(conn, fam, "Bank & insurance"), frequency="yearly", start_date=add_months(start, 2).replace(day=1).isoformat())
         _rec(conn, name="Grocery card top-up", kind="transfer", amount=50000, account_id=comune, to_account_id=carta,
              start_date=start.replace(day=2).isoformat())
-        _rec(conn, name="Contribution Anna", kind="income", amount=95000, account_id=comune,
+        _rec(conn, name="Contribution Anna", kind="income", amount=118000, account_id=comune,
              category_id=_cat(conn, fam, "Contributions to household"), start_date=start.replace(day=1).isoformat())
         spesa, rist, casa_c, trasp, salute = (_cat(conn, fam, n) for n in
                                               ("Groceries", "Restaurants & bars", "Home & furniture", "Transport", "Health & personal care"))
+        # a fixed-rate car loan next to the mortgage (Mortgage & loans tab), a cash wallet and an old closed account
+        _rec(conn, name="Car loan", kind="expense", amount=34600, account_id=comune, category_id=_cat(conn, fam, "Mortgage & loans"),
+             start_date=add_months(start, -6).replace(day=15).isoformat(), installments=60, principal=1800000,
+             rate_type="fixed", rate=5.4, notes="Sample fixed-rate loan")
+        cash = _acc(conn, fam, "Cash", "contanti", "💶", "#f59e0b", 8000)
+        old = _acc(conn, fam, "Old savings book", "risparmio", "📕", "#94a3b8", 120000)
+        _tx(conn, start + dt.timedelta(days=9), 120000, "transfer", old, desc="Savings book closed", to=comune,
+            notes="Account closed: archived, its history stays")
+        conn.execute("UPDATE accounts SET archived = 1 WHERE id = ?", (old,))
+        # "expected" recurring item: variable bill, linked to the real payments by keyword (forecast = median)
+        _rec(conn, name="Water bill", kind="expense", amount=6200, account_id=comune, category_id=_cat(conn, fam, "Utilities"),
+             frequency="bimonthly", start_date=start.replace(day=18).isoformat(), expected=1, match_text="water")
+        other_c = _cat(conn, fam, "Other")
+        for i, m in enumerate(months):
+            if i % 2 == 0 and m.replace(day=18) <= today:
+                _tx(conn, m.replace(day=16 + rnd.randint(0, 5)), rnd.randint(5200, 7400), "expense", comune,
+                    _cat(conn, fam, "Utilities"), "Water bill AquaService")
+            d = m + dt.timedelta(days=6)
+            if d <= today:  # ATM withdrawals and small cash expenses
+                _tx(conn, d, 10000, "transfer", comune, desc="ATM withdrawal", to=cash)
+                for _ in range(rnd.randint(2, 4)):
+                    dd = m + dt.timedelta(days=rnd.randint(7, 27))
+                    if dd <= today:
+                        _tx(conn, dd, rnd.randint(300, 2500), "expense", cash, rnd.choice([rist, spesa, other_c]),
+                            rnd.choice(["Bakery", "Newsstand", "Coffee", "Parking", "Street market"]))
         for m in months:
             for w in range(4):
                 d = m + dt.timedelta(days=3 + w * 7)
@@ -78,28 +141,47 @@ def build(today=None):
             if d <= today:
                 _tx(conn, d, rnd.randint(3000, 25000), "expense", comune, rnd.choice([casa_c, trasp, salute]),
                     rnd.choice(["Hardware store", "Pharmacy", "Fuel", "Furniture", "Car tax"]))
+        # a purchase made for someone else and paid back: excluded from reports, still in the balance
+        _tx(conn, months[-4].replace(day=9), 38000, "expense", comune, casa_c, "Bike bought for a friend",
+            notes="Paid back in cash: excluded from reports and budgets", excluded=1)
+        _tx(conn, months[-2].replace(day=21), 64900, "expense", comune, casa_c, "Washing machine",
+            notes="2-year warranty until " + add_months(months[-2], 24).strftime("%m/%Y"))
+        # categorization rules, and a few recent transactions still to categorize (the rules or the history suggest them)
+        for pattern, name in (("supermarket", "Groceries"), ("market", "Groceries"), ("pizzeria", "Restaurants & bars"),
+                              ("pharmacy", "Health & personal care"), ("fuel", "Transport"), ("water bill", "Utilities")):
+            conn.execute("INSERT INTO rules(pattern, category_id) VALUES (?, ?)", (pattern, _cat(conn, fam, name)))
+        for back, cents, desc in ((1, 4870, "Supermarket"), (3, 1290, "Pharmacy"), (4, 5600, "Pizzeria"), (6, 2350, "Hardware store")):
+            _tx(conn, today - dt.timedelta(days=back), cents, "expense", comune, None, desc, source="import")
+        # rows of the sample statement (Import page) that are already here: the import recognizes them as duplicates
+        for line in sample_statement(today).splitlines()[1:4]:
+            dmy, _, desc, amt, _ = line.split(";")
+            cents = int(round(float(amt.replace(",", ".")) * 100))
+            day = dt.datetime.strptime(dmy, "%d/%m/%Y").date()
+            _tx(conn, day, abs(cents), "expense" if cents < 0 else "income", comune, None, desc.title(), source="import")
 
         # -------------------------------------------------------------- personal
         pers = dbm.create_portfolio(conn, "Marco", "personal", "#6366f1", "👤")
         cc = _acc(conn, pers, "Current account", "corrente", "🏦", "#6366f1", 350000)
         dep = _acc(conn, pers, "Deposit account", "risparmio", "🐷", "#10b981", 800000)
         broker = _acc(conn, pers, "Broker", "investimenti", "📈", "#8b5cf6")
-        etf = conn.execute("INSERT INTO holdings(account_id, ticker, name, asset_class) VALUES (?,?,?,?)",
-                           (broker, "DEMO-WORLD", "World equity ETF (sample)", "azioni")).lastrowid
-        bond = conn.execute("INSERT INTO holdings(account_id, ticker, name, asset_class) VALUES (?,?,?,?)",
-                            (broker, "DEMO-BOND", "Bond ETF (sample)", "obbligazioni")).lastrowid
-        price = {etf: 98.0, bond: 51.0}
+        card = _acc(conn, pers, "Credit card", "credito", "💳", "#e11d48")
+        pension = _acc(conn, pers, "Pension fund", "investimenti", "🧓", "#0ea5e9", 1250000)
+        etf = _holding(conn, broker, "DEMO-WORLD", "World equity ETF (sample)", "azioni")
+        bond = _holding(conn, broker, "DEMO-BOND", "Bond ETF (sample)", "obbligazioni")
+        mm = _holding(conn, broker, "DEMO-CASH", "Money market ETF (sample)", "monetario")
+        gold = _holding(conn, broker, "DEMO-GOLD", "Gold ETC (sample)", "materie prime")
+        price = {etf: 98.0, bond: 51.0, mm: 100.0, gold: 160.0}
+        drift = {etf: (0.008, 0.035), bond: (0.002, 0.01), mm: (0.0028, 0.0004), gold: (0.006, 0.03)}
         for m in [add_months(start, -1), *months]:  # made-up month-end prices, with some fluctuation
-            price[etf] *= 1 + rnd.gauss(0.008, 0.035)
-            price[bond] *= 1 + rnd.gauss(0.002, 0.01)
-            for h in (etf, bond):
+            for h in price:
+                price[h] *= 1 + rnd.gauss(*drift[h])
                 conn.execute("INSERT INTO price_history(holding_id, month, price_eur) VALUES (?,?,?)", (h, m.strftime("%Y-%m"), round(price[h], 2)))
-        for h in (etf, bond):
+        for h in price:
             conn.execute("UPDATE holdings SET price_eur = ?, price = ?, currency = 'EUR', price_date = ? WHERE id = ?",
                          (round(price[h], 2), round(price[h], 2), today.isoformat(), h))
         _rec(conn, name="Salary", kind="income", amount=210000, account_id=cc, category_id=_cat(conn, pers, "Salary"),
              start_date=start.replace(day=27).isoformat())
-        _rec(conn, name="Contribution to household account", kind="transfer", amount=95000, account_id=cc, to_account_id=comune,
+        _rec(conn, name="Contribution to household account", kind="transfer", amount=108000, account_id=cc, to_account_id=comune,
              start_date=start.replace(day=1).isoformat())
         _rec(conn, name="World ETF plan", kind="transfer", amount=30000, account_id=cc, to_account_id=broker, holding_id=etf,
              start_date=start.replace(day=10).isoformat(), pac_since=start.isoformat())
@@ -110,9 +192,29 @@ def build(today=None):
         _rec(conn, name="Gym", kind="expense", amount=4500, account_id=cc, category_id=_cat(conn, pers, "Sport & leisure"),
              start_date=start.replace(day=3).isoformat())
         _tx(conn, add_months(start, 1).replace(day=12), 300000, "transfer", cc, desc="First transfer to the broker", to=broker)
-        conn.execute("INSERT INTO trades(account_id, holding_id, date, kind, quantity, price, amount, fees, notes) "
-                     "VALUES (?,?,?, 'buy', 50, 50.5, -252700, 200, 'Initial purchase (sample)')",
-                     (broker, bond, add_months(start, 1).replace(day=14).isoformat()))
+        _trade(conn, broker, bond, add_months(start, 1).replace(day=14), "buy", 50, 50.5, -252700, 200, "Initial purchase (sample)")
+        # more trades: money market for the reserve, gold, a partial sale (realized gain), coupons, interest, a fee
+        _tx(conn, add_months(start, 3).replace(day=4), 500000, "transfer", dep, desc="To the broker: reserve in money market", to=broker)
+        _trade(conn, broker, mm, add_months(start, 3).replace(day=6), "buy", 48, 100.6, -483080, 200, "Emergency reserve")
+        _trade(conn, broker, gold, add_months(start, 5).replace(day=11), "buy", 6, 158.2, -95120, 200)
+        _trade(conn, broker, bond, add_months(start, 12).replace(day=20), "sell", 15, 52.9, 79150, 200, "Partial sale")
+        for k in (4, 10, 16):
+            if add_months(start, k) <= today:
+                _trade(conn, broker, bond, add_months(start, k).replace(day=15), "dividend", amount=rnd.randint(2200, 2600),
+                       notes="Half-yearly coupon")
+        for k in range(2, MONTHS, 3):
+            _trade(conn, broker, None, add_months(start, k).replace(day=28), "interest", amount=rnd.randint(150, 400),
+                   notes="Interest on uninvested cash")
+        _trade(conn, broker, None, add_months(start, 12) - dt.timedelta(days=1), "fee", amount=-3400, notes="Yearly custody fee")
+        # pension fund: valued as a whole from the statements (no securities), monthly contributions
+        _rec(conn, name="Pension fund contribution", kind="transfer", amount=15000, account_id=cc, to_account_id=pension,
+             start_date=start.replace(day=20).isoformat())
+        val = 1250000
+        for i, m in enumerate(months):
+            val = int(val * (1 + rnd.gauss(0.004, 0.012))) + 15000
+            if i % 3 == 2 and add_months(m, 1) - dt.timedelta(days=1) <= today:
+                conn.execute("INSERT INTO valuations(account_id, date, value) VALUES (?,?,?)",
+                             (pension, (add_months(m, 1) - dt.timedelta(days=1)).isoformat(), val))
         cats = {n: _cat(conn, pers, n) for n in ("Restaurants & bars", "Shopping & gifts", "Transport", "Books & learning", "Travel", "Taxes")}
         for i, m in enumerate(months):
             for _ in range(rnd.randint(2, 4)):
@@ -128,13 +230,56 @@ def build(today=None):
                 d = m + dt.timedelta(days=8)
                 if d <= today:
                     _tx(conn, d, rnd.randint(45000, 90000), "expense", cc, cats["Travel"], "Weekend away")
+            # credit card: purchases during the month, paid off from the current account at the start of the next
+            spent = 0
+            for _ in range(rnd.randint(2, 5)):
+                d = m + dt.timedelta(days=rnd.randint(0, 27))
+                if d <= today:
+                    cents = rnd.randint(1500, 9000)
+                    spent += cents
+                    _tx(conn, d, cents, "expense", card, cats[rnd.choice(["Shopping & gifts", "Restaurants & bars"])],
+                        rnd.choice(["Online store", "Clothing", "Electronics", "Sushi bar", "Gift shop"]))
+            if spent and add_months(m, 1).replace(day=5) <= today:
+                _tx(conn, add_months(m, 1).replace(day=5), spent, "transfer", cc, desc="Credit card payment", to=card)
+            if m.month == 12 and m.replace(day=31) <= today:
+                _tx(conn, m.replace(day=31), rnd.randint(4000, 7000), "income", dep, _cat(conn, pers, "Interest"), "Yearly interest")
         _tx(conn, months[-3].replace(day=16), 42000, "expense", cc, cats["Taxes"], "Income tax")
-        conn.execute("INSERT INTO goals(portfolio_id, name, icon, color, target, target_date) VALUES (?,?,?,?,?,?)",
-                     (pers, "Long trip", "✈️", "#3b82f6", 450000, add_months(today, 10).isoformat()))
-        conn.execute("INSERT INTO goals(portfolio_id, name, icon, color, target, target_date) VALUES (?,?,?,?,?,?)",
-                     (fam, "New kitchen", "🛋️", "#f59e0b", 1200000, add_months(today, 24).isoformat()))
-        for name, cents in (("Groceries", 45000), ("Restaurants & bars", 15000), ("Utilities", 18000)):
-            conn.execute("UPDATE categories SET budget = ? WHERE portfolio_id = ? AND name = ?", (cents, fam, name))
+        for pattern, name in (("train", "Transport"), ("bookstore", "Books & learning"), ("sushi", "Restaurants & bars")):
+            conn.execute("INSERT INTO rules(pattern, category_id) VALUES (?, ?)", (pattern, _cat(conn, pers, name)))
+
+        # ------------------------------------------------- goals, budgets, settings, activity log
+        conn.execute("INSERT INTO goals(portfolio_id, name, icon, color, target, target_date, account_id) VALUES (?,?,?,?,?,?,?)",
+                     (pers, "House down payment", "🏠", "#3b82f6", 3000000, add_months(today, 30).isoformat(), dep))
+        conn.execute("INSERT INTO goals(portfolio_id, name, icon, color, target, target_date, saved) VALUES (?,?,?,?,?,?,?)",
+                     (pers, "New laptop", "💻", "#8b5cf6", 160000, add_months(today, 4).isoformat(), 95000))
+        conn.execute("INSERT INTO goals(portfolio_id, name, icon, color, target, target_date, saved) VALUES (?,?,?,?,?,?,?)",
+                     (fam, "New kitchen", "🛋️", "#f59e0b", 1200000, add_months(today, 24).isoformat(), 380000))
+        conn.execute("INSERT INTO goals(portfolio_id, name, icon, color, target, target_date, saved) VALUES (?,?,?,?,?,?,?)",
+                     (fam, "Summer holiday", "🏖️", "#14b8a6", 300000, add_months(today, 7).isoformat(), 120000))
+        for pid, budgets in ((fam, (("Groceries", 45000), ("Restaurants & bars", 15000), ("Utilities", 18000),
+                                    ("Home & furniture", 20000), ("Transport", 12000))),
+                             (pers, (("Restaurants & bars", 12000), ("Shopping & gifts", 10000), ("Subscriptions", 2500),
+                                     ("Books & learning", 4000)))):
+            for name, cents in budgets:
+                conn.execute("UPDATE categories SET budget = ? WHERE portfolio_id = ? AND name = ?", (cents, pid, name))
+        _setting(conn, f"emergency_months@{pers}", 4)
+        _setting(conn, f"split_months@{fam}", 6)
+        _setting(conn, f"rebalance@{pers}", json.dumps({
+            "accounts": [broker], "mode": "class", "targets": {"class": {"azioni": 60, "obbligazioni": 20, "monetario": 15,
+                                                                         "materie prime": 5}, "security": {}},
+            "excluded": {"class": [], "security": []}, "drift_abs": 5.0, "drift_rel": 25.0, "contribution": 100000, "sells": False}))
+        _setting(conn, "last_backup_download", (today - dt.timedelta(days=41)).isoformat())  # shows the backup reminder
+        log = [(40, "security", "Password created", ""), (40, "change", "Space created", "Marco"),
+               (39, "data", "Bank statement imported", "62 transactions"), (38, "change", "Account created", "Credit card"),
+               (32, "change", "Recurring item created", "Water bill"), (21, "change", "Fair split applied to recurring items", ""),
+               (6, "access", "Sign-in", "after 2 failed attempts"),
+               (5, "delete", "Transaction deleted", "Duplicate payment"), (2, "data", "Transactions exported (unencrypted file)", "whole period"),
+               (0, "access", "Sign-in", "")]
+        for back, kind, action, detail in log:
+            ts = dt.datetime.combine(today - dt.timedelta(days=back), dt.time(9 + back % 10, 7 * (back % 8)))
+            conn.execute("INSERT INTO audit_log(ts, kind, action, detail, portfolio) VALUES (?,?,?,?,?)",
+                         (ts.isoformat(sep=" ", timespec="seconds"), "security" if "failed" in detail else kind, action, detail,
+                          "Marco" if action in ("Account created",) else "Sample Home"))
         conn.commit()
         process_recurring(conn, today)  # records past due items (and the investment plan purchases)
         # older plan purchases are already verified, the latest stay "estimated" (they show the reminder)

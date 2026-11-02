@@ -1,13 +1,14 @@
 # CLAUDE.md — HomeCoin
 
-Guidance for Claude Code when working in this repository. Household finance app that runs locally on Windows: Python/Flask server on `127.0.0.1`, encrypted SQLCipher database, vanilla JS single-page UI. Current version: see `VERSION` in `homecoin/app.py` (1.2.0 at the time of writing).
+Guidance for Claude Code when working in this repository. Household finance app that runs locally on Windows: Python/Flask server on `127.0.0.1`, encrypted SQLCipher database, vanilla JS single-page UI. Current version: see `VERSION` in `homecoin/app.py` (1.2.1 at the time of writing).
 
 ## Hard rules
 
 - **Never read, copy or print the real data.** The data folder (`%LOCALAPPDATA%\HomeCoin\data` from 1.2.0; `data/` in the program folder up to 1.1.0, renamed `data.migrated-*` after the move: database, `keystore.json`, `backups/`) belongs to the user. Never call `db.migrate_data_folder()` without explicit throwaway `src`/`dst` in tests. Test only with the demo (`demo-data/`) or a throwaway folder set through `HOMECOIN_DATA_DIR`, and delete it afterwards.
 - **No personal or financial data anywhere outside the encrypted database**: not in code, comments, examples, demo data, commit messages, docs or screenshots. Examples stay generic (Sample Home, Anna/Marco, `VWCE.DE`).
 - **Keep the temporary import code** (`X-HomeCoin-Token`, Settings → Security): the user explicitly wants it. It must never reach `/api/auth/*`, `/api/backup`, `/api/restore` or `/api/export/*`.
-- **The only network call** is the optional price update to Yahoo Finance, which sends tickers only. No CDN, no telemetry, no other online service.
+- **Only two network calls**, both optional: the price update to Yahoo Finance (tickers only) and the update check/download from GitHub releases (`updater.py`: HTTPS to GitHub hosts only, nothing about the user sent). No CDN, no telemetry, no other online service. Neither runs in the demo.
+- **Updates are signed.** Never weaken `updater.py`: Ed25519 signature on the manifest with the embedded `PUBLIC_KEY`, newer version only, size + SHA-256 of every file, ZIP paths validated, git working trees never updated. The private key lives outside the repository (maintainer only); changing `PUBLIC_KEY` cuts off every installed copy.
 - Do not commit or push without the maintainer's confirmation.
 
 ## Commands (Windows, PowerShell)
@@ -56,6 +57,9 @@ homecoin/
                   savings/net worth
   importer.py     CSV/TXT/XLSX statement parsing and column detection (Italian and English header aliases)
   audit.py        activity log (12 months retention)
+  updater.py      signed updates from GitHub releases: check (latest release, signed manifest), download (size + SHA-256),
+                  apply (installer: silent /HCUPDATE=1 run that reopens HomeCoin; ZIP: in-place copy with rollback and
+                  pip --require-hashes when requirements.lock changes); install_kind() = installer | zip | dev | unknown
   util.py         money/number parsing, dates, shared constants (TECH_CATEGORIES, BALANCE_ADJUSTMENT…), STOPWORDS
   demo.py         sample data (two spaces, 18 months)
 static/           index.html, js/app.js (whole SPA, hash routes), js/theme.js, css/app.css, img/logo.svg, vendor/chart.umd.min.js
@@ -73,7 +77,10 @@ Key concepts:
 - **Monthly balance** (`tools.savings`): saved = month surplus (income − spent − other spaces), never the change in cash; "invested" = buys − sells of non-money-market securities, shown separately; money-market ETFs (`asset_class` `monetario`) count as cash.
 - **Investment plans**: a recurring transfer with `holding_id` buys units automatically at an estimated price (`external_id` `pac:<rid>:<date>`, note "estimated price"); editing the trade marks it "verified price"; unverified after 30 days → reminder.
 - **Security guard**: Host check (DNS rebinding), `Sec-Fetch-Site: cross-site` rejected, writes need `X-HomeCoin: 1` + local Origin (CSRF), strict CSP, Permissions-Policy, no server signature, session cookie `hc_session_{port}` (`hc_session_demo_{port}` in demo), all `/api/*` except `/api/auth/*` return 401 while locked.
-- **Database**: encrypted at rest, temp store in memory, `secure_delete`; automatic encrypted backup at the first unlock of every start (last 15); restore runs `migrate()`.
+- **Database**: encrypted at rest, temp store in memory, `secure_delete`; automatic encrypted backup at the first unlock of every start (last 15); restore runs `migrate()`. `keystore.json` is read and written only through `security.read_keystore`/`write_keystore` (one lock + cache: on Windows `os.replace` fails while another thread has the file open).
+- **Updates** (1.2.1): `GET /api/update` (`?check=1` now, `?auto=1` at most every 20 h if `update_auto`), `PUT /api/update/settings`, `POST /api/update/apply` (session only: `/api/update*` is closed to the import code; backup `*-update.db` first; then exit via `HC_EXIT`, restart via `HC_RESTART` in tests). Settings keys `update_auto`, `update_checked`, `update_info` (global). UI: `loadUpdate()`, chip `#update-chip`, dot `#nav-update-dot`, Settings → Updates tab.
+- **UI layout** (1.2.1): sidebar groups Everyday / Planning / Wealth / Tools (`.nav-group`, hidden when empty); rare actions in the top-right **⋯** menu; Settings tabs `SETTINGS_TABS` (`#/impostazioni?tab=general|spaces|security|data|updates`). New settings go in the tab where a user would look for them; keep the top bar for daily actions only.
+- **Demo** (`homecoin/demo.py`): must keep showing every feature with made-up data; when a feature is added, add sample data for it. `GET /api/demo/statement.csv` (demo only) feeds Import → "Try it with a sample bank statement".
 
 ## Conventions
 
@@ -98,7 +105,8 @@ Key concepts:
 
 ## Known gaps
 
-- No automated tests in the repo: the maintainer keeps a regression + fuzz suite outside it (made-up data only); last full run on 1.2.0 (also with the Python bundled in the installer).
+- No automated tests in the repo: the maintainer keeps a regression + fuzz suite outside it (made-up data only); last full run on 1.2.1.
+- Automatic updates only work once the GitHub repository is public (the API returns 404 for a private one without a token) and for releases published with their signed manifest.
 - `util.STOPWORDS` contains Italian bank words only (adding English ones would change payee keys of existing data).
 - Activity-log rows written before the translation stay in Italian; old investment-plan notes may read half Italian, half English.
 - Windows only (launchers, data-folder ACL); the Python code is untested elsewhere.

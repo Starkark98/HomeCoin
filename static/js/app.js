@@ -357,6 +357,7 @@ async function unlocked() {
   try { await loadMeta(); } catch (e) { fail(e); }
   route();
   setTimeout(offerFolderProtection, 1200);  // after the dashboard has appeared
+  setTimeout(() => loadUpdate('auto'), 2500);  // at most once a day, only if automatic checks are on
 }
 async function lockNow() {
   try { await api('/auth/logout', { method: 'POST' }); } catch { /* already locked */ }
@@ -474,6 +475,11 @@ function drawPortfolioSwitcher() {
         <span class="pf-ico">${esc(x.icon)}</span><span class="pf-txt"><b>${esc(x.name)}</b><small>${PF_TYPES[x.type][0]} · ${x.accounts} ${x.accounts === 1 ? 'account' : 'accounts'}</small></span></button>`).join('')}
       <hr><button data-pf-new>＋ New space</button><button data-pf-manage>⚙️ Manage spaces</button></div>`;
   $$('#nav a').forEach((a) => a.classList.toggle('hidden', !featureOn(a.dataset.route, p)));
+  $$('#nav .nav-group').forEach((g) => {  // a group title only when one of its tabs is shown in this space
+    let n = g.nextElementSibling, any = false;
+    for (; n && !n.classList.contains('nav-group'); n = n.nextElementSibling) any ||= !n.classList.contains('hidden');
+    g.classList.toggle('hidden', !any);
+  });
   $('#pf-btn').onclick = (e) => { e.stopPropagation(); $('#pf-menu').classList.toggle('hidden'); };
   $$('#pf-menu [data-pf]').forEach((b) => (b.onclick = () => { $('#pf-menu').classList.add('hidden'); if (+b.dataset.pf !== S.pid) switchPortfolio(+b.dataset.pf); }));
   $('#pf-menu [data-pf-new]').onclick = () => { $('#pf-menu').classList.add('hidden'); portfolioModal(); };
@@ -648,7 +654,7 @@ const ROUTES = {
   calendario: ['Calendar', 'Due dates for the coming months and projected balance', renderCalendario],
   categorie: ['Categories', 'Categories, budgets and automatic rules', renderCategorie],
   registro: ['Activity log', 'Sign-ins, changes and important deletions over the last 12 months', renderRegistro],
-  impostazioni: ['Settings', 'Backups, exports and preferences', renderImpostazioni],
+  impostazioni: ['Settings', 'Preferences, spaces, security, backups and updates', renderImpostazioni],
 };
 function currentRoute() {
   const [path, query] = location.hash.replace(/^#\/?/, '').split('?');
@@ -1611,6 +1617,7 @@ async function renderImport(v) {
       <div class="grid-3-2"><div class="card">
         <label class="dropzone" id="drop"><input type="file" id="file" accept=".csv,.txt,.tsv,.xlsx,.xlsm" hidden>
           <div class="big">📥</div><h3>Drag your bank statement here</h3><p class="muted">or click to choose a file · CSV, TXT, XLSX</p></label>
+        ${AUTH.status?.demo ? '<div style="text-align:center;margin-top:12px"><button class="btn btn-sm" id="imp-sample">🧪 Try it with a sample bank statement</button></div>' : ''}
       </div>
       <div class="card"><div class="card-head"><h3>How it works</h3></div><div class="list">
         <div class="list-item"><div class="cat-ico" style="--c:#6366f1">1️⃣</div><div class="grow">Export your transactions from online banking as <b>CSV or Excel</b>.</div></div>
@@ -1631,6 +1638,12 @@ async function renderImport(v) {
       } catch (e) { fail(e); route(); }
     };
     input.onchange = () => upload(input.files[0]);
+    $('#imp-sample')?.addEventListener('click', async () => {  // demo: a made-up statement of the joint account
+      try {
+        const blob = await fetch('/api/demo/statement.csv', { headers: { 'X-HomeCoin': '1' } }).then((r) => { if (!r.ok) throw new Error('Sample not available'); return r.blob(); });
+        upload(new File([blob], 'sample-bank-statement.csv', { type: 'text/csv' }));
+      } catch (e) { fail(e); }
+    });
     ['dragenter', 'dragover'].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.add('drag'); }));
     ['dragleave', 'drop'].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.remove('drag'); }));
     drop.addEventListener('drop', (e) => upload(e.dataTransfer.files[0]));
@@ -2463,7 +2476,7 @@ async function renderInvestimenti(v) {
         <b>${money(Math.abs(o.amount))}</b><button class="btn btn-sm btn-primary" data-pacv="${i}">✏️ Verify</button></div>`).join('')}</div></div>` : ''}`
     + `
     <div class="toolbar"><span class="muted small">Value = latest valuation (automatic from securities or entered by hand). Invested = net transfers/income into the account.</span><span class="spacer"></span>
-      ${hasHoldings ? '<button class="btn" id="iv-refresh" title="The only feature that uses the internet: it sends only the tickers to Yahoo Finance">🌐 Update prices</button>' : ''}
+      ${hasHoldings ? '<button class="btn" id="iv-refresh" title="Uses the internet: it sends only the tickers to Yahoo Finance">🌐 Update prices</button>' : ''}
       <button class="btn btn-primary" id="iv-new">＋ Investment account</button></div>
     <div class="kpis">
       <div class="kpi g-indigo"><div class="k-label">📊 Current value</div><div class="k-value">${money0(d.total_value)}</div><div class="k-sub">${d.accounts.length} accounts</div></div>
@@ -2963,9 +2976,32 @@ function backupAge() {
   if (!d) return S.tx_count ? '<span class="tag warn">never downloaded</span>' : 'Never downloaded';
   return `Last downloaded: <b>${esc(fmtDate(d))}</b>${days > 30 ? ` <span class="tag warn">${days} days ago</span>` : ''}`;
 }
-async function renderImpostazioni(v) {
+// Settings in five tabs, from the everyday to the rare: what you change often first, safety and data after
+const SETTINGS_TABS = [['general', '🎨 General'], ['spaces', '🗂️ Spaces'], ['security', '🔐 Security'], ['data', '💾 Backup & data'], ['updates', '🔄 Updates']];
+async function renderImpostazioni(v, params) {
   const th = getTheme();
-  v.innerHTML = `<div class="card" style="margin-bottom:18px"><div class="card-head"><div><h3>🗂️ Spaces</h3>
+  const tab = SETTINGS_TABS.some(([k]) => k === params?.get('tab')) ? params.get('tab') : S.settingsTab || 'general';
+  S.settingsTab = tab;
+  if (tab === 'updates' && !S.update) await loadUpdate();
+  const tabs = `<div class="seg settings-tabs" id="s-tabs" role="tablist">${SETTINGS_TABS.map(([k, l]) => `<button role="tab" data-tab="${k}" class="${k === tab ? 'on' : ''}" aria-selected="${k === tab}">${l}${k === 'updates' && S.update?.available ? '<span class="nav-dot"></span>' : ''}</button>`).join('')}</div>`;
+  const lockLabel = (m) => (m < 60 ? m + ' minutes' : m / 60 + (m === 60 ? ' hour' : ' hours'));
+  const panes = {
+    general: `<div class="grid-2">
+    <div class="card"><div class="card-head"><h3>🎨 Appearance</h3></div>
+      <div class="settings-row"><div><b>Theme</b><p class="muted small">Light, dark or same as the system</p></div>
+        <div class="seg" id="s-theme">${[['system', '💻 System'], ['light', '☀️ Light'], ['dark', '🌙 Dark']].map(([k, l]) => `<button data-t="${k}" class="${th === k ? 'on' : ''}">${l}</button>`).join('')}</div></div>
+      <div class="settings-row"><div><b>Reference currency</b><p class="muted small">Symbol and number format of every space: ${esc(money(123456))}. A label only: amounts are not converted</p></div>
+        <div class="seg" id="s-cur">${Object.entries(CURRENCIES).map(([k, c]) => `<button data-c="${k}" class="${CUR === k ? 'on' : ''}" title="${esc(c.name)}">${esc(c.symbol)} ${k}</button>`).join('')}</div></div>
+      <div class="settings-row"><div><b>Hide amounts</b><p class="muted small">The eye at the top blurs every amount, for when someone is looking at the screen</p></div></div>
+      <div class="settings-row"><div><b>Shortcuts</b><p class="muted small"><span class="kbd">N</span> new transaction · <span class="kbd">Esc</span> closes dialogs</p></div></div>
+    </div>
+    <div class="card"><div class="card-head"><h3>🪙 About HomeCoin</h3></div>
+      <div class="settings-row"><div><b>HomeCoin ${esc(S.version)}</b><p class="muted small">${S.update?.available ? `<span class="tag ai">version ${esc(S.update.latest)} available</span>` : 'Household finances on your own PC, by Starkark98'}</p></div><a class="btn btn-sm" href="#/impostazioni?tab=updates">🔄 Updates</a></div>
+      <div class="settings-row"><div><b>Help</b><p class="muted small">Guide and questions on GitHub (opens a new tab)</p></div><a class="btn btn-sm" href="https://github.com/Starkark98/HomeCoin#readme" target="_blank" rel="noopener noreferrer">❔ Help</a></div>
+      <div class="settings-row"><div><b>Support HomeCoin</b><p class="muted small">HomeCoin is free. If it helps you, a coffee on Ko-fi keeps it growing</p></div><a class="btn btn-sm" href="https://ko-fi.com/starkark98" target="_blank" rel="noopener noreferrer">☕ Ko-fi</a></div>
+      <div class="settings-row"><div><b>Close HomeCoin</b><p class="muted small">Locks and stops HomeCoin; open it again from its shortcut</p></div><button class="btn btn-sm" id="s-quit">⏻ Close</button></div>
+    </div></div>`,
+    spaces: `<div class="card"><div class="card-head"><div><h3>🗂️ Spaces</h3>
       <p class="muted small" style="margin:3px 0 0">Separate portfolios in the same HomeCoin (e.g. family, personal, business). Switch between them from the switcher at the top left.</p></div>
       <button class="btn btn-sm btn-primary" id="s-pf-new">＋ New space</button></div>
     <div class="pf-list">${S.portfolios.map((p) => `<div class="pf-row ${p.archived ? 'is-off' : ''}">
@@ -2973,19 +3009,25 @@ async function renderImpostazioni(v) {
       <div class="grow"><b>${esc(p.name)}</b> ${p.id === S.pid ? '<span class="tag ai">active</span>' : ''} ${p.archived ? '<span class="tag">archived</span>' : ''}
         <div class="muted small">${PF_TYPES[p.type][0]} · ${p.accounts} ${p.accounts === 1 ? 'account' : 'accounts'} · tabs: ${p.features.map((k) => `${FEATURES[k][0]} ${FEATURES[k][1]}`).join(', ') || 'only the common ones'}</div></div>
       ${p.id !== S.pid && !p.archived ? `<button class="btn btn-sm" data-pf-go="${p.id}">Open</button>` : ''}
-      <button class="icon-btn sm" data-pf-edit="${p.id}" title="Edit">✏️</button></div>`).join('')}</div></div>
-  <div class="card" style="margin-bottom:18px" id="sec-card"><div class="card-head"><div><h3>🩺 Security check</h3>
+      <button class="icon-btn sm" data-pf-edit="${p.id}" title="Edit">✏️</button></div>`).join('')}</div></div>`,
+    security: `<div class="card" style="margin-bottom:18px" id="sec-card"><div class="card-head"><div><h3>🩺 Security check</h3>
       <p class="muted small" style="margin:3px 0 0" id="sec-sum">Checking…</p></div>
       <button class="btn btn-sm" id="sec-go">🩺 Check now</button></div>
     <div class="sec-list" id="sec-list"><div class="loading">Checking the database, data folder and keys…</div></div></div>
   <div class="grid-2">
-    <div class="card"><div class="card-head"><h3>🎨 Appearance</h3></div>
-      <div class="settings-row"><div><b>Theme</b><p class="muted small">Light, dark or same as the system</p></div>
-        <div class="seg" id="s-theme">${[['system', '💻 System'], ['light', '☀️ Light'], ['dark', '🌙 Dark']].map(([k, l]) => `<button data-t="${k}" class="${th === k ? 'on' : ''}">${l}</button>`).join('')}</div></div>
-      <div class="settings-row"><div><b>Reference currency</b><p class="muted small">Symbol and number format of every space: ${esc(money(123456))}. A label only: amounts are not converted</p></div>
-        <div class="seg" id="s-cur">${Object.entries(CURRENCIES).map(([k, c]) => `<button data-c="${k}" class="${CUR === k ? 'on' : ''}" title="${esc(c.name)}">${esc(c.symbol)} ${k}</button>`).join('')}</div></div>
-      <div class="settings-row"><div><b>Shortcuts</b><p class="muted small"><span class="kbd">N</span> new transaction · <span class="kbd">Esc</span> closes dialogs</p></div></div>
+    <div class="card"><div class="card-head"><h3>🔐 Password and lock</h3></div>
+      <div class="settings-row"><div><b>Password</b><p class="muted small">Asked every time you open HomeCoin; it is not saved anywhere</p></div><button class="btn btn-sm" id="s-pw">Change password</button></div>
+      <div class="settings-row"><div><b>Recovery key</b><p class="muted small">Needed if you forget the password; generating a new one invalidates the previous one</p></div><button class="btn btn-sm" id="s-rk">New key</button></div>
+      <div class="settings-row"><div><b>Auto-lock</b><p class="muted small">After this much time without activity the password is needed again</p></div>
+        <select id="s-autolock" style="width:auto">${[5, 15, 30, 60, 120].map((m) => `<option value="${m}" ${(AUTH.status?.auto_lock || 15) === m ? 'selected' : ''}>${lockLabel(m)}</option>`).join('')}</select></div>
+      <div class="settings-row"><div><b>Lock now</b><p class="muted small">Removes the key from memory and hides the data</p></div><button class="btn btn-sm" id="s-lock">🔒 Lock</button></div>
     </div>
+    <div class="card"><div class="card-head"><div><h3>🧰 Advanced</h3><p class="muted small" style="margin:3px 0 0">Only if you asked for it yourself</p></div></div>
+      <div class="settings-row"><div><b>Import code</b><p class="muted small" id="s-itoken-state">Temporary code for an import script on this PC. It expires on its own and is revoked when HomeCoin locks. Generate it only if you asked for it yourself.</p></div>
+        <div style="display:flex;gap:8px"><button class="btn btn-sm hidden" id="s-itoken-off">Revoke code</button><button class="btn btn-sm" id="s-itoken">🔑 Generate</button></div></div>
+      <div class="settings-row"><div><p class="muted small" style="margin:0">The database and the automatic backups are encrypted with AES-256 (SQLCipher); the key is protected by your password (scrypt) and stays in memory only while HomeCoin is unlocked. Downloaded backups are encrypted too and open only in HomeCoin with the password or recovery key.</p></div></div>
+    </div></div>`,
+    data: `<div class="grid-2">
     <div class="card"><div class="card-head"><h3>💾 Backup and restore</h3></div>
       <div class="settings-row"><div><b>Download full backup</b><p class="muted small">Encrypted <code>.hcbackup</code> file: it opens only with the current password (or recovery key). Keep a copy outside this PC (USB drive, cloud): the automatic backups below stay in the same folder as the data.
         <br>${backupAge()}</p></div><a class="btn btn-sm" href="/api/backup" id="s-backup">⬇ Backup</a></div>
@@ -2998,27 +3040,28 @@ async function renderImpostazioni(v) {
       <div class="settings-row"><div><b>All transactions</b><p class="muted small">For Excel or other programs</p></div>
         <div style="display:flex;gap:8px"><a class="btn btn-sm" href="/api/export/transactions?format=csv&pf=${S.pid}">CSV</a><a class="btn btn-sm" href="/api/export/transactions?format=xlsx&pf=${S.pid}">Excel</a></div></div>
       <div class="settings-row"><div><b>Annual report</b><p class="muted small">From the Reports page</p></div><a class="btn btn-sm" href="#/report">Go →</a></div>
-    </div>
-    <div class="card"><div class="card-head"><h3>🔐 Security</h3></div>
-      <div class="settings-row"><div><b>Password</b><p class="muted small">Asked every time you open HomeCoin; it is not saved anywhere</p></div><button class="btn btn-sm" id="s-pw">Change password</button></div>
-      <div class="settings-row"><div><b>Recovery key</b><p class="muted small">Needed if you forget the password; generating a new one invalidates the previous one</p></div><button class="btn btn-sm" id="s-rk">New key</button></div>
-      <div class="settings-row"><div><b>Auto-lock</b><p class="muted small">After this much time without activity the password is needed again</p></div>
-        <select id="s-autolock" style="width:auto">${[5, 15, 30, 60, 120].map((m) => `<option value="${m}" ${(AUTH.status?.auto_lock || 15) === m ? 'selected' : ''}>${m < 60 ? m + ' minutes' : m / 60 + (m === 60 ? ' hour' : ' hours')}</option>`).join('')}</select></div>
-      <div class="settings-row"><div><b>Lock now</b><p class="muted small">Removes the key from memory and hides the data</p></div><button class="btn btn-sm" id="s-lock">🔒 Lock</button></div>
-      <div class="settings-row"><div><b>Close HomeCoin</b><p class="muted small">Locks and stops HomeCoin; open it again from its shortcut</p></div><button class="btn btn-sm" id="s-quit">⏻ Close</button></div>
-      <div class="settings-row"><div><b>Import code</b><p class="muted small" id="s-itoken-state">Temporary code for an import script on this PC. It expires on its own and is revoked when HomeCoin locks. Generate it only if you asked for it yourself.</p></div>
-        <div style="display:flex;gap:8px"><button class="btn btn-sm hidden" id="s-itoken-off">Revoke code</button><button class="btn btn-sm" id="s-itoken">🔑 Generate</button></div></div>
-    </div>
-    <div class="card"><div class="card-head"><h3>🛡️ Privacy</h3></div>
+    </div></div>
+    <div class="card" style="margin-top:18px"><div class="card-head"><h3>🛡️ Where your data lives</h3></div>
       <div class="settings-row"><div><b>Data encrypted on your PC</b><p class="muted small"><code class="path">${esc(S.data_dir)}</code></p>
         ${S.legacyCopies.length ? `<p class="small"><span class="tag warn">old copy</span> Since version 1.2 the data lives in the folder above. The previous folder was kept, unused: ${S.legacyCopies.map((p) => `<code class="path">${esc(p)}</code>`).join(' ')} — delete it once you have checked that everything is here (it is encrypted, like the data).</p>` : ''}</div></div>
-      <div class="settings-row"><div><p class="muted small" style="margin:0">The database and automatic backups are encrypted with AES-256 (SQLCipher); the key is protected by your password (scrypt) and stays in memory only while HomeCoin is unlocked.
-        HomeCoin accepts connections only from this PC (127.0.0.1), uses no external services or CDNs and blocks requests coming from other sites; the only online feature is "Update prices" in Investments, which sends only the tickers to Yahoo Finance. ❔ Help and ☕ Donate at the top open GitHub and Ko-fi in a new browser tab, only when you click them. HomeCoin ${esc(S.version)} · by Starkark98.</p></div></div>
-    </div></div>`;
-  $('#s-pw').onclick = () => passwordModal();
-  $('#s-rk').onclick = () => recoveryModal();
-  $('#s-lock').onclick = () => lockNow();
-  $('#s-quit').onclick = () => quitApp();
+      <div class="settings-row"><div><p class="muted small" style="margin:0">HomeCoin accepts connections only from this PC (127.0.0.1), uses no external services or CDNs and blocks requests coming from other sites.
+        It goes online only for two optional things: "Update prices" in Investments (sends only the tickers to Yahoo Finance) and the update check (asks GitHub for the latest version; nothing about you or your data is sent).
+        Help and Support open GitHub and Ko-fi in a new browser tab, only when you click them.</p></div></div>
+    </div>`,
+    updates: updatePane(),
+  };
+  v.innerHTML = tabs + panes[tab];
+  $$('#s-tabs button', v).forEach((b) => (b.onclick = () => {
+    S.settingsTab = b.dataset.tab;
+    history.replaceState(null, '', `#/impostazioni?tab=${b.dataset.tab}`);
+    route();
+  }));
+  if (tab === 'updates') bindUpdatePane(v);
+  $('#s-pw')?.addEventListener('click', () => passwordModal());
+  $('#s-rk')?.addEventListener('click', () => recoveryModal());
+  $('#s-lock')?.addEventListener('click', () => lockNow());
+  $('#s-quit')?.addEventListener('click', () => quitApp());
+  if (tab !== 'security') return bindSettingsCommon(v);
   const runCheck = () => securityCheck(v);
   $('#sec-go').onclick = runCheck;
   runCheck();
@@ -3058,8 +3101,11 @@ async function renderImpostazioni(v) {
   $('#s-autolock').onchange = async (e) => {
     try { const r = await api('/auth/settings', { method: 'PUT', body: { auto_lock: +e.target.value } }); AUTH.status.auto_lock = r.auto_lock; toast('Auto-lock updated'); } catch (err) { fail(err); }
   };
+}
+// controls of the General, Spaces and Backup tabs (each binds only what its tab shows)
+function bindSettingsCommon(v) {
   $$('#s-theme button').forEach((b) => (b.onclick = () => setTheme(b.dataset.t)));
-  $('#s-backup').addEventListener('click', () => { S.lastBackup = todayIso(); });
+  $('#s-backup')?.addEventListener('click', () => { S.lastBackup = todayIso(); });
   $$('#s-cur button').forEach((b) => (b.onclick = async () => {
     const code = b.dataset.c;
     if (code === CUR) return;
@@ -3075,9 +3121,10 @@ async function renderImpostazioni(v) {
       route();
     } catch (e) { fail(e); }
   }));
-  $('#s-pf-new').onclick = () => portfolioModal();
+  $('#s-pf-new')?.addEventListener('click', () => portfolioModal());
   $$('[data-pf-go]', v).forEach((b) => (b.onclick = () => switchPortfolio(+b.dataset.pfGo)));
   $$('[data-pf-edit]', v).forEach((b) => (b.onclick = () => portfolioModal(S.portfolios.find((p) => p.id === +b.dataset.pfEdit))));
+  if (!$('#s-restore')) return;
   $('#s-restore').onchange = async (e) => {
     const f = e.target.files[0];
     if (!f) return;
@@ -3098,6 +3145,90 @@ async function renderImpostazioni(v) {
       $('#rb-go').onclick = async () => { try { await send($('#rb-pw').value); } catch (e2) { fail(e2); } };
     } finally { e.target.value = ''; }
   };
+}
+
+// ================================================================ updates
+// Signed GitHub releases (see homecoin/updater.py). mode: 'auto' = at most once a day if enabled, 'check' = ask now,
+// nothing = only the last known state (no network). A new version shows a small chip at the top and a dot on Settings.
+async function loadUpdate(mode) {
+  try {
+    S.update = await api('/update' + (mode === 'check' ? '?check=1' : mode === 'auto' ? '?auto=1' : ''));
+  } catch { return null; }
+  const on = !!S.update.available && !S.update.demo;
+  $('#update-chip').classList.toggle('hidden', !on);
+  $('#update-chip').textContent = on ? `⬆ HomeCoin ${S.update.latest} is available` : '';
+  $('#nav-update-dot').classList.toggle('hidden', !on);
+  return S.update;
+}
+function updatePane() {
+  const u = S.update;
+  if (!u) return '<div class="card"><div class="empty">The update status could not be read</div></div>';
+  if (u.demo) return `<div class="card empty"><div class="big">🔄</div><h3>Updates are off in the demo</h3>
+    <p>The demo works offline with made-up data. In your own HomeCoin this tab checks GitHub for new versions and installs them after verifying their signature.</p></div>`;
+  const when = u.checked ? `last checked ${esc(fmtDate(u.checked.slice(0, 10)))} at ${esc(u.checked.slice(11, 16))}` : 'not checked yet';
+  const status = u.error ? `<span class="tag warn">could not check</span> ${esc(u.error)}`
+    : u.available ? `<span class="tag ai">version ${esc(u.latest)} is available</span>` : u.checked ? '<span class="tag ok">✔ up to date</span>' : '';
+  const how = { installer: 'The new installer runs by itself in the background and HomeCoin reopens.',
+    zip: 'The program files in this folder are replaced (a copy of the old ones is kept) and HomeCoin restarts.',
+    dev: 'This is a development copy (a git working tree): update it with git. Nothing is installed from here.',
+    unknown: 'This copy cannot update itself: download the new version from GitHub.' }[u.kind];
+  const action = !u.available ? ''
+    : u.can_apply ? `<button class="btn btn-primary" id="s-upd-go">⬆ Update to ${esc(u.latest)}</button>`
+      : `<a class="btn" href="${esc(u.url)}" target="_blank" rel="noopener noreferrer">Open on GitHub ↗</a>`;
+  return `<div class="grid-2">
+    <div class="card"><div class="card-head"><h3>🔄 Updates</h3><button class="btn btn-sm" id="s-upd-check">Check now</button></div>
+      <div class="settings-row"><div><b>HomeCoin ${esc(u.current)}</b><p class="muted small">${status}${status ? ' · ' : ''}${when}</p></div></div>
+      ${u.available ? `<div class="settings-row"><div><b>Version ${esc(u.latest)}</b><p class="muted small">${how}</p></div>${action}</div>
+        ${u.notes ? `<details class="upd-notes"><summary>What's new in ${esc(u.latest)}</summary><div class="upd-notes-text">${esc(u.notes)}</div></details>` : ''}` : ''}
+      <div class="settings-row"><div><b>Check automatically</b><p class="muted small">Once a day, after you sign in, HomeCoin asks GitHub whether there is a new version. Nothing about you or your data is sent.</p></div>
+        <label class="switch"><input type="checkbox" id="s-upd-auto" ${u.auto ? 'checked' : ''}><span></span></label></div>
+    </div>
+    <div class="card"><div class="card-head"><h3>🛡️ How updates stay safe</h3></div><div class="list small">
+      <div>✍️ Every release is <b>signed</b> by the maintainer: HomeCoin checks the signature (Ed25519) with a key built into the program and refuses anything else, even if it came from GitHub.</div>
+      <div>🔢 Every downloaded byte is checked against the signed <b>SHA-256</b> before anything is installed.</div>
+      <div>⏫ Only <b>newer</b> published versions are offered: never test builds, never an older version.</div>
+      <div>💾 An encrypted <b>backup</b> of the database is saved first; the data folder is never part of an update.</div>
+      <div>🖐️ Nothing is installed until you click <b>Update</b>.</div>
+    </div></div></div>`;
+}
+function bindUpdatePane(v) {
+  $('#s-upd-check', v)?.addEventListener('click', async (e) => {
+    e.target.disabled = true; e.target.textContent = '⏳ Checking…';
+    await loadUpdate('check');
+    route();
+  });
+  $('#s-upd-auto', v)?.addEventListener('change', async (e) => {
+    try { S.update = await api('/update/settings', { method: 'PUT', body: { auto: e.target.checked } }); toast(e.target.checked ? 'Automatic checks on' : 'Automatic checks off'); } catch (err) { fail(err); }
+  });
+  $('#s-upd-go', v)?.addEventListener('click', applyUpdate);
+}
+async function applyUpdate() {
+  const u = S.update, btn = $('#s-upd-go');
+  if (!(await confirmDialog(`HomeCoin will download version ${u.latest} from GitHub, verify its signature and SHA-256, save an encrypted backup of the database and install it. Then it restarts by itself (about a minute). Your data is not touched.`,
+    { ok: `⬆ Update to ${u.latest}`, danger: false, title: '🔄 Update HomeCoin' }))) return;
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Downloading and verifying…'; }
+  let r;
+  try { r = await api('/update/apply', { method: 'POST' }); } catch (e) {
+    fail(e);
+    if (btn) { btn.disabled = false; btn.textContent = `⬆ Update to ${u.latest}`; }
+    return;
+  }
+  document.body.classList.add('locked');
+  wipeView();
+  $('#lock-body').innerHTML = `<h2>Updating to ${esc(r.version)} ⏳</h2>
+    <p class="muted small" id="upd-msg">The new version was verified and is being installed. This page reloads by itself when HomeCoin is back.</p>`;
+  const started = Date.now();
+  const poll = async () => {
+    try {
+      const st = await fetch('/api/auth/status', { headers: { 'X-HomeCoin': '1' } }).then((x) => x.json());
+      if (st.version === r.version) { location.replace('/'); return; }
+    } catch { /* restarting */ }
+    if (Date.now() - started > 180000 && $('#upd-msg')) {
+      $('#upd-msg').textContent = 'This is taking longer than expected. If HomeCoin does not come back, open it again from its shortcut (or with HomeCoin.cmd in the ZIP version).';
+    }
+    setTimeout(poll, 2000);
+  };
+  setTimeout(poll, 3000);
 }
 
 // ================================================================ security check
@@ -3218,6 +3349,11 @@ $('#theme-toggle').onclick = () => {
 };
 $('#lock-now').onclick = () => lockNow();
 $('#quit-app').onclick = () => quitApp();
+// "⋯" menu: the actions used less often (theme, help, donate, close), out of the way of the everyday ones
+const moreMenu = (open) => { $('#more-menu').classList.toggle('hidden', !open); $('#more-btn').setAttribute('aria-expanded', open ? 'true' : 'false'); };
+$('#more-btn').onclick = (e) => { e.stopPropagation(); moreMenu($('#more-menu').classList.contains('hidden')); };
+$('#more-menu').addEventListener('click', () => moreMenu(false));
+document.addEventListener('click', (e) => { if (!e.target.closest('.more')) moreMenu(false); });
 $('#privacy-toggle').onclick = () => setPrivacy(!privacyOn());
 setPrivacy((() => { try { return localStorage.getItem('homecoin-privacy') === '1'; } catch { return false; } })());
 window.addEventListener('hashchange', () => { if (!document.body.classList.contains('locked')) route(); });
