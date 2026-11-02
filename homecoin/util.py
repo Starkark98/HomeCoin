@@ -2,7 +2,7 @@
 import calendar
 import datetime as dt
 import re
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal, DecimalException
 
 FREQUENCIES = {
     "weekly": ("d", 7),
@@ -45,7 +45,10 @@ def parse_number(value):
     if value is None or isinstance(value, bool):
         return None
     if isinstance(value, (int, float)):
-        return float(value)
+        v = float(value)  # also from JSON: NaN and Infinity are not numbers here either
+        if v != v or v in (float("inf"), float("-inf")):
+            raise ValueError("invalid number")
+        return v
     s = str(value).strip().replace("€", "").replace(" ", "").replace(" ", "").replace("'", "").replace("−", "-")
     if not s:
         return None
@@ -61,6 +64,20 @@ def parse_number(value):
     return v
 
 
+MAX_CENTS = 10 ** 13  # 100 billion euros: larger amounts in a statement are typos or garbage, not money
+
+
+def _cents(d):
+    """Decimal in euros → cents; None if not finite or out of range (e.g. "9e999999" or a 1e308 Excel cell)."""
+    try:
+        if not d.is_finite():  # "NaN", "inf" (e.g. empty cells exported by other programs)
+            return None
+        cents = int((d * 100).quantize(Decimal("1")))
+    except (DecimalException, ValueError, OverflowError):
+        return None
+    return cents if abs(cents) <= MAX_CENTS else None
+
+
 def parse_amount(value):
     """Convert an amount (number or text, IT/EN formats) into signed cents. None if invalid."""
     if value is None:
@@ -68,8 +85,7 @@ def parse_amount(value):
     if isinstance(value, bool):
         return None
     if isinstance(value, (int, float)):
-        d = Decimal(str(value))
-        return int((d * 100).quantize(Decimal("1"))) if d.is_finite() else None  # "NaN"/infinity cells: invalid
+        return _cents(Decimal(str(value)))
     s = str(value).strip()
     if not s:
         return None
@@ -97,11 +113,10 @@ def parse_amount(value):
     elif s.count(".") > 1 or (s.count(".") == 1 and len(s.split(".")[1]) == 3):
         s = s.replace(".", "")
     try:
-        d = Decimal(s)
-        if not d.is_finite():  # "NaN", "inf" (e.g. empty cells exported by other programs)
-            return None
-        cents = int((d * 100).quantize(Decimal("1")))
-    except (InvalidOperation, ValueError):
+        cents = _cents(Decimal(s))
+    except (DecimalException, ValueError):
+        return None
+    if cents is None:
         return None
     return -cents if neg else cents
 
@@ -115,6 +130,8 @@ def parse_date(value):
     if isinstance(value, dt.date):
         return value
     if isinstance(value, (int, float)) and not isinstance(value, bool):
+        if value != value or value in (float("inf"), float("-inf")):  # NaN/infinity (JSON or Excel cells)
+            return None
         if 20000 < value < 80000:  # Excel serial
             return dt.date(1899, 12, 30) + dt.timedelta(days=int(value))
         value = str(int(value))

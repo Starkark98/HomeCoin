@@ -19,7 +19,9 @@ def clean_manual(value, account_ids):
     """Valid manual items: [{name, account_id, amount (cents/month), rule}]."""
     try:
         items = value if isinstance(value, list) else json.loads(value or "[]")
-    except ValueError:
+    except (TypeError, ValueError):  # not a text (a number, an object) or not JSON
+        items = []
+    if not isinstance(items, list):
         items = []
     out = []
     for it in items[:50]:

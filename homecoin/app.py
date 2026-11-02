@@ -23,7 +23,7 @@ from . import split as splitm
 from . import tools
 from .util import FREQUENCIES, add_months, months_between, parse_date, parse_number, rule_matches
 
-VERSION = "1.0.0"
+VERSION = "1.0.1"
 STATIC_DIR = dbm.BASE_DIR / "static"
 KINDS = ("expense", "income", "transfer")
 ACCOUNT_TYPES = ("corrente", "risparmio", "credito", "prepagata", "contanti", "investimenti", "altro")
@@ -76,6 +76,19 @@ def as_int(value, name, required=True, minimum=None):
     if abs(v) > MAX_INT:  # huge figures would overflow the totals (and every page with them)
         raise ApiError(f"Value too large: {name}")
     return v
+
+
+def as_key(value):
+    """A code chosen from a list (type, action, token…): only a text; lists or objects become None (not hashable)."""
+    return value if isinstance(value, str) else None
+
+
+def as_dict(value, name):
+    if value in (None, ""):
+        return {}
+    if not isinstance(value, dict):
+        raise ApiError(f"Invalid data: {name}")
+    return value
 
 
 def as_date(value, name="date", required=True):
@@ -173,7 +186,8 @@ def pf():
     if "pf" not in g:
         db = get_db()
         raw = request.headers.get("X-Portfolio") or request.args.get("pf") or ""
-        row = db.execute("SELECT * FROM portfolios WHERE id = ?", (int(raw),)).fetchone() if raw.isdigit() else None
+        ok = raw.isascii() and raw.isdigit() and len(raw) <= 12  # not "²" or a number beyond the database integers
+        row = db.execute("SELECT * FROM portfolios WHERE id = ?", (int(raw),)).fetchone() if ok else None
         row = row or db.execute("SELECT * FROM portfolios ORDER BY archived, position, id LIMIT 1").fetchone()
         g.pf, g.portfolio = row["id"], dict(row)
     return g.pf
@@ -450,7 +464,8 @@ def create_app(port):
 
     @app.post("/api/auth/import-token")
     def auth_import_token():
-        b = request.get_json(silent=True) or {}
+        b = request.get_json(silent=True)
+        b = b if isinstance(b, dict) else {}
         token, minutes = vault.new_import_token(as_int(b.get("minutes") or security.IMPORT_TOKEN_MINUTES, "duration"))
         return jsonify(token=token, minutes=minutes)
 
@@ -976,7 +991,7 @@ def create_app(port):
             raise ApiError("The selected transactions are transfers coming from another space: edit them from there")
         g.skipped_incoming = asked - len(ids)
         marks = ",".join("?" * len(ids))
-        action = b.get("action")
+        action = as_key(b.get("action"))
         note(f"{len(ids)} transactions", {"delete": "Multiple transactions deleted", "category": "Category changed on multiple transactions",
                                           "exclude": "Transactions excluded from reports", "include": "Transactions included in reports"}.get(action))
         if action == "delete":
@@ -1077,7 +1092,7 @@ def create_app(port):
         kind = b.get("kind")
         if kind not in KINDS:
             raise ApiError("Invalid type")
-        freq = b.get("frequency")
+        freq = as_key(b.get("frequency"))
         if freq not in FREQUENCIES:
             raise ApiError("Invalid frequency")
         name = as_text(b.get("name"), 80)
@@ -1428,7 +1443,7 @@ def create_app(port):
                 raise ApiError("The period is not valid")
         else:
             year = request.args.get("year") or (years[0] if years else str(dt.date.today().year))
-            if not (year.isdigit() and len(year) == 4):
+            if not (year.isascii() and year.isdigit() and len(year) == 4 and year >= "1900"):
                 raise ApiError("Invalid year")
             d_from, d_to = f"{year}-01-01", f"{year}-12-31"
         start, end = parse_date(d_from), parse_date(d_to)
@@ -1514,7 +1529,7 @@ def create_app(port):
                 raise ApiError("At most 10 people")
             keep = []
             for pos, p in enumerate(people):
-                name = as_text(p.get("name"), 40)
+                name = as_text(as_dict(p, "person").get("name"), 40)
                 if not name:
                     raise ApiError("Each person must have a name")
                 vals = (name, as_int(p.get("income") or 0, "income", minimum=0), as_text(p.get("keyword"), 40), pos)
@@ -1527,7 +1542,7 @@ def create_app(port):
                 keep.append(person_id)
             marks = ",".join("?" * len(keep)) or "NULL"
             db.execute(f"DELETE FROM people WHERE portfolio_id = ? AND id NOT IN ({marks})", (cur_pf, *keep))
-        for k, v in (b.get("settings") or {}).items():
+        for k, v in as_dict(b.get("settings"), "settings").items():
             if k not in splitm.DEFAULTS:
                 continue
             if k == "split_base":
@@ -1548,8 +1563,8 @@ def create_app(port):
                     raise ApiError(f"Invalid value: {k}")
             db.execute("INSERT INTO settings(key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
                        (f"{k}@{cur_pf}", str(v)))
-        for cid, rule in (b.get("rules") or {}).items():
-            if rule not in splitm.RULES:
+        for cid, rule in as_dict(b.get("rules"), "split rules").items():
+            if as_key(rule) not in splitm.RULES:
                 raise ApiError("Invalid split rule")
             db.execute("UPDATE categories SET split = ? WHERE id = ? AND kind = 'expense' AND portfolio_id = ?",
                        (rule, as_int(cid, "category"), cur_pf))
@@ -1854,11 +1869,11 @@ def create_app(port):
         """Data of a trade: buy/sell (quantity, price, fees; optionally the exact total debited/credited),
         split (quantity change), interest/dividends/fees/capital returns (amount)."""
         db = get_db()
-        kind = b.get("kind")
+        kind = as_key(b.get("kind"))
         if kind not in tools.TRADE_KINDS:
             raise ApiError("Invalid trade type")
         hid = as_int(b.get("holding_id"), "security", required=kind in ("buy", "sell", "split", "capital"))
-        if hid and not db.execute("SELECT 1 FROM holdings WHERE id = ? AND account_id = ?", (hid, aid)).fetchone():
+        if hid is not None and not db.execute("SELECT 1 FROM holdings WHERE id = ? AND account_id = ?", (hid, aid)).fetchone():
             raise ApiError("Security not found in this account")
         fees = as_int(b.get("fees") or 0, "fees", minimum=0)
         qty = price = None
@@ -1867,8 +1882,13 @@ def create_app(port):
             if qty <= 0 or price < 0:
                 raise ApiError("Quantity and price must be positive")
             total = as_int(b.get("total"), "total", required=False, minimum=1)  # actual amount on the statement
-            gross = round(qty * price * 100)
+            gross = qty * price * 100
+            if not gross <= MAX_INT:  # also infinity (e.g. 1e200 × 1e200): same limit as every other amount
+                raise ApiError("Value too large: quantity × price")
+            gross = round(gross)
             amount = (-(total or gross + fees)) if kind == "buy" else (total or gross - fees)
+            if abs(amount) > MAX_INT:
+                raise ApiError("Value too large: amount")
             if kind == "sell" and amount < 0:
                 raise ApiError("The fees exceed the sale proceeds: check quantity, price and fees")
             qty = qty if kind == "buy" else -qty
@@ -1959,7 +1979,7 @@ def create_app(port):
         dry = bool(b.get("dry_run"))
         if not dry:
             dbm.backup_now("pre-import")
-        acc, cat, hold = {}, {}, {}
+        acc, cat, hold, cat_kind = {}, {}, {}, {}
         created = {"accounts": 0, "categories": 0, "transactions": 0, "holdings": 0, "trades": 0, "valuations": 0}
 
         def ref(table, key, what):
@@ -1989,6 +2009,7 @@ def create_app(port):
                                                (p, name, kind, as_color(c.get("color")), as_text(c.get("icon"), 8) or "📦",
                                                 "other" if kind == "expense" and name in OTHER_FLOW_NAMES else "")).lastrowid
                     created["categories"] += 1
+                cat_kind[cat[c["key"]]] = kind
             for t in b.get("transactions") or []:
                 kind = t.get("kind")
                 if kind not in KINDS:
@@ -1997,10 +2018,12 @@ def create_app(port):
                 dst = ref(acc, t.get("to_account"), "destination account") if kind == "transfer" else None
                 if dst is not None and dst == src:
                     raise ApiError(f"Transfer to the same account: {t.get('description') or t.get('date')}")
+                cid = ref(cat, t.get("category"), "category") if kind != "transfer" and t.get("category") else None
+                if cid is not None and cat_kind[cid] != kind:  # same rule as transactions entered by hand
+                    raise ApiError(f"The category does not match the transaction type: {t.get('description') or t.get('date')}")
                 db.execute("""INSERT INTO transactions(date, amount, kind, account_id, to_account_id, category_id,
                                                        description, notes, source, excluded) VALUES (?,?,?,?,?,?,?,?, 'import', ?)""",
-                           (tx_date(t.get("date")), as_int(t.get("amount"), "amount", minimum=1), kind, src, dst,
-                            ref(cat, t.get("category"), "category") if kind != "transfer" and t.get("category") else None,
+                           (tx_date(t.get("date")), as_int(t.get("amount"), "amount", minimum=1), kind, src, dst, cid,
                             as_text(t.get("description"), 200), as_text(t.get("notes"), 500), 1 if t.get("excluded") else 0))
                 created["transactions"] += 1
             for h in b.get("holdings") or []:
@@ -2019,7 +2042,7 @@ def create_app(port):
                                                 (aid, ticker, as_text(h.get("name"), 80), cls, isin or None)).lastrowid
                     created["holdings"] += 1
             for o in b.get("trades") or []:
-                if o.get("kind") not in tools.TRADE_KINDS:
+                if as_key(o.get("kind")) not in tools.TRADE_KINDS:
                     raise ApiError(f"Invalid trade type: {o.get('kind')}")
                 ext = as_text(o.get("external_id"), 60)
                 if ext and db.execute("SELECT 1 FROM trades WHERE external_id = ?", (ext,)).fetchone():
@@ -2028,8 +2051,9 @@ def create_app(port):
                                                  source, external_id) VALUES (?,?,?,?,?,?,?,?,?, 'import', ?)""",
                            (ref(acc, o.get("account"), "account"), ref(hold, o["holding"], "security") if o.get("holding") else None,
                             tx_date(o.get("date")), o["kind"], as_float(o.get("quantity") or 0, "quantity"),
-                            float(o["price"]) if o.get("price") is not None else None, int(o.get("amount") or 0),
-                            int(o.get("fees") or 0), as_text(o.get("notes"), 200), as_text(o.get("external_id"), 60) or None))
+                            as_float(o["price"], "price") if o.get("price") is not None else None,
+                            as_int(o.get("amount") or 0, "amount"), as_int(o.get("fees") or 0, "fees"),
+                            as_text(o.get("notes"), 200), as_text(o.get("external_id"), 60) or None))
                 created["trades"] += 1
             for v in b.get("valuations") or []:
                 db.execute("""INSERT INTO valuations(account_id, date, value, source) VALUES (?, ?, ?, 'import')
@@ -2291,16 +2315,16 @@ def create_app(port):
     @app.post("/api/import/analyze")
     def import_analyze():
         b = body()
-        item = _imports.get(b.get("token"))
+        item = _imports.get(as_key(b.get("token")))
         if not item:
             raise ApiError("Import session expired: upload the file again")
         account_id = as_int(b.get("account_id"), "account")
         own_account(account_id)
         width = len(item["rows"][0])
-        mapping = {}
+        mapping, chosen = {}, as_dict(b.get("mapping"), "columns")
         for k in importer.FIELD_KEYWORDS:
-            v = (b.get("mapping") or {}).get(k)
-            mapping[k] = int(v) if v not in (None, "", -1, "-1") and 0 <= int(v) < width else None
+            v = as_int(chosen.get(k), "column", required=False)
+            mapping[k] = v if v is not None and 0 <= v < width else None
         if mapping["date"] is None:
             raise ApiError("Select the date column")
         if mapping["amount"] is None and mapping["debit"] is None and mapping["credit"] is None:
@@ -2347,10 +2371,10 @@ def create_app(port):
         account_id = as_int(b.get("account_id"), "account")
         own_account(account_id)
         rows = b.get("rows") or []
-        if not isinstance(rows, list) or not rows:
+        if not isinstance(rows, list) or not rows or not all(isinstance(r, dict) for r in rows):
             raise ApiError("No transactions to import")
         # an uploaded file is imported only once (e.g. double click on "Import": no duplicate rows)
-        if _imports.pop(b.get("token"), None) is None:
+        if _imports.pop(as_key(b.get("token")), None) is None:
             raise ApiError("This file has already been imported (or the session expired): upload it again if needed", 409)
         db = get_db()
         cat_kind = {c["id"]: c["kind"] for c in db.execute("SELECT id, kind FROM categories WHERE portfolio_id = ?", (pf(),))}

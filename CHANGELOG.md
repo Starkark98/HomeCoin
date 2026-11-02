@@ -2,6 +2,23 @@
 
 All notable changes to HomeCoin are listed here, newest first.
 
+## 1.0.1 — 2026-11-02
+
+Bug fixes found by automated testing. No change to the database or to how existing data is counted.
+
+**Import**
+- CSV files with old Mac line endings (carriage return only) or a line break inside a cell can be imported instead of failing with a server error.
+- Absurd amounts in a bank statement (e.g. `9e999999` as text or a huge number in an Excel cell) are reported as invalid rows instead of stopping the analysis.
+- Bundle import: a transaction can no longer get a category of the opposite type (an expense with an income category); trade amounts and fees follow the same limits as everywhere else.
+
+**Investments**
+- Trades: quantity × price is checked against the usual amount limit, so huge values are rejected with a clear message instead of a server error or an out-of-range amount.
+- A trade that refers to a nonexistent security is rejected even when the security id is 0.
+- Quantities given as `NaN` or `Infinity` are rejected.
+
+**Robustness**
+- Malformed requests (wrong value types, an invalid space header, an invalid report year) get a clear error message instead of a server error.
+
 ## 1.0.0 — 2026-10-29
 
 First public release.

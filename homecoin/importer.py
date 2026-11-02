@@ -65,12 +65,15 @@ def read_table(filename, data):
         rows = best
     elif ext in ("csv", "txt", "tsv"):
         text = _decode(data)
-        sample = text[:8000]
+        sample = text[:8000].replace("\r\n", "\n").replace("\r", "\n")  # the sniffer only splits lines on \n
         try:
             delim = csv.Sniffer().sniff(sample, delimiters=";,\t|").delimiter
         except csv.Error:
             delim = ";" if sample.count(";") >= sample.count(",") else ","
-        rows = [[c.strip() for c in r] for r in csv.reader(io.StringIO(text), delimiter=delim)]
+        try:  # newline="": any line ending (\n, \r\n, old Mac \r) and line breaks inside quoted cells
+            rows = [[c.strip() for c in r] for r in csv.reader(io.StringIO(text, newline=""), delimiter=delim)]
+        except csv.Error as exc:
+            raise ValueError(f"Cannot read the CSV file: {exc}") from exc
         rows = [r for r in rows if any(c for c in r)][:MAX_ROWS]
     elif ext == "xls":
         raise ValueError("The old .xls format is not supported: save the file as .xlsx or .csv")
