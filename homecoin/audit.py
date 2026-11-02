@@ -55,15 +55,16 @@ EVENTS = {
     "import_bundle": ("data", "Bundle imported"),
     "export_transactions": ("data", "Transactions exported (unencrypted file)"),
     "export_report": ("data", "Report exported (unencrypted file)"),
+    "currency_set": ("change", "Reference currency changed"),
     "backup": ("data", "Encrypted backup downloaded"),
     "restore": ("data", "Backup restored"),
 }
 
 
 def eur(cents):
-    """Compact amount for activity log rows: 1.234,56 €."""
-    s = f"{abs(cents) / 100:,.2f}".replace(",", "_").replace(".", ",").replace("_", ".")
-    return ("−" if cents < 0 else "") + s + " €"
+    """Compact amount for activity log rows, in the reference currency: 1.234,56 € or $1,234.56."""
+    from .util import fmt_money
+    return fmt_money(cents)
 
 
 def write(kind, action, detail="", portfolio=None, conn=None):

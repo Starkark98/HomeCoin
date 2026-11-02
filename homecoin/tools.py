@@ -9,7 +9,7 @@ import urllib.parse
 import urllib.request
 
 from .services import account_balances
-from .util import OTHER_INVESTMENTS, TECH_CATEGORIES, add_months, occurrence, parse_date
+from .util import CURRENCY, OTHER_INVESTMENTS, TECH_CATEGORIES, add_months, currency_of, occurrence, parse_date
 
 INVEST = "investimenti"
 
@@ -75,7 +75,15 @@ def set_setting(db, key, pid, value):
 # ------------------------------------------------------- mortgage schedule
 
 RATE_TYPES = ("fixed", "variable", "mixed")
-RATE_INDEXES = ("Euribor 1M", "Euribor 3M", "Euribor 6M", "Euribor 12M")
+# reference indexes of variable and mixed-rate loans: euro area and United States (same list as RATE_INDEXES in app.js).
+# The schedule uses the current value entered by hand: HomeCoin does not download rates
+RATE_INDEX_GROUPS = {
+    "Europe": ("Euribor 1M", "Euribor 3M", "Euribor 6M", "Euribor 12M"),
+    "United States": ("SOFR 30-day average", "Term SOFR 1M", "Term SOFR 3M", "Term SOFR 6M", "US Treasury 1Y (CMT)",
+                      "US Prime Rate"),
+}
+RATE_INDEXES = tuple(i for g in RATE_INDEX_GROUPS.values() for i in g)
+DEFAULT_RATE_INDEX = {"EUR": "Euribor 3M", "USD": "SOFR 30-day average"}
 
 
 def rate_fn(rec):
@@ -93,7 +101,7 @@ def rate_fn(rec):
 
 def rate_label(rec):
     kind = rec.get("rate_type") or "fixed"
-    pct = lambda x: f"{x:g}".replace(".", ",") + "%"
+    pct = lambda x: f"{x:g}".replace(".", "." if CURRENCY["code"] == "USD" else ",") + "%"  # number format of the currency
     var = f"{rec.get('rate_index') or 'index'} + {pct(rec.get('spread') or 0)}"
     if kind == "variable":
         return f"variable: {var}"
@@ -320,7 +328,7 @@ def trades_value(db, account, when):
 
 
 def price_at(db, holding_id, when, pos=None):
-    """Price (EUR) of a security at a date: current price if the date is after the last update, otherwise the historical
+    """Price (reference currency) of a security at a date: current price if the date is after the last update, otherwise the historical
     month-end price; without history, the last trade price known at that date."""
     h = db.execute("SELECT price_eur, price_date FROM holdings WHERE id = ?", (holding_id,)).fetchone()
     if h and h["price_eur"] is not None and h["price_date"] and h["price_date"] <= when and when[:7] >= h["price_date"][:7]:
@@ -531,6 +539,125 @@ def investments(db, pid, months=24):
             "series": series}
 
 
+# ----------------------------------------------------------------- rebalancing
+
+ASSET_CLASSES = ("azioni", "obbligazioni", "monetario", "materie prime", "immobiliare", "crypto", "altro")
+CASH, UNSPECIFIED = "liquidità", "non specificato"  # same keys as the allocation chart
+REBALANCE_DEFAULTS = {"accounts": None, "mode": "class", "targets": {"class": {}, "security": {}},
+                      "drift_abs": 5.0, "drift_rel": 25.0, "contribution": 0, "sells": False}
+
+
+def _split(total, weights):
+    """Split `total` cents in proportion to `weights` (list), with integer parts that add up exactly to `total`."""
+    s = sum(weights)
+    if not weights or s <= 0:
+        return [0] * len(weights)
+    parts = [int(total * w / s) for w in weights]
+    parts[max(range(len(weights)), key=weights.__getitem__)] += total - sum(parts)  # rounding cents on the largest
+    return parts
+
+
+def rebalance(db, pid, cfg):
+    """How far the portfolio is from the target allocation and what to buy (or sell) to get back to it.
+
+    cfg: accounts (ids to count, None = all), mode 'class' (targets per asset class + broker cash) or 'security'
+    (targets per security, broker cash, accounts valued only as a whole), targets {'class': {key: %}, 'security': {key: %}},
+    drift_abs (percentage points) and drift_rel (% of the target): a row is off when either is exceeded (None = not used),
+    contribution (new money, cents), sells (False = only buys with the new money, True = buys and sells up to the target).
+    Values are the ones of the allocation chart (market value of the securities, uninvested cash of accounts with trades,
+    whole value of the accounts without priced securities). Nothing is recorded."""
+    inv = investments(db, pid, months=1)
+    chosen = None if cfg["accounts"] is None else set(cfg["accounts"])
+    accounts, rows = [], {}
+    mode, targets = cfg["mode"], cfg["targets"].get(cfg["mode"]) or {}
+
+    def row(key, label, kind, **extra):
+        return rows.setdefault(key, {"key": key, "label": label, "kind": kind, "value": 0, "holdings": [], **extra})
+
+    for a in inv["accounts"]:
+        included = chosen is None or a["id"] in chosen
+        accounts.append({"id": a["id"], "name": a["name"], "icon": a["icon"], "value": a["value"], "included": included})
+        if not included:
+            continue
+        priced = [h for h in a["holdings"] if h["value"]]
+        for h in priced:
+            unit = h["value"] / h["quantity"] if h["quantity"] else None
+            item = {"id": h["id"], "ticker": h["ticker"], "name": h["name"], "value": h["value"], "unit": unit,
+                    "account": a["name"], "asset_class": h["asset_class"]}
+            if mode == "class":
+                row(h["asset_class"], h["asset_class"], "class")["holdings"].append(item)
+                rows[h["asset_class"]]["value"] += h["value"]
+            else:
+                r = row(f"h:{h['id']}", h["ticker"], "security", name=h["name"], account=a["name"],
+                        asset_class=h["asset_class"], unit=unit)
+                r["value"] += h["value"]
+        if a["has_trades"] and (a["cash"] or 0) > 0:
+            r = row(CASH if mode == "class" else "cash", CASH, "cash")
+            r["value"] += a["cash"]
+        if not a["has_trades"] and not priced and a["value"] > 0:  # valued only as a whole (e.g. a pension fund)
+            if mode == "class":
+                row(UNSPECIFIED, UNSPECIFIED, "class")["value"] += a["value"]
+            else:
+                row(f"acc:{a['id']}", a["name"], "account")["value"] += a["value"]
+    if mode == "class":  # every class can get a target, even one not owned yet
+        for k in (*ASSET_CLASSES, CASH):
+            row(k, k, "cash" if k == CASH else "class")
+    # targets of securities no longer owned or of accounts not counted: listed apart (so they can be cleared), not used
+    names = {f"h:{h['id']}": h["ticker"] for h in db.execute(
+        "SELECT h.id, h.ticker FROM holdings h JOIN accounts a ON a.id = h.account_id WHERE a.portfolio_id = ?", (pid,))}
+    names.update({f"acc:{a['id']}": a["name"] for a in accounts})
+    missing = [{"key": k, "label": names.get(k, k), "kind": "missing", "target": float(t)}
+               for k, t in targets.items() if k not in rows and t]
+
+    total = sum(r["value"] for r in rows.values())
+    contribution = cfg["contribution"]
+    after_total = total + contribution
+    sum_targets = round(sum(targets.get(k, 0) for k in rows), 4)
+    has_targets = abs(sum_targets - 100) <= 0.05
+    both_off = cfg["drift_abs"] is None and cfg["drift_rel"] is None  # no threshold: any visible drift counts
+    order = {k: i for i, k in enumerate((*ASSET_CLASSES, CASH))}  # rows not owned yet: in the usual class order
+    lst = sorted(rows.values(), key=lambda r: (-r["value"], order.get(r["key"], -1), r["label"]))
+    for r in lst:
+        r["target"] = float(targets.get(r["key"], 0) or 0)
+        r["pct"] = r["value"] / total * 100 if total > 0 else 0.0
+        r["drift"] = r["pct"] - r["target"]
+        r["drift_rel"] = r["drift"] / r["target"] * 100 if r["target"] else None
+        r["off"] = has_targets and total > 0 and (
+            (cfg["drift_abs"] is not None and abs(r["drift"]) > cfg["drift_abs"]) or
+            (cfg["drift_rel"] is not None and r["target"] > 0 and abs(r["drift_rel"]) > cfg["drift_rel"]) or
+            (both_off and abs(r["drift"]) > 0.5))
+        r["trade"] = 0
+    if has_targets and after_total > 0:
+        goal = [r["target"] / 100 * after_total for r in lst]
+        if cfg["sells"]:  # exactly to the target: buys and sells, the difference is the new money
+            trades = [round(g_ - r["value"]) for g_, r in zip(goal, lst)]
+            if trades:
+                big = max(range(len(lst)), key=lambda i: abs(trades[i]))
+                trades[big] += contribution - sum(trades)
+        else:  # only buys: the new money goes to the rows below target, in proportion to what they miss
+            gaps = [max(0.0, g_ - r["value"]) for g_, r in zip(goal, lst)]
+            if sum(gaps) <= contribution:  # enough to reach every target: the rest follows the targets
+                extra = _split(contribution - round(sum(gaps)), [r["target"] for r in lst])
+                trades = [round(gp) + e for gp, e in zip(gaps, extra)]
+                trades[max(range(len(lst)), key=lambda i: lst[i]["target"])] += contribution - sum(trades)
+            else:
+                trades = _split(contribution, gaps)
+        for r, t in zip(lst, trades):
+            r["trade"] = t
+    for r in lst:
+        r["after"] = r["value"] + r["trade"]
+        r["after_pct"] = r["after"] / after_total * 100 if after_total > 0 else 0.0
+        if r.get("unit"):  # unit = value of one unit, in cents
+            r["units"] = round(r["trade"] / r["unit"], 4) if r["trade"] else 0
+        if r["holdings"]:  # class mode: the class amount split among the securities already owned, by value
+            for h, part in zip(r["holdings"], _split(r["trade"], [h["value"] for h in r["holdings"]])):
+                h["trade"] = part
+                h["units"] = round(part / h["unit"], 4) if h["unit"] and part else 0
+    return {"rows": lst, "missing": missing, "accounts": accounts, "total": total, "contribution": contribution,
+            "total_after": after_total, "sum_targets": sum_targets, "has_targets": has_targets, "needs_rebalance": any(r["off"] for r in lst),
+            "max_drift": max((abs(r["drift"]) for r in lst if r["target"] or r["value"]), default=0.0)}
+
+
 # instrument class from the Yahoo name/type: the first matching rule wins (a suggestion, always editable)
 CLASS_RULES = [
     ("monetario", ("overnight", "money market", "monetar", "€str", "estr ", "eonia", "ultrashort", "ultra short", "0-1y", "0-1 y",
@@ -640,7 +767,9 @@ def fetch_history(ticker, timeout=15):
 
 
 def refresh_history(db, pid):
-    """Month-end prices (EUR) of securities with trades, to value past months. Returns (securities updated, errors)."""
+    """Month-end prices (in the reference currency) of securities with trades, to value past months.
+    Returns (securities updated, errors)."""
+    base = currency_of(db)
     fx, ok, errors = {}, 0, []
     rows = db.execute("""SELECT h.id, h.ticker, MIN(o.date) AS first FROM holdings h JOIN accounts a ON a.id = h.account_id
                          JOIN trades o ON o.holding_id = h.id
@@ -650,12 +779,12 @@ def refresh_history(db, pid):
             hist, cur = fetch_history(h["ticker"])
             if cur == "GBp":
                 hist, cur = {k: v / 100 for k, v in hist.items()}, "GBP"
-            if cur != "EUR" and cur not in fx:
-                fx[cur] = fetch_history(f"EUR{cur}=X")[0]  # currency units per 1 EUR, per month
+            if cur != base and cur not in fx:
+                fx[cur] = fetch_history(f"{base}{cur}=X")[0]  # currency units per 1 unit of the reference currency, per month
             for month, price in hist.items():
                 if month < h["first"][:7]:
                     continue
-                rate = 1.0 if cur == "EUR" else fx[cur].get(month)
+                rate = 1.0 if cur == base else fx[cur].get(month)
                 if rate:
                     db.execute("""INSERT INTO price_history(holding_id, month, price_eur) VALUES (?, ?, ?)
                                   ON CONFLICT(holding_id, month) DO UPDATE SET price_eur = excluded.price_eur""",
@@ -669,7 +798,8 @@ def refresh_history(db, pid):
 def refresh_prices(db, pid):
     """Update the prices of the space's securities and record today's valuation of accounts holding securities."""
     today = dt.date.today().isoformat()
-    fx, ok, errors = {"EUR": 1.0}, 0, []
+    base = currency_of(db)  # price_eur holds the price in the reference currency (historical column name)
+    fx, ok, errors = {base: 1.0}, 0, []
     accounts, failed = {}, set()
     for h in db.execute("""SELECT h.* FROM holdings h JOIN accounts a ON a.id = h.account_id
                            WHERE a.portfolio_id = ? AND a.type = ? AND h.quantity > 0""", (pid, INVEST)).fetchall():
@@ -678,7 +808,7 @@ def refresh_prices(db, pid):
             if cur == "GBp":  # London pence
                 price, cur = price / 100, "GBP"
             if cur not in fx:
-                fx[cur] = fetch_quote(f"EUR{cur}=X")[0]  # currency units per 1 EUR
+                fx[cur] = fetch_quote(f"{base}{cur}=X")[0]  # currency units per 1 unit of the reference currency
             price_eur = price / fx[cur]
             db.execute("UPDATE holdings SET price=?, currency=?, price_eur=?, price_date=? WHERE id=?",
                        (price, cur, price_eur, today, h["id"]))

@@ -5,31 +5,49 @@
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const EUR = new Intl.NumberFormat('it-IT', { style: 'currency', currency: 'EUR', useGrouping: 'always' });
-const EUR0 = new Intl.NumberFormat('it-IT', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0, useGrouping: 'always' });
-const money = (c) => EUR.format((c || 0) / 100);
-const money0 = (c) => EUR0.format((c || 0) / 100);
+// reference currency of the installation (Settings): a label only, amounts are never converted. The number format
+// follows it: € → 1.234,56 € (it-IT) · $ → $1,234.56 (en-US)
+const CURRENCIES = { EUR: { symbol: '€', locale: 'it-IT', name: 'Euro' }, USD: { symbol: '$', locale: 'en-US', name: 'US dollar' } };
+let CUR = 'EUR', CUR_SYM = '€', LOCALE = 'it-IT', MONEY, MONEY0, _unitFmt = {};
+function setCurrency(code) {
+  CUR = CURRENCIES[code] ? code : 'EUR';
+  ({ symbol: CUR_SYM, locale: LOCALE } = CURRENCIES[CUR]);
+  MONEY = new Intl.NumberFormat(LOCALE, { style: 'currency', currency: CUR, useGrouping: 'always' });
+  MONEY0 = new Intl.NumberFormat(LOCALE, { style: 'currency', currency: CUR, maximumFractionDigits: 0, useGrouping: 'always' });
+  _unitFmt = {};
+}
+setCurrency('EUR');
+const money = (c) => MONEY.format((c || 0) / 100);
+const money0 = (c) => MONEY0.format((c || 0) / 100);
+const num = (x, d = 1) => (x ?? 0).toLocaleString(LOCALE, { maximumFractionDigits: d });
 // unit price (not in cents) with its currency symbol: 6,1973 € · 6,91 $ (up to 4 decimals)
-const _unitFmt = {};
-const unitPrice = (v, cur = 'EUR') => {
+const unitPrice = (v, cur = CUR) => {
   if (v == null) return '—';
-  const c = /^[A-Z]{3}$/.test(cur || '') ? cur : 'EUR';
-  _unitFmt[c] ||= new Intl.NumberFormat('it-IT', { style: 'currency', currency: c, currencyDisplay: 'narrowSymbol', minimumFractionDigits: 2, maximumFractionDigits: 4 });
+  const c = /^[A-Z]{3}$/.test(cur || '') ? cur : CUR;
+  _unitFmt[c] ||= new Intl.NumberFormat(LOCALE, { style: 'currency', currency: c, currencyDisplay: 'narrowSymbol', minimumFractionDigits: 2, maximumFractionDigits: 4 });
   return _unitFmt[c].format(v);
 };
-const moneyInput = (c) => (c ? (c / 100).toFixed(2).replace('.', ',') : '');
+const moneyInput = (c) => (c ? (c / 100).toFixed(2).replace('.', CUR === 'USD' ? '.' : ',') : '');
 const pct = (x) => `${Math.round(x * 100)}%`;
+const decInput = (v) => (v == null ? '' : String(v).replace('.', CUR === 'USD' ? '.' : ','));  // plain decimal (rate %, quantity) for inputs
+// reference indexes of variable and mixed-rate loans (same list as tools.RATE_INDEXES); the default follows the currency
+const RATE_INDEXES = {
+  Europe: ['Euribor 1M', 'Euribor 3M', 'Euribor 6M', 'Euribor 12M'],
+  'United States': ['SOFR 30-day average', 'Term SOFR 1M', 'Term SOFR 3M', 'Term SOFR 6M', 'US Treasury 1Y (CMT)', 'US Prime Rate'],
+};
+const defaultRateIndex = () => (CUR === 'USD' ? 'SOFR 30-day average' : 'Euribor 3M');
 const debounce = (fn, ms = 300) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
 
 // hand-typed numbers, a single rule for the whole app (like util.parse_number on the server):
-// "1.234,56" · "1234,56" · "1234.56" · "1,234.56" · and for amounts "1.500" = 1500 (thousands dot)
+// "1.234,56" · "1234,56" · "1234.56" · "1,234.56" · and for amounts "1.500" = 1500 (thousands dot; in dollars the dot
+// is always the decimal one: "1.500" = 1,5)
 function normNum(s, { thousandsDot = true } = {}) {
   s = String(s ?? '').trim().replace(/[€$£\s ']/g, '').replace(/^−/, '-');
   if (!s) return '';
   const c = s.lastIndexOf(','), d = s.lastIndexOf('.');
   if (c >= 0 && d >= 0) s = c > d ? s.replace(/\./g, '').replace(',', '.') : s.replace(/,/g, '');  // the last separator is the decimal one
   else if (c >= 0) s = (s.match(/,/g).length > 1 || (thousandsDot && /^[-+]?\d{1,3},\d{3}$/.test(s)) ? s.replace(/,/g, '') : s.replace(',', '.'));
-  else if (d >= 0 && (s.match(/\./g).length > 1 || (thousandsDot && /^[-+]?\d{1,3}\.\d{3}$/.test(s)))) s = s.replace(/\./g, '');
+  else if (d >= 0 && (s.match(/\./g).length > 1 || (thousandsDot && CUR !== 'USD' && /^[-+]?\d{1,3}\.\d{3}$/.test(s)))) s = s.replace(/\./g, '');
   return s;
 }
 function parseMoney(s) {  // amount in cents, always positive (the sign comes from the transaction type)
@@ -366,6 +384,7 @@ async function loadMeta() {
   const m = await api('/meta');
   Object.assign(S, { accounts: m.accounts, categories: m.categories, rules: m.rules, tx_count: m.tx_count, version: m.version,
     data_dir: m.data_dir, portfolio: m.portfolio, portfolios: m.portfolios, allAccounts: m.all_accounts });
+  if (m.currency !== CUR) setCurrency(m.currency);
   if (S.pid !== m.portfolio.id) setPid(m.portfolio.id);  // saved space no longer valid
   $('#app-version').textContent = 'v' + m.version;
   drawPortfolioSwitcher();
@@ -463,7 +482,8 @@ function chartTheme() {
 // ================================================================ privacy: hidden amounts (eye icon)
 // Every euro amount on the page is wrapped in <span class="m"> (including ones added later, via MutationObserver);
 // with body.privacy the CSS blurs them. In charts (canvas) axes and tooltips show "•••".
-const AMOUNT_RE = /[−+-]?\d{1,3}(?:\.\d{3})*(?:,\d+)?\s?K?\s?(?:€|\$|£|¥|CHF)/g;  // also prices in other currencies
+// European format with the symbol after (1.234,56 € · 6,91 $) or US format with the symbol before ($1,234.56 · -$1.2K)
+const AMOUNT_RE = /[−+-]?\d{1,3}(?:\.\d{3})*(?:,\d+)?\s?K?\s?(?:€|\$|£|¥|CHF)|[−+-]?(?:€|\$|£|¥)\s?\d{1,3}(?:,\d{3})*(?:\.\d+)?K?/g;
 const maskAmounts = (v) => (Array.isArray(v) ? v.map(maskAmounts) : typeof v === 'string' ? v.replace(AMOUNT_RE, '•••') : v);
 const privacyOn = () => document.body.classList.contains('privacy');
 function wrapAmounts(root) {
@@ -944,7 +964,7 @@ function txModal(tx = null, defaults = {}) {
     <div class="seg" id="tx-kind" style="margin-bottom:16px">
       ${Object.entries(KIND_LABEL).map(([k, l]) => `<button type="button" data-kind="${k}" class="${t.kind === k ? 'on' : ''}">${{ expense: '📤', income: '📥', transfer: '🔄' }[k]} ${l}</button>`).join('')}
     </div>
-    <input id="tx-amount" class="amount-input" inputmode="decimal" placeholder="0,00 €" value="${moneyInput(t.amount)}" autofocus>
+    <input id="tx-amount" class="amount-input" inputmode="decimal" placeholder="${esc(money(0))}" value="${moneyInput(t.amount)}" autofocus>
     <div class="form-grid" style="margin-top:16px">
       <label class="field full">Description <input id="tx-desc" maxlength="200" value="${esc(t.description || '')}" placeholder="E.g. Supermarket shopping, electricity bill…">
         <span id="tx-sugg-note" class="sugg-note hidden"></span></label>
@@ -1155,7 +1175,7 @@ function accountModal(a = null, preset = {}) {
     <div class="form-grid">
       <label class="field full">Name <input id="a-name" maxlength="60" value="${esc(x.name)}" placeholder="E.g. Main bank account, Prepaid card, Cash" autofocus></label>
       <label class="field">Type <select id="a-type">${Object.entries(ACC_TYPES).map(([k, l]) => `<option value="${k}" ${x.type === k ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
-      <label class="field">Opening balance <input id="a-init" inputmode="decimal" value="${x.initial_balance ? (x.initial_balance / 100).toFixed(2).replace('.', ',') : ''}" placeholder="0,00"></label>
+      <label class="field">Opening balance <input id="a-init" inputmode="decimal" value="${moneyInput(x.initial_balance)}" placeholder="${CUR === 'USD' ? '0.00' : '0,00'}"></label>
       <div class="full acc-type-help" id="a-help"></div>
       <div class="field full">Color ${swatchPicker('a-color', x.color)}</div>
       <div class="field full">Icon ${emojiPicker('a-icon', x.icon)}</div>
@@ -1299,7 +1319,7 @@ async function renderCalendario(v) {
         ${plusEst || minusEst ? `<div class="k-split"><span class="k-li"><span>✔ Confirmed only</span><b>${money0(sure)}</b></span><span class="k-li"><span>≈ Total with estimates</span><b>${money0(bal)}</b></span></div>`
           : '<div class="k-sub">confirmed due dates only</div>'}</div>
     </div>
-    ${plusEst || minusEst ? `<p class="muted small" style="margin:-6px 0 14px">≈ <b>Estimated</b>, with the same method for income and expenses: variable recurring items (median of recent payments) and regular transactions without a recurring item, recognized from history (same payer or payee in at least ${d.regular_min} of the last ${d.history_months} months, ignoring month and year in the description; median monthly amount and day). Occasional expenses are not forecast; among estimated income only significant amounts are included (at least 50 € and 5% of the largest, so no account interest of a few euros). To track an item better, create a "variable amount" recurring item in Recurring.</p>` : ''}
+    ${plusEst || minusEst ? `<p class="muted small" style="margin:-6px 0 14px">≈ <b>Estimated</b>, with the same method for income and expenses: variable recurring items (median of recent payments) and regular transactions without a recurring item, recognized from history (same payer or payee in at least ${d.regular_min} of the last ${d.history_months} months, ignoring month and year in the description; median monthly amount and day). Occasional expenses are not forecast; among estimated income only significant amounts are included (at least ${money0(5000)} and 5% of the largest, so no account interest of a few euros). To track an item better, create a "variable amount" recurring item in Recurring.</p>` : ''}
     ${months.map((m) => {
       const key = isoLocal(m).slice(0, 7), its = items.filter((x) => x.date.startsWith(key));
       return `<div class="card" style="margin-bottom:18px"><div class="card-head"><h3>${esc(fmtMonth(key))}</h3><span class="muted">${its.length} due</span></div>
@@ -1387,11 +1407,12 @@ function recurringModal(r = null) {
         <div class="rate-grid">
           <label class="field">Type <select id="r-rtype">${[['', '— not specified'], ['fixed', 'Fixed'], ['variable', 'Variable'], ['mixed', 'Mixed']].map(([k, l]) =>
             `<option value="${k}" ${(x.rate_type || (x.rate != null ? 'fixed' : '')) === k ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
-          <label class="field" data-rt="fixed mixed">Fixed rate (%) <input id="r-rate" inputmode="decimal" value="${x.rate != null ? String(x.rate).replace('.', ',') : ''}" placeholder="3"></label>
-          <label class="field" data-rt="mixed">Fixed for (years) <input id="r-fyears" type="number" min="1" max="40" value="${x.fixed_years ?? ''}" placeholder="5"></label>
-          <label class="field" data-rt="variable mixed">Index <select id="r-index">${['Euribor 1M', 'Euribor 3M', 'Euribor 6M', 'Euribor 12M'].map((i) => `<option ${(x.rate_index || 'Euribor 3M') === i ? 'selected' : ''}>${i}</option>`).join('')}</select></label>
-          <label class="field" data-rt="variable mixed">Spread (%) <input id="r-spread" inputmode="decimal" value="${x.spread != null ? String(x.spread).replace('.', ',') : ''}" placeholder="1,6"></label>
-          <label class="field" data-rt="variable mixed">Current index value (%) <input id="r-ivalue" inputmode="decimal" value="${x.index_value != null ? String(x.index_value).replace('.', ',') : ''}" placeholder="optional"></label>
+          <label class="field" data-rt="fixed mixed">Fixed rate (%) <input id="r-rate" inputmode="decimal" value="${decInput(x.rate)}" placeholder="3"></label>
+          <label class="field" data-rt="mixed">Fixed for (years) <input id="r-fyears" type="number" min="1" max="40" value="${x.fixed_years ?? ''}" placeholder="5" title="e.g. 5 for a 5/1 ARM"></label>
+          <label class="field" data-rt="variable mixed">Index <select id="r-index">${Object.entries(RATE_INDEXES).map(([area, list]) => `<optgroup label="${esc(area)}">${list.map((i) =>
+            `<option ${(x.rate_index || defaultRateIndex()) === i ? 'selected' : ''}>${esc(i)}</option>`).join('')}</optgroup>`).join('')}</select></label>
+          <label class="field" data-rt="variable mixed">Spread / margin (%) <input id="r-spread" inputmode="decimal" value="${decInput(x.spread)}" placeholder="${decInput(1.6)}"></label>
+          <label class="field" data-rt="variable mixed">Current index value (%) <input id="r-ivalue" inputmode="decimal" value="${decInput(x.index_value)}" placeholder="optional"></label>
         </div></div>
       <label class="field">Ends on <input id="r-end" type="date" value="${esc(x.end_date || '')}"></label>
       <label class="field full">Notes <textarea id="r-notes" maxlength="1000">${esc(x.notes || '')}</textarea></label>
@@ -1725,8 +1746,12 @@ async function renderReport(v) {
   if (d.rows.length) drawReportChart(data, d, single, tab);
 }
 
-// compact amounts for axes and labels: 950 €, 1,2K €, 12K €
-const moneyK = (c) => (Math.abs(c) >= 100000 ? `${(c / 100000).toLocaleString('it-IT', { maximumFractionDigits: c >= 1000000 ? 0 : 1 })}K €` : money0(c));
+// compact amounts for axes and labels: 950 €, 1,2K €, 12K € · $950, $1.2K, $12K
+const moneyK = (c) => {
+  if (Math.abs(c) < 100000) return money0(c);
+  const k = `${(c / 100000).toLocaleString(LOCALE, { maximumFractionDigits: Math.abs(c) >= 1000000 ? 0 : 1 })}K`;
+  return CUR === 'USD' ? (k.startsWith('-') ? `-$${k.slice(1)}` : `$${k}`) : `${k} €`;
+};
 
 function drawReportChart(data, d, single, tab) {
   const surface = css('--surface'), ink = css('--text'), muted = css('--muted');
@@ -1891,7 +1916,7 @@ async function renderRipartizione(v) {
   const manualRow = (it = {}) => `<div class="sp-mrow">
       <input data-m="name" maxlength="60" placeholder="Item (e.g. Mortgage, Groceries, Unexpected)" value="${esc(it.name ?? '')}">
       <select data-m="account">${state.accounts.map((a) => `<option value="${a.id}" ${+it.account_id === a.id ? 'selected' : ''}>${esc(a.name)}</option>`).join('')}</select>
-      <input data-m="amount" inputmode="decimal" placeholder="€ / month" value="${it.amount ? moneyInput(it.amount) : ''}">
+      <input data-m="amount" inputmode="decimal" placeholder="${CUR_SYM} / month" value="${it.amount ? moneyInput(it.amount) : ''}">
       <select data-m="rule">${SPLIT_RULES.map(([k, l]) => `<option value="${k}" ${(it.rule || 'prop') === k ? 'selected' : ''}>${l}</option>`).join('')}</select>
       <button class="icon-btn sm" data-m-del title="Remove">✕</button></div>`;
   const parseManual = () => { try { return JSON.parse(state.settings.split_manual || '[]'); } catch { return []; } };
@@ -1914,8 +1939,8 @@ async function renderRipartizione(v) {
           <label class="field full">Calculation basis <select id="sp-base">${Object.entries(BASE_LABEL).map(([k, l]) => `<option value="${k}" ${s.split_base === k ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
           <label class="field">Averaging period <select id="sp-months">${[3, 6, 12, 24].map((m) => `<option value="${m}" ${+s.split_months === m ? 'selected' : ''}>Last ${m} full months</option>`).join('')}<option value="all" ${s.split_months === 'all' ? 'selected' : ''}>Entire history</option></select></label>
           <label class="field">Margin for unexpected costs (%) <input id="sp-margin" type="number" min="0" max="50" step="1" value="${esc(s.split_margin)}"></label>
-          <label class="field">Round contributions to <select id="sp-round">${[1, 5, 10, 50].map((r) => `<option value="${r}" ${+s.split_round === r ? 'selected' : ''}>${r} €</option>`).join('')}</select></label>
-          <label class="field">Minimum contribution (€) <input id="sp-min" type="number" min="0" step="5" value="${esc(s.split_minimum)}"></label>
+          <label class="field">Round contributions to <select id="sp-round">${[1, 5, 10, 50].map((r) => `<option value="${r}" ${+s.split_round === r ? 'selected' : ''}>${esc(money0(r * 100))}</option>`).join('')}</select></label>
+          <label class="field">Minimum contribution (${CUR_SYM}) <input id="sp-min" type="number" min="0" step="5" value="${esc(s.split_minimum)}"></label>
         </div></div>
     </div>
     <div class="card" id="sp-manual" style="margin-bottom:18px"><div class="card-head"><div><h3>✏️ Amounts entered by hand</h3>
@@ -2197,12 +2222,12 @@ async function renderMutuo(v) {
     ${plans.map((p, i) => `<div class="card mt-plan" style="margin-bottom:18px">
       <div class="card-head"><div><h3>${esc(p.name)}</h3><p class="muted small" style="margin:3px 0 0">${esc(p.account)} · ${money0(p.principal)} in ${p.installments} installments · rate ${p.rate_known ? esc(p.rate_label) : '<span class="tag warn">not specified: calculated at 0%</span>'} · ends ${esc(fmtDate(p.end_date))}</p></div>
         <a class="btn btn-sm" href="#/movimenti?${qs({ recurring_id: p.id })}">📄 Installments paid</a></div>
-      ${p.index_missing ? `<div class="sp-warn card" style="margin-bottom:12px">⚠️ The current value of the ${esc(p.rate_index)} is missing: the variable part of the schedule is indicative (calculated with a 0% index, i.e. spread only, ${String(p.spread).replace('.', ',')}%). Enter it in the mortgage's recurring item (Recurring → Edit → Rate).</div>` : ''}
-      ${p.rate_change ? `<div class="mt-change">🔁 From installment ${p.rate_change.n} (${esc(fmtDate(p.rate_change.date))}) the rate becomes <b>${String(+p.rate_change.rate.toFixed(3)).replace('.', ',')}%</b>${p.index_missing ? ' (estimated)' : ''} and the installment becomes about <b>${money(p.rate_change.installment)}</b>.</div>` : ''}
+      ${p.index_missing ? `<div class="sp-warn card" style="margin-bottom:12px">⚠️ The current value of the ${esc(p.rate_index)} is missing: the variable part of the schedule is indicative (calculated with a 0% index, i.e. spread only, ${decInput(p.spread)}%). Enter it in the mortgage's recurring item (Recurring → Edit → Rate).</div>` : ''}
+      ${p.rate_change ? `<div class="mt-change">🔁 From installment ${p.rate_change.n} (${esc(fmtDate(p.rate_change.date))}) the rate becomes <b>${num(p.rate_change.rate, 3)}%</b>${p.index_missing ? ' (estimated)' : ''} and the installment becomes about <b>${money(p.rate_change.installment)}</b>.</div>` : ''}
       <div class="mt-grid">
         <div class="rec-stats" style="grid-template-columns:repeat(3,minmax(0,1fr))">
           <div class="rec-stat"><span>Current installment</span><b>${money(p.installment)}</b></div>
-          <div class="rec-stat"><span>Current rate</span><b>${String(+p.current_rate.toFixed(3)).replace('.', ',')}%</b></div>
+          <div class="rec-stat"><span>Current rate</span><b>${num(p.current_rate, 3)}%</b></div>
           <div class="rec-stat"><span>Paid</span><b>${p.paid} / ${p.installments}</b></div>
           <div class="rec-stat"><span>Remaining</span><b>${money0(p.residual)}</b></div>
           <div class="rec-stat"><span>Interest paid</span><b>${money0(p.interest_paid)}</b></div>
@@ -2212,12 +2237,12 @@ async function renderMutuo(v) {
       </div>
       <details class="mt-sched"><summary>Full amortization schedule (${p.schedule.length} installments)</summary>
         <div class="table-wrap" style="max-height:340px;overflow:auto"><table class="sp-table"><thead><tr><th>No.</th><th>Date</th><th class="right">Rate</th><th class="right">Installment</th><th class="right">Principal</th><th class="right">Interest</th><th class="right">Remaining</th></tr></thead>
-        <tbody>${p.schedule.map((r) => `<tr class="${r.n <= p.paid ? 'is-paid' : ''}"><td>${r.n}</td><td>${esc(fmtDate(r.date))}</td><td class="right muted">${String(+r.rate.toFixed(3)).replace('.', ',')}%</td><td class="right">${money(r.installment)}</td><td class="right">${money(r.capital)}</td><td class="right">${money(r.interest)}</td><td class="right">${money0(r.residual)}</td></tr>`).join('')}</tbody></table></div></details>
+        <tbody>${p.schedule.map((r) => `<tr class="${r.n <= p.paid ? 'is-paid' : ''}"><td>${r.n}</td><td>${esc(fmtDate(r.date))}</td><td class="right muted">${num(r.rate, 3)}%</td><td class="right">${money(r.installment)}</td><td class="right">${money(r.capital)}</td><td class="right">${money(r.interest)}</td><td class="right">${money0(r.residual)}</td></tr>`).join('')}</tbody></table></div></details>
     </div>`).join('')}
     <div class="card"><div class="card-head"><div><h3>🧮 Simulate an early repayment</h3><p class="muted small" style="margin:3px 0 0">You pay an extra amount: you can reduce the term (same installment) or the installment (same term).</p></div></div>
       <div class="form-grid" style="grid-template-columns:repeat(auto-fill,minmax(180px,1fr))">
         <label class="field">Loan <select id="sim-p">${plans.filter((p) => p.paid < p.installments).map((p) => `<option value="${p.id}">${esc(p.name)}</option>`).join('')}</select></label>
-        <label class="field">Extra amount (€) <input id="sim-x" inputmode="decimal" value="10000"></label>
+        <label class="field">Extra amount (${CUR_SYM}) <input id="sim-x" inputmode="decimal" value="10000"></label>
         <label class="field">After installment no. <input id="sim-n" type="number" min="0"></label>
         <label class="field">Goal <select id="sim-m"><option value="duration">Reduce the term</option><option value="installment">Reduce the installment</option></select></label>
       </div>
@@ -2264,13 +2289,13 @@ async function renderEmergenza(v) {
       <p class="muted small" style="margin:3px 0 0">How many months of expenses the <b>available reserve</b> would cover: the accounts plus uninvested broker cash and money market ETFs (available within a few days), using the average spending of the last ${em.months_basis} months. Stocks, bonds and funds do not count.</p></div>
       <label class="field" style="flex-direction:row;align-items:center;gap:8px">Target <input id="em-target" type="number" min="1" max="36" step="1" value="${em.target_months}" style="width:70px"> months</label></div>
       <div class="em-grid">
-        <div class="em-big"><div class="em-months ${ratio >= 1 ? 'pos' : ratio >= 0.5 ? '' : 'neg'}">${months == null ? '—' : months.toLocaleString('it-IT', { maximumFractionDigits: 1 })}</div><div class="muted">months covered</div></div>
+        <div class="em-big"><div class="em-months ${ratio >= 1 ? 'pos' : ratio >= 0.5 ? '' : 'neg'}">${months == null ? '—' : num(months)}</div><div class="muted">months covered</div></div>
         <div style="flex:1;min-width:0">
           <div class="budget-row" style="padding-top:0"><div class="top"><span>Available reserve <b>${money0(em.liquidity)}</b></span><span class="muted">target ${money0(em.target_amount)}</span></div>
             <div class="bar ${ratio < 0.5 ? 'over' : ''}"><i style="width:${Math.min(100, ratio * 100).toFixed(1)}%"></i></div></div>
           <div class="rec-stats" style="grid-template-columns:repeat(3,minmax(0,1fr));margin-top:8px">
             <div class="rec-stat"><span>Average spending / month</span><b>${money0(em.avg_expenses)}</b></div>
-            <div class="rec-stat"><span>Fixed expenses only</span><b>${money0(em.fixed_monthly)} → ${em.months_fixed == null ? '—' : em.months_fixed.toLocaleString('it-IT', { maximumFractionDigits: 1 }) + ' months'}</b></div>
+            <div class="rec-stat"><span>Fixed expenses only</span><b>${money0(em.fixed_monthly)} → ${em.months_fixed == null ? '—' : num(em.months_fixed) + ' months'}</b></div>
             <div class="rec-stat"><span>Missing</span><b>${money0(Math.max(0, em.target_amount - em.liquidity))}</b></div></div>
           <div class="em-parts">
             <div class="em-part"><span>💧 Cash in accounts <span class="muted small">(the same as in the Calendar)</span></span><b>${money0(em.operational)}</b>
@@ -2311,11 +2336,11 @@ function goalModal(gl = null) {
   const m = openModal(gl ? 'Edit goal' : 'New goal', `
     <div class="form-grid">
       <label class="field full">Name <input id="gl-name" maxlength="60" value="${esc(x.name)}" placeholder="E.g. Summer holiday, New car" autofocus></label>
-      <label class="field">Target amount (€) <input id="gl-target" inputmode="decimal" value="${moneyInput(x.target)}"></label>
+      <label class="field">Target amount (${CUR_SYM}) <input id="gl-target" inputmode="decimal" value="${moneyInput(x.target)}"></label>
       <label class="field">By (optional) <input id="gl-date" type="date" value="${esc(x.target_date || '')}"></label>
       <label class="field full">How progress is measured <select id="gl-acc"><option value="">Amount set aside, entered by hand</option>
         ${accs.map((a) => `<option value="${a.id}" ${a.id === x.account_id ? 'selected' : ''}>Balance of the account ${esc(a.name)}</option>`).join('')}</select></label>
-      <label class="field" id="gl-saved-wrap">Set aside so far (€) <input id="gl-saved" inputmode="decimal" value="${moneyInput(x.saved)}"></label>
+      <label class="field" id="gl-saved-wrap">Set aside so far (${CUR_SYM}) <input id="gl-saved" inputmode="decimal" value="${moneyInput(x.saved)}"></label>
       <div class="field full">Color ${swatchPicker('gl-color', x.color)}</div>
       <div class="field full">Icon ${emojiPicker('gl-icon', x.icon)}</div>
     </div>
@@ -2349,8 +2374,8 @@ const CLASS_HELP = {
   'materie prime': '📈 Investment: purchases and sales count as <b>invested</b>.', immobiliare: '📈 Investment: purchases and sales count as <b>invested</b>.',
   crypto: '📈 Investment: purchases and sales count as <b>invested</b>.', altro: '📈 Investment: purchases and sales count as <b>invested</b>.',
 };
-const ASSET_COLORS = { azioni: '#7b52ab', obbligazioni: '#3f86dc', monetario: '#2fbf71', 'materie prime': '#fcc419', immobiliare: '#f59f45', crypto: '#e45bc4', altro: '#8b8fa8', 'non specificato': '#c9976a' };
-const pctSigned = (x) => (x == null ? '—' : `${x > 0 ? '+' : ''}${(x * 100).toLocaleString('it-IT', { maximumFractionDigits: 2 })}%`);
+const ASSET_COLORS = { azioni: '#7b52ab', obbligazioni: '#3f86dc', monetario: '#2fbf71', 'materie prime': '#fcc419', immobiliare: '#f59f45', crypto: '#e45bc4', altro: '#8b8fa8', 'non specificato': '#c9976a', 'liquidità': '#94a3b8' };
+const pctSigned = (x) => (x == null ? '—' : `${x > 0 ? '+' : ''}${num(x * 100, 2)}%`);
 
 async function renderInvestimenti(v) {
   S.invMonths ||= '24';
@@ -2393,6 +2418,9 @@ async function renderInvestimenti(v) {
         <div class="legend" style="margin-top:10px">${d.allocation.map((x) => `<div class="legend-item"><span class="dot" style="background:${ASSET_COLORS[x.name] || '#8b8fa8'}"></span><span>${esc(assetLabel(x.name))}<span class="pct">${pct(x.value / d.allocation.reduce((s, y) => s + y.value, 0))}</span></span><b class="num">${money0(x.value)}</b></div>`).join('')}</div>`
         : '<div class="empty">Add securities to see the allocation</div>'}</div>
     </div>
+    <details class="card rb-card" id="rb" ${S.rbOpen ? 'open' : ''}><summary class="card-head"><div><h3>🧭 Rebalancing</h3>
+      <p class="muted small" style="margin:3px 0 0">Target allocation, drift and what to buy or sell to get back to it. A calculator: it records nothing.</p></div>
+      <span class="rb-status muted small"></span></summary><div class="rb-body"><div class="loading">Loading…</div></div></details>
     ${d.accounts.map((a) => `<div class="card" style="margin-bottom:18px">
       <div class="card-head"><div><h3>${esc(a.icon)} ${esc(a.name)}</h3><p class="muted small" style="margin:3px 0 0">${a.has_trades ? 'value = cash + securities (from trades)' : a.value_date ? `value as of ${esc(fmtDate(a.value_date))}` : '<span class="tag warn">no valuation: showing the book balance</span>'}</p>
         ${a.idle ? `<p class="small" style="margin:6px 0 0"><span class="tag warn">💤 ${money(a.idle.cash)} of cash idle for ${a.idle.days} days</span> <span class="muted">if you have already invested it, record the purchase with "＋ Trade"</span></p>` : ''}</div>
@@ -2409,6 +2437,9 @@ async function renderInvestimenti(v) {
     </div>`).join('')}`;
 
   $('#iv-new').onclick = () => accountModal(null, { type: 'investimenti', icon: '📈', name: '' });
+  const rb = $('#rb');
+  rb.addEventListener('toggle', () => { S.rbOpen = rb.open; if (rb.open && !rb.dataset.ready) { rb.dataset.ready = '1'; rebalanceCard(rb); } });
+  if (rb.open) { rb.dataset.ready = '1'; rebalanceCard(rb); }
   $('#iv-months').onchange = (e) => { S.invMonths = e.target.value; route(); };
   if ($('#iv-refresh')) $('#iv-refresh').onclick = async (e) => {
     e.target.disabled = true; e.target.textContent = '⏳ Updating…';
@@ -2452,7 +2483,98 @@ async function renderInvestimenti(v) {
   });
 }
 
-const qtyFmt = (q) => (q ?? 0).toLocaleString('it-IT', { maximumFractionDigits: 6 });
+const qtyFmt = (q) => num(q, 6);
+
+// rebalancing calculator: targets per asset class or per security, drift thresholds, buys only (new money) or buys and sells
+async function rebalanceCard(det) {
+  const box = $('.rb-body', det);
+  let cfg, res;
+  const pct1 = (x) => `${num(x, 1)}%`;
+  const calc = async (save = false) => {
+    try {
+      const r = await api('/investments/rebalance', { method: 'POST', body: { ...cfg, save } });
+      ({ config: cfg, result: res } = r);
+      draw();
+      if (save) toast('Rebalancing settings saved');
+    } catch (e) { fail(e); }
+  };
+  const label = (r) => {
+    if (r.kind === 'security') return `<b>${esc(r.label)}</b><div class="muted small">${esc(r.name || '')}${r.name ? ' · ' : ''}${esc(r.account)} · ${esc(assetLabel(r.asset_class))}</div>`;
+    if (r.kind === 'account') return `<b>${esc(r.label)}</b><div class="muted small">account valued as a whole</div>`;
+    return `<span class="dot" style="background:${ASSET_COLORS[r.key] || '#8b8fa8'}"></span> <b>${esc(assetLabel(r.key === 'cash' ? 'liquidità' : r.key))}</b>${r.kind === 'cash' ? '<div class="muted small">uninvested cash on the broker</div>' : ''}`;
+  };
+  const trade = (r) => {
+    if (!r.trade) return '<span class="muted">—</span>';
+    const verb = r.kind === 'cash' ? (r.trade > 0 ? 'Keep' : 'Use') : r.trade > 0 ? 'Buy' : 'Sell';
+    const parts = (r.holdings || []).filter((x) => x.trade).map((x) => `${esc(x.ticker)} ${x.trade > 0 ? '+' : '−'}${esc(money0(Math.abs(x.trade)))}${x.units ? ` (≈ ${qtyFmt(Math.abs(x.units))})` : ''}`);
+    const hint = r.units ? `≈ ${qtyFmt(Math.abs(r.units))} units` : parts.length ? parts.join(' · ')
+      : r.kind === 'class' && r.trade > 0 ? 'no security of this class yet: choose one' : '';
+    return `<b class="${r.trade > 0 ? 'pos' : 'neg'}">${verb} ${esc(money0(Math.abs(r.trade)))}</b>${hint ? `<div class="muted small">${hint}</div>` : ''}`;
+  };
+  const draw = () => {
+    const tg = cfg.targets[cfg.mode] || {};
+    const chosen = cfg.accounts == null ? null : new Set(cfg.accounts);
+    const status = !res.total ? 'No investments to rebalance in the accounts chosen'
+      : !res.has_targets ? `Targets add up to ${pct1(res.sum_targets)}: they must make 100%`
+        : res.needs_rebalance ? `⚠️ Rebalancing needed · largest drift ${num(res.max_drift, 1)} points` : `✅ Within the thresholds · largest drift ${num(res.max_drift, 1)} points`;
+    $('.rb-status', det).innerHTML = `<span class="tag ${res.has_targets ? (res.needs_rebalance ? 'warn' : 'ai') : ''}">${esc(status)}</span>`;
+    const noTrades = res.has_targets && res.needs_rebalance && !cfg.sells && !res.contribution;
+    box.innerHTML = `<div class="rb-controls">
+        <div class="seg" id="rb-mode">${[['class', 'By asset class'], ['security', 'By security']].map(([k, l]) => `<button data-m="${k}" class="${cfg.mode === k ? 'on' : ''}">${l}</button>`).join('')}</div>
+        <div class="rb-accs">${res.accounts.map((a) => `<label class="check"><input type="checkbox" data-acc="${a.id}" ${!chosen || chosen.has(a.id) ? 'checked' : ''}> ${esc(a.icon)} ${esc(a.name)} <span class="muted small">${esc(money0(a.value))}</span></label>`).join('')}</div>
+      </div>
+      <div class="rb-controls">
+        <label class="field">Drift threshold (points) <input id="rb-abs" inputmode="decimal" value="${cfg.drift_abs ?? ''}" placeholder="off" title="Rebalance when a weight is this many percentage points away from its target"></label>
+        <label class="field">or relative (% of the target) <input id="rb-rel" inputmode="decimal" value="${cfg.drift_rel ?? ''}" placeholder="off" title="e.g. 25: a 20% target is off below 15% or above 25%"></label>
+        <label class="field">New money to invest (${CUR_SYM}) <input id="rb-new" inputmode="decimal" value="${moneyInput(cfg.contribution)}" placeholder="${CUR === 'USD' ? '0.00' : '0,00'}"></label>
+        <label class="check" title="Without sells, only the new money is used, on the items below target"><input type="checkbox" id="rb-sells" ${cfg.sells ? 'checked' : ''}> Allow sells (exactly back to the targets)</label>
+      </div>
+      <div class="table-wrap"><table class="sp-table inv-table rb-table"><thead><tr><th>${cfg.mode === 'class' ? 'Asset class' : 'Security'}</th><th class="right">Value</th><th class="right">Now</th>
+        <th class="right">Target %</th><th class="right">Drift</th><th>To do</th><th class="right">After</th></tr></thead><tbody>
+        ${res.rows.map((r) => `<tr class="${r.off ? 'rb-off' : ''}"><td>${label(r)}</td><td class="num right">${esc(money0(r.value))}</td><td class="num right">${pct1(r.pct)}</td>
+          <td class="right"><input class="rb-t" data-k="${esc(r.key)}" inputmode="decimal" value="${tg[r.key] != null ? num(tg[r.key], 2) : ''}" placeholder="0"></td>
+          <td class="num right ${r.off ? 'neg' : 'muted'}">${r.target || r.value ? `${r.drift > 0 ? '+' : ''}${num(r.drift, 1)}` : ''}${r.off ? ' ⚠️' : ''}</td>
+          <td>${trade(r)}</td><td class="num right">${r.trade ? pct1(r.after_pct) : ''}</td></tr>`).join('')}</tbody>
+        <tfoot><tr><td>Total</td><td class="num right">${esc(money0(res.total))}</td><td></td><td class="num right ${res.has_targets ? '' : 'neg'}">${pct1(res.sum_targets)}</td><td></td>
+          <td>${res.contribution ? `+ ${esc(money0(res.contribution))} new money` : ''}</td><td class="num right">${res.contribution ? esc(money0(res.total_after)) : ''}</td></tr></tfoot></table></div>
+      ${res.missing.length ? `<p class="small"><span class="tag warn">Targets not used</span> ${res.missing.map((m) => `${esc(m.label)} ${pct1(m.target)}`).join(' · ')} <span class="muted">(security no longer owned or account not counted)</span> <button class="btn btn-sm" id="rb-drop">Remove them</button></p>` : ''}
+      ${noTrades ? '<p class="muted small">To see the trades, enter the new money to invest or allow sells.</p>' : ''}
+      <div class="rb-foot"><span class="muted small">Values as in the Allocation chart (latest prices). Drift = current weight − target, in percentage points. Taxes and fees of the trades are not included.</span><span class="spacer"></span>
+        <button class="btn btn-sm" id="rb-now" title="Targets = today's weights">Use current weights</button><button class="btn btn-sm" id="rb-clear">Clear targets</button>
+        <button class="btn btn-sm btn-primary" id="rb-save">Save settings</button></div>`;
+    $$('#rb-mode button', box).forEach((b) => (b.onclick = () => { cfg.mode = b.dataset.m; calc(); }));
+    $$('[data-acc]', box).forEach((c) => (c.onchange = () => {
+      const ids = $$('[data-acc]', box).filter((x) => x.checked).map((x) => +x.dataset.acc);
+      cfg.accounts = ids.length === res.accounts.length ? null : ids;
+      calc();
+    }));
+    const numOrNull = (s) => { const v = parseQty(s); return v === '' ? null : v; };
+    $('#rb-abs', box).onchange = (e) => { cfg.drift_abs = numOrNull(e.target.value); calc(); };
+    $('#rb-rel', box).onchange = (e) => { cfg.drift_rel = numOrNull(e.target.value); calc(); };
+    $('#rb-new', box).onchange = (e) => { const c = parseMoney(e.target.value); if (Number.isNaN(c)) return fail(new Error('Invalid amount')); cfg.contribution = c; calc(); };
+    $('#rb-sells', box).onchange = (e) => { cfg.sells = e.target.checked; calc(); };
+    $$('.rb-t', box).forEach((inp) => (inp.onchange = () => {
+      const t = cfg.targets[cfg.mode] ||= {}, v = parseQty(inp.value);
+      if (v === '' || +v === 0) delete t[inp.dataset.k]; else t[inp.dataset.k] = v;
+      calc();
+    }));
+    $('#rb-now', box).onclick = () => {
+      const t = {};
+      res.rows.filter((r) => r.value > 0).forEach((r) => { t[r.key] = Math.round(r.pct * 10) / 10; });
+      const keys = Object.keys(t), diff = Math.round((100 - keys.reduce((s, k) => s + t[k], 0)) * 10) / 10;
+      if (keys.length && diff) t[keys[0]] = Math.round((t[keys[0]] + diff) * 10) / 10;  // rounding: still 100% in total
+      cfg.targets[cfg.mode] = t;
+      calc();
+    };
+    $('#rb-clear', box).onclick = () => { cfg.targets[cfg.mode] = {}; calc(); };
+    $('#rb-save', box).onclick = () => calc(true);
+    if ($('#rb-drop', box)) $('#rb-drop', box).onclick = () => { res.missing.forEach((m) => delete cfg.targets[cfg.mode][m.key]); calc(); };
+  };
+  try {
+    ({ config: cfg, result: res } = await api('/investments/rebalance'));
+    draw();
+  } catch (e) { box.innerHTML = `<div class="empty">${esc(e.message || e)}</div>`; }
+}
 const signedMoney0 = (c) => (c >= 0 ? '+' : '') + money0(c);
 function holdingsTable(a) {
   const open = a.holdings.filter((h) => !h.trades || h.quantity > 1e-9);  // securities sold entirely stay in the trades
@@ -2461,7 +2583,7 @@ function holdingsTable(a) {
   // order: security → quantity → purchase (average cost, cost) → today (price, value) → result; numbers aligned in columns
   const priceCell = (h) => (h.price != null
     // everything in euros like average cost, cost and value; the original quote (e.g. in dollars) stays below, in small print
-    ? `${esc(unitPrice(h.price_eur ?? h.price, h.price_eur != null ? 'EUR' : h.currency))}<div class="muted small">${h.currency && h.currency !== 'EUR' ? `${esc(unitPrice(h.price, h.currency))} · ` : ''}${esc(fmtDate(h.price_date))}</div>`
+    ? `${esc(unitPrice(h.price_eur ?? h.price, h.price_eur != null ? CUR : h.currency))}<div class="muted small">${h.currency && h.currency !== CUR ? `${esc(unitPrice(h.price, h.currency))} · ` : ''}${esc(fmtDate(h.price_date))}</div>`
     : h.estimated_price ? '<span class="muted small">last trade<br>price</span>' : '<span class="muted">needs updating</span>');
   return `<div class="table-wrap" style="margin-top:12px"><table class="sp-table inv-table"><thead>
       ${t ? '<tr class="inv-groups"><th colspan="3"></th><th colspan="2" class="center">Purchase</th><th colspan="2" class="center">Today</th><th colspan="2"></th></tr>' : ''}
@@ -2501,7 +2623,7 @@ async function loadTrades(det, aid) {
 function tradeModal(a, o = null, preset = {}) {
   const hs = a.holdings;
   const x = { kind: 'buy', date: todayIso(), holding_id: '', quantity: '', price: '', fees: 0, amount: 0, notes: '', ...preset, ...(o || {}) };
-  const dec = (v, d = 6) => (v === '' || v == null ? '' : (+v).toLocaleString('it-IT', { maximumFractionDigits: d, useGrouping: false }));
+  const dec = (v, d = 6) => (v === '' || v == null ? '' : (+v).toLocaleString(LOCALE, { maximumFractionDigits: d, useGrouping: false }));
   const tradeTotal = ['buy', 'sell'].includes(x.kind) && x.amount ? Math.abs(x.amount) : '';
   const m = openModal(`${o ? 'Edit trade' : 'New trade'} · ${a.name}`, `
     <div class="form-grid">
@@ -2509,10 +2631,10 @@ function tradeModal(a, o = null, preset = {}) {
       <label class="field">Date <input id="tr-date" type="date" value="${esc(x.date)}"></label>
       <label class="field full" data-f="hold">Security <select id="tr-hold"><option value="">—</option>${hs.map((h) => `<option value="${h.id}" ${h.id === +x.holding_id ? 'selected' : ''}>${esc(h.ticker)} · ${esc(h.name)}</option>`).join('')}</select></label>
       <label class="field" data-f="qty"><span id="tr-qty-l">Quantity</span> <input id="tr-qty" inputmode="decimal" value="${dec(x.kind === 'sell' ? Math.abs(x.quantity) : x.quantity)}"></label>
-      <label class="field" data-f="price">Unit price (€) <input id="tr-price" inputmode="decimal" value="${dec(x.price, 4)}"></label>
-      <label class="field" data-f="total">Total amount (€) <input id="tr-total" inputmode="decimal" value="${tradeTotal ? moneyInput(tradeTotal) : ''}" placeholder="optional"></label>
-      <label class="field" data-f="fees">Fees (€) <input id="tr-fees" inputmode="decimal" value="${x.fees ? moneyInput(x.fees) : ''}"></label>
-      <label class="field" data-f="amount">Amount (€) <input id="tr-amount" inputmode="decimal" value="${!['buy', 'sell', 'split'].includes(x.kind) && x.amount ? moneyInput(Math.abs(x.amount)) : ''}"></label>
+      <label class="field" data-f="price">Unit price (${CUR_SYM}) <input id="tr-price" inputmode="decimal" value="${dec(x.price, 4)}"></label>
+      <label class="field" data-f="total">Total amount (${CUR_SYM}) <input id="tr-total" inputmode="decimal" value="${tradeTotal ? moneyInput(tradeTotal) : ''}" placeholder="optional"></label>
+      <label class="field" data-f="fees">Fees (${CUR_SYM}) <input id="tr-fees" inputmode="decimal" value="${x.fees ? moneyInput(x.fees) : ''}"></label>
+      <label class="field" data-f="amount">Amount (${CUR_SYM}) <input id="tr-amount" inputmode="decimal" value="${!['buy', 'sell', 'split'].includes(x.kind) && x.amount ? moneyInput(Math.abs(x.amount)) : ''}"></label>
       <label class="field full">Notes <input id="tr-notes" maxlength="200" value="${esc(x.notes || '')}"></label>
     </div>
     <p class="muted small" id="tr-hint"></p>
@@ -2555,7 +2677,7 @@ function valuationModal(accountId) {
   const m = openModal('Account value', `
     <p class="muted small" style="margin:0 0 14px">The market value of the account on a date (e.g. from the broker's website). If you enter it for a date that already exists, it is replaced.</p>
     <div class="form-grid"><label class="field">Date <input id="vl-date" type="date" value="${todayIso()}"></label>
-      <label class="field">Value (€) <input id="vl-value" inputmode="decimal" autofocus></label></div>
+      <label class="field">Value (${CUR_SYM}) <input id="vl-value" inputmode="decimal" autofocus></label></div>
     <div class="modal-foot"><button class="btn" data-cancel>Cancel</button><button class="btn btn-primary" id="vl-save">Save</button></div>`);
   $('[data-cancel]', m).onclick = closeModal;
   $('#vl-save', m).onclick = async () => {
@@ -2569,7 +2691,7 @@ function holdingModal(accountId, h = null) {
     <p class="muted small" style="margin:0 0 14px">Use the Yahoo Finance ticker with the exchange suffix: <b>.MI</b> Milan, <b>.DE</b> Xetra, <b>.AS</b> Amsterdam, <b>.PA</b> Paris (e.g. VWCE.DE, SWDA.MI). With "Update prices" the account value is calculated automatically.</p>
     <div class="form-grid">
       <label class="field">Ticker <input id="hd-ticker" maxlength="30" value="${esc(x.ticker)}" placeholder="VWCE.DE" autofocus></label>
-      <label class="field">Quantity <input id="hd-qty" inputmode="decimal" value="${x.quantity === '' ? '' : String(x.quantity).replace('.', ',')}" ${x.trades ? 'disabled title="Calculated from the trades"' : ''}></label>
+      <label class="field">Quantity <input id="hd-qty" inputmode="decimal" value="${x.quantity === '' ? '' : decInput(x.quantity)}" ${x.trades ? 'disabled title="Calculated from the trades"' : ''}></label>
       <label class="field full">Description <input id="hd-name" maxlength="80" value="${esc(x.name)}" placeholder="E.g. Vanguard FTSE All-World"></label>
       <label class="field">Class <select id="hd-class">${ASSET_CLASSES.map((c) => `<option value="${esc(c)}" ${c === x.asset_class ? 'selected' : ''}>${esc(assetLabel(c))}</option>`).join('')}</select></label>
       <p class="muted small full" id="hd-hint" style="margin:0">${CLASS_HELP[x.asset_class] || ''}</p>
@@ -2783,6 +2905,8 @@ async function renderImpostazioni(v) {
     <div class="card"><div class="card-head"><h3>🎨 Appearance</h3></div>
       <div class="settings-row"><div><b>Theme</b><p class="muted small">Light, dark or same as the system</p></div>
         <div class="seg" id="s-theme">${[['system', '💻 System'], ['light', '☀️ Light'], ['dark', '🌙 Dark']].map(([k, l]) => `<button data-t="${k}" class="${th === k ? 'on' : ''}">${l}</button>`).join('')}</div></div>
+      <div class="settings-row"><div><b>Reference currency</b><p class="muted small">Symbol and number format of every space: ${esc(money(123456))}. A label only: amounts are not converted</p></div>
+        <div class="seg" id="s-cur">${Object.entries(CURRENCIES).map(([k, c]) => `<button data-c="${k}" class="${CUR === k ? 'on' : ''}" title="${esc(c.name)}">${esc(c.symbol)} ${k}</button>`).join('')}</div></div>
       <div class="settings-row"><div><b>Shortcuts</b><p class="muted small"><span class="kbd">N</span> new transaction · <span class="kbd">Esc</span> closes dialogs</p></div></div>
     </div>
     <div class="card"><div class="card-head"><h3>💾 Backup and restore</h3></div>
@@ -2854,6 +2978,21 @@ async function renderImpostazioni(v) {
     try { const r = await api('/auth/settings', { method: 'PUT', body: { auto_lock: +e.target.value } }); AUTH.status.auto_lock = r.auto_lock; toast('Auto-lock updated'); } catch (err) { fail(err); }
   };
   $$('#s-theme button').forEach((b) => (b.onclick = () => setTheme(b.dataset.t)));
+  $$('#s-cur button').forEach((b) => (b.onclick = async () => {
+    const code = b.dataset.c;
+    if (code === CUR) return;
+    const c = CURRENCIES[code];
+    if (!(await confirmDialog(`HomeCoin will show every amount in ${c.name} (${c.symbol}) with the ${code === 'USD' ? 'US number format: $1,234.56' : 'European number format: 1.234,56 €'}. `
+      + 'Amounts are NOT converted: 1.000 stays 1.000, only the symbol changes. Use it only if your accounts are kept in that currency. '
+      + 'Security prices downloaded so far are cleared: use "Update prices" in Investments to get them again in the new currency.',
+    { ok: `Switch to ${code}`, danger: false, title: '⚠️ Change the reference currency' }))) return;
+    try {
+      await api('/settings/currency', { method: 'PUT', body: { currency: code, confirm: true } });
+      await loadMeta();
+      toast(`Reference currency: ${c.name}`);
+      route();
+    } catch (e) { fail(e); }
+  }));
   $('#s-pf-new').onclick = () => portfolioModal();
   $$('[data-pf-go]', v).forEach((b) => (b.onclick = () => switchPortfolio(+b.dataset.pfGo)));
   $$('[data-pf-edit]', v).forEach((b) => (b.onclick = () => portfolioModal(S.portfolios.find((p) => p.id === +b.dataset.pfEdit))));

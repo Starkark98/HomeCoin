@@ -2,7 +2,7 @@
 
 # HomeCoin *by Starkark98*
 
-![Version](https://img.shields.io/badge/version-1.0.1-8b5cf6)
+![Version](https://img.shields.io/badge/version-1.1.0-8b5cf6)
 ![Python](https://img.shields.io/badge/Python-3.12%20%7C%203.13-3776AB?logo=python&logoColor=white)
 ![Platform](https://img.shields.io/badge/platform-Windows-0078D6)
 ![Data](https://img.shields.io/badge/data-encrypted%2C%20on%20your%20PC-16a34a)
@@ -77,17 +77,17 @@ All taken from the demo version, with made-up data.
 | **Reports** | Same periods as the dashboard (month, 3/6/12 months, year, all); category × month heatmap, stacked chart with average and interactive legend, Excel export |
 | **Budgets** | Monthly budget per category, editable inline, spent, 3-month average, overspending alerts |
 | **Calendar** | Upcoming payments for the next 1–12 months (including transfers coming from other spaces) on a monthly grid, with confirmed and estimated amounts, projected cash and the lowest point of the period |
-| **Mortgage & loans** | Fixed, variable or mixed rate (e.g. 3% fixed for 5 years, then Euribor 3M + spread), amortization schedule with payment recalculation when the rate changes, interest paid and remaining, early-repayment simulation (APR and ancillary costs excluded) |
+| **Mortgage & loans** | Fixed, variable or mixed rate (e.g. 3% fixed for 5 years, then Euribor 3M + spread, or a 5/1 ARM on SOFR or the 1-year Treasury), European or US indexes, amortization schedule with payment recalculation when the rate changes, interest paid and remaining, early-repayment simulation (APR and ancillary costs excluded) |
 | **Fair split** | (household spaces) How much each person should contribute so that everyone saves the same share of their income; based on actual expenses, actual contributions or amounts entered by hand; categories proportional, split equally or excluded; rounding, minimum, safety margin; comparison with actual contributions and update of the recurring items |
 | **Goals & emergency fund** | Savings goals with the monthly amount needed (and each person's share in a household); emergency fund with the months of expenses covered by the available reserve |
-| **Investments & savings** | Trades with average cost and realized/unrealized gains; value, invested, gain, return %, XIRR, allocation; prices from Yahoo Finance (the only online feature, sends only tickers); savings rate and net worth |
+| **Investments & savings** | Trades with average cost and realized/unrealized gains; value, invested, gain, return %, XIRR, allocation; prices from Yahoo Finance (the only online feature, sends only tickers); **rebalancing calculator** (target allocation per asset class or per security, accounts to count, drift threshold in points or relative, new money only or buys and sells); savings rate and net worth |
 | **Drill-down** | Click categories, cells, bars and items → Transactions already filtered |
 | **Categories** | Colors and icons, monthly budgets, automatic rules |
 | **Activity log** | Important events of the last 12 months, filterable: sign-ins (including failed attempts), security, changes, deletions, imports and exports; no noise |
 | **Optional tabs** | Always present: Dashboard, Transactions, Accounts, Recurring, Import, Categories, Reports, Activity log, Settings. Per space you turn on the others: Budgets, Goals, Emergency fund, Calendar, Mortgage, Fair split, Investments, Savings. Hiding a tab never deletes its data |
-| **Settings** | Light/dark theme, security check, encrypted backup and restore, export |
+| **Settings** | Light/dark theme, reference currency (€ or $), security check, encrypted backup and restore, export |
 
-The interface is in English. Amounts use the European format (`1.234,56 €`), which is also how you type them (`1.500` = 1,500 €, `1.234,56`, `1234.56`).
+The interface is in English. The **reference currency** is euro or US dollar (Settings), for the whole installation: it is a label, amounts are never converted, so choose the currency your accounts are kept in. The number format follows it: in euro `1.234,56 €`, which is also how you type them (`1.500` = 1,500 €, `1.234,56`, `1234.56`); in dollars `$1,234.56` (`1,500` = $1,500, `1.5` = $1.50).
 
 Version history is in [CHANGELOG.md](CHANGELOG.md).
 
@@ -134,7 +134,7 @@ Double-click **`HomeCoin-Demo.cmd`** (port 8766, it can run next to HomeCoin). I
 - One user per installation: HomeCoin is a personal tool, not a multi-user server. Do not expose it on a network.
 - Bank import depends on the statement format: columns are detected automatically, but some exports may need a quick check in the preview.
 - Prices come from Yahoo Finance and can be delayed, incomplete or missing for some funds.
-- Calculations use euro amounts; securities in other currencies are converted with the exchange rates available on Yahoo Finance.
+- One currency per installation (euro or US dollar): amounts in other currencies are not supported. Securities quoted in other currencies are converted into the reference currency with the exchange rates available on Yahoo Finance. Mortgage indexes (Euribor, SOFR, Treasury, Prime) are not downloaded: enter their current value by hand.
 
 ## Getting help
 
@@ -211,4 +211,4 @@ Because of the Commons Clause, HomeCoin is **source-available** software, not "o
 
 ---
 
-*HomeCoin by **Starkark98** · v1.0.1 · see the [changelog](CHANGELOG.md)*
+*HomeCoin by **Starkark98** · v1.1.0 · see the [changelog](CHANGELOG.md)*

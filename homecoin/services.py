@@ -3,7 +3,7 @@ import datetime as dt
 import threading
 from collections import Counter, defaultdict
 
-from .util import occurrence, normalize_desc, rule_matches, parse_date, MONTHLY_FACTOR
+from .util import CURRENCIES, CURRENCY, occurrence, normalize_desc, rule_matches, parse_date, MONTHLY_FACTOR
 
 MAX_GENERATE = 5000  # safety limit for recurring items with very old dates
 
@@ -122,7 +122,8 @@ def pac_buy(db, r, date):
     db.execute("""INSERT INTO trades(account_id, holding_id, date, kind, quantity, price, amount, fees, notes, source, external_id)
                   VALUES (?,?,?, 'buy', ?, ?, ?, 0, ?, 'recurring', ?)""",
                (h["account_id"], h["id"], date, round(r["amount"] / 100 / price, 6), price, -r["amount"],
-                f"Automatic purchase «{r['name']}» · estimated price {price:.4f} €: replace it with the real one",
+                f"Automatic purchase «{r['name']}» · estimated price {price:.4f} {CURRENCIES[CURRENCY['code']][0]}: "
+                "replace it with the real one",
                 f"pac:{r['id']}:{date}"))
     sync_holdings(db, h["account_id"])
     return True

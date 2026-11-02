@@ -25,6 +25,27 @@ OTHER_INVESTMENTS = {"Other investments (excluded)", "Altri investimenti (esclus
 # system transactions excluded from reports: neither income nor spending (adjustments stay a separate line of the balance)
 TECH_CATEGORIES = BALANCE_ADJUSTMENT | OTHER_INVESTMENTS
 
+# reference currency of the whole installation: a label only (amounts are never converted); market prices are converted
+# into it. code -> (symbol, number format of the UI: it-IT "1.234,56 €" or en-US "$1,234.56")
+CURRENCIES = {"EUR": ("€", "it-IT"), "USD": ("$", "en-US")}
+CURRENCY = {"code": "EUR"}  # current one, loaded from the settings when HomeCoin is unlocked (activity log texts)
+
+
+def currency_of(db):
+    r = db.execute("SELECT value FROM settings WHERE key = 'currency'").fetchone()
+    return r[0] if r and r[0] in CURRENCIES else "EUR"
+
+
+def fmt_money(cents, code=None):
+    """Amount for texts written by the server (activity log): 1.234,56 € or $1,234.56."""
+    code = code or CURRENCY["code"]
+    s = f"{abs(cents) / 100:,.2f}"
+    sign = "−" if cents < 0 else ""
+    if code == "USD":
+        return f"{sign}${s}"
+    return sign + s.replace(",", "_").replace(".", ",").replace("_", ".") + " €"
+
+
 DATE_FORMATS = (
     "%d/%m/%Y", "%d-%m-%Y", "%d.%m.%Y", "%Y-%m-%d", "%Y/%m/%d",
     "%d/%m/%y", "%d-%m-%y", "%d.%m.%y", "%Y%m%d",
@@ -49,7 +70,7 @@ def parse_number(value):
         if v != v or v in (float("inf"), float("-inf")):
             raise ValueError("invalid number")
         return v
-    s = str(value).strip().replace("€", "").replace(" ", "").replace(" ", "").replace("'", "").replace("−", "-")
+    s = str(value).strip().replace("€", "").replace("$", "").replace(" ", "").replace(" ", "").replace("'", "").replace("−", "-")
     if not s:
         return None
     if "," in s and "." in s:
@@ -89,7 +110,7 @@ def parse_amount(value):
     s = str(value).strip()
     if not s:
         return None
-    s = s.replace("€", "").replace("EUR", "").replace(" ", "").replace(" ", "").replace("'", "")
+    s = s.replace("€", "").replace("EUR", "").replace("US$", "").replace("$", "").replace("USD", "").replace(" ", "").replace(" ", "").replace("'", "")
     neg = False
     if s.startswith("(") and s.endswith(")"):
         neg, s = True, s[1:-1]

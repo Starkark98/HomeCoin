@@ -167,7 +167,7 @@ CREATE TABLE IF NOT EXISTS trades (
     created_at  TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS ix_trades_account ON trades(account_id, date);
--- month-end prices of securities (in EUR), to value investments correctly in past months
+-- month-end prices of securities (in the reference currency, despite the column name), to value past months correctly
 CREATE TABLE IF NOT EXISTS price_history (
     holding_id INTEGER NOT NULL REFERENCES holdings(id) ON DELETE CASCADE,
     month      TEXT NOT NULL,

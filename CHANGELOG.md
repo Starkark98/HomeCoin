@@ -2,6 +2,23 @@
 
 All notable changes to HomeCoin are listed here, newest first.
 
+## 1.1.0 — 2026-11-02
+
+**Reference currency**
+- Euro or US dollar for the whole installation (Settings → Appearance). It is a label: amounts are never converted, so choose the currency your accounts are kept in. A warning explains this before the change.
+- The number format follows the currency: `1.234,56 €` or `$1,234.56`, also when typing amounts, in exports to Excel and in the activity log.
+- Security prices are converted into the reference currency; prices downloaded before a change are cleared, to be updated again.
+- Bank statement import also recognizes amounts written with `$` or `USD`.
+
+**Mortgages and loans**
+- Variable and mixed-rate loans can use European indexes (Euribor 1M, 3M, 6M, 12M) or United States ones (SOFR 30-day average, Term SOFR 1M, 3M, 6M, 1-year Treasury CMT, Prime Rate). The default follows the reference currency; a "mixed" rate also covers hybrid ARMs (e.g. 5/1). As before, the current index value is entered by hand.
+
+**Rebalancing calculator** (Investments)
+- 🧭 Target allocation per asset class (with the broker's uninvested cash) or per security, choosing which investment accounts to count.
+- Drift from the target in percentage points, with a threshold in points and/or relative to the target; rows out of the threshold are highlighted.
+- What to do: invest only new money in the items below target, or buy and sell to get exactly back to the targets; amounts split among the securities already owned, with the approximate number of units.
+- "Use current weights" to start from today's allocation; settings saved per space. It is a calculator: no trade is recorded.
+
 ## 1.0.1 — 2026-11-02
 
 Bug fixes found by automated testing. No change to the database or to how existing data is counted.

@@ -676,6 +676,21 @@ body.privacy .m { filter: blur(7px); user-select: none; }
 .inv-table .nowrap { white-space: nowrap; }
 .inv-table tr.inv-groups th { padding-bottom: 0; font-size: 10.5px; letter-spacing: .06em; color: var(--muted); border-bottom: 0; }
 .inv-table tr.inv-groups th.center { text-align: center; border-bottom: 1px solid var(--border); }
+/* rebalancing calculator */
+.rb-card { margin-bottom: 18px; }
+.rb-card > summary { cursor: pointer; list-style: none; margin-bottom: 0; }
+.rb-card > summary::-webkit-details-marker { display: none; }
+.rb-card > summary h3::before { content: '▸ '; color: var(--muted); }
+.rb-card[open] > summary { margin-bottom: 10px; }
+.rb-card[open] > summary h3::before { content: '▾ '; }
+.rb-controls { display: flex; flex-wrap: wrap; gap: 12px 18px; align-items: flex-end; margin: 4px 0 12px; }
+.rb-controls label.field { width: 180px; }
+.rb-accs { display: flex; flex-wrap: wrap; gap: 8px 18px; }
+.rb-table input.rb-t { width: 76px; text-align: right; padding: 5px 8px; }
+.rb-table tr.rb-off td { background: color-mix(in srgb, var(--amber) 8%, transparent); }
+.rb-table .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; }
+.rb-foot { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 12px; }
+.rb-foot .spacer { flex: 1; }
 .em-parts { display: grid; gap: 6px; margin-top: 10px; }
 .em-part { display: grid; grid-template-columns: 1fr auto; gap: 2px 12px; padding: 7px 10px; border-radius: 8px; background: var(--surface-2); font-size: 13px; }
 .em-part .muted.small { grid-column: 1 / -1; }

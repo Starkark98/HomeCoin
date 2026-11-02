@@ -21,9 +21,10 @@ from .services import (Categorizer, account_balances, count_past_occurrences, pr
                        recurring_view, upcoming)
 from . import split as splitm
 from . import tools
+from . import util
 from .util import FREQUENCIES, add_months, months_between, parse_date, parse_number, rule_matches
 
-VERSION = "1.0.1"
+VERSION = "1.1.0"
 STATIC_DIR = dbm.BASE_DIR / "static"
 KINDS = ("expense", "income", "transfer")
 ACCOUNT_TYPES = ("corrente", "risparmio", "credito", "prepagata", "contanti", "investimenti", "altro")
@@ -148,8 +149,8 @@ def rate_from_body(b):
     if kind == "mixed":
         out["fixed_years"] = as_int(b.get("fixed_years"), "years at fixed rate", minimum=1)
     if kind in ("variable", "mixed"):
-        idx = b.get("rate_index") or "Euribor 3M"
-        if idx not in ("Euribor 1M", "Euribor 3M", "Euribor 6M", "Euribor 12M"):
+        idx = b.get("rate_index") or tools.DEFAULT_RATE_INDEX[util.currency_of(get_db())]
+        if as_key(idx) not in tools.RATE_INDEXES:
             raise ApiError("Invalid index")
         out["rate_index"], out["spread"] = idx, as_rate(b.get("spread"))
         if out["spread"] is None:
@@ -418,7 +419,13 @@ def create_app(port):
 
     # --------------------------------------------------------- access
 
+    def load_currency():
+        """Reference currency of the installation (setting), kept in util.CURRENCY for the texts written by the server."""
+        util.CURRENCY["code"] = util.currency_of(get_db())
+        return util.CURRENCY["code"]
+
     def with_session(token, **data):
+        load_currency()
         resp = jsonify(ok=True, **data)
         resp.set_cookie(COOKIE, token, httponly=True, samesite="Strict", path="/")
         return resp
@@ -579,6 +586,7 @@ def create_app(port):
         plist = portfolios_list(db)
         return jsonify(
             version=VERSION,
+            currency=load_currency(),
             data_dir=str(dbm.DATA_DIR),
             portfolio=next((x for x in plist if x["id"] == p), g.portfolio),
             portfolios=plist,
@@ -592,6 +600,29 @@ def create_app(port):
             tx_count=db.execute(f"SELECT COUNT(*) FROM transactions WHERE account_id IN {PF_ACCOUNTS}",
                                 (p,)).fetchone()[0],
         )
+
+    @app.put("/api/settings/currency")
+    def currency_set():
+        """Reference currency of the whole installation. Amounts are NOT converted (it is a label: everything is assumed to be
+        in that currency); market prices converted into the old currency are cleared, to be downloaded again."""
+        b, db = body(), get_db()
+        code = as_key(b.get("currency"))
+        if code not in util.CURRENCIES:
+            raise ApiError("Invalid currency")
+        old = util.currency_of(db)
+        if code == old:
+            g.audit_skip = True
+            return jsonify(ok=True, currency=code, prices_cleared=0)
+        if b.get("confirm") is not True:  # the client shows the warning first: no change by mistake
+            raise ApiError("Confirm the change: amounts are not converted", 409)
+        cleared = db.execute("UPDATE holdings SET price_eur = NULL WHERE price_eur IS NOT NULL").rowcount
+        cleared += db.execute("DELETE FROM price_history").rowcount
+        db.execute("INSERT INTO settings(key, value) VALUES ('currency', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                   (code,))
+        db.commit()
+        load_currency()
+        note(f"{old} → {code}, amounts not converted" + (" · market prices to update" if cleared else ""))
+        return jsonify(ok=True, currency=code, prices_cleared=cleared)
 
     # --------------------------------------------------------- spaces
 
@@ -2090,6 +2121,82 @@ def create_app(port):
                                                  "trades": created["trades"], "securities": created["holdings"]}.items() if v) or "no new data")
         return jsonify(dry_run=dry, created=created, balances=balances, values=values, positions=positions)
 
+    # ------------------------------------------------- rebalancing calculator
+
+    def rebalance_config(b, base):
+        """Rebalancing settings from a request, on top of the saved ones (base): validated, nothing else kept."""
+        cfg = json.loads(json.dumps(base))
+        if "accounts" in b:
+            ids = None if b["accounts"] is None else id_list(b["accounts"], "account")
+            cfg["accounts"] = None if ids is None else sorted(set(ids))
+        if "mode" in b:
+            if as_key(b["mode"]) not in ("class", "security"):
+                raise ApiError("Invalid rebalancing mode")
+            cfg["mode"] = b["mode"]
+        for mode, t in as_dict(b.get("targets"), "targets").items():
+            if mode not in ("class", "security"):
+                raise ApiError("Invalid targets")
+            clean = {}
+            for k, v in as_dict(t, "targets").items():
+                if not isinstance(k, str) or len(k) > 40:
+                    raise ApiError("Invalid targets")
+                if isinstance(v, (bool, list, dict)):
+                    raise ApiError("Invalid target")
+                try:
+                    p = float(str(v).replace(",", ".")) if v not in (None, "") else 0.0
+                except ValueError:
+                    raise ApiError("Invalid target")
+                if not 0 <= p <= 100 or p != p:
+                    raise ApiError("Each target must be between 0 and 100%")
+                if p:
+                    clean[k] = round(p, 2)
+            if len(clean) > 200:
+                raise ApiError("Too many targets")
+            cfg["targets"][mode] = clean
+        for k in ("drift_abs", "drift_rel"):
+            if k in b:
+                if b[k] in (None, ""):
+                    cfg[k] = None
+                    continue
+                try:
+                    v = float(str(b[k]).replace(",", "."))
+                except ValueError:
+                    raise ApiError("Invalid drift threshold")
+                if isinstance(b[k], (bool, list, dict)) or not 0 < v <= (100 if k == "drift_abs" else 1000):
+                    raise ApiError("Invalid drift threshold")
+                cfg[k] = v
+        if "contribution" in b:
+            cfg["contribution"] = as_int(b["contribution"] or 0, "amount to invest", minimum=0)
+        if "sells" in b:
+            cfg["sells"] = b["sells"] is True
+        return cfg
+
+    def rebalance_saved(db):
+        raw = tools.setting(db, "rebalance", pf(), None)
+        cfg = json.loads(json.dumps(tools.REBALANCE_DEFAULTS))
+        if raw:
+            try:
+                cfg.update({k: v for k, v in json.loads(raw).items() if k in cfg})
+            except (ValueError, AttributeError):
+                pass
+        return cfg
+
+    @app.get("/api/investments/rebalance")
+    def rebalance_get():
+        db = get_db()
+        cfg = rebalance_saved(db)
+        return jsonify(config=cfg, result=tools.rebalance(db, pf(), cfg))
+
+    @app.post("/api/investments/rebalance")
+    def rebalance_calc():
+        """Calculates with the settings sent (not saved), or saves them with save=true. Never records trades."""
+        b, db = body(), get_db()
+        cfg = rebalance_config(b, rebalance_saved(db))
+        if b.get("save") is True:
+            tools.set_setting(db, "rebalance", pf(), json.dumps(cfg))
+            db.commit()
+        return jsonify(config=cfg, result=tools.rebalance(db, pf(), cfg))
+
     @app.post("/api/investments/refresh")
     def investments_refresh():
         """Downloads updated prices (the only feature that contacts the internet: it sends only the tickers)."""
@@ -2144,10 +2251,12 @@ def create_app(port):
             c.font = Font(bold=True, color="FFFFFF")
             c.fill = fill
             c.alignment = Alignment(horizontal="center")
+        fmt = ('"$"#,##0.00;[Red]-"$"#,##0.00' if util.currency_of(get_db()) == "USD"
+               else '#,##0.00 "€";[Red]-#,##0.00 "€"')  # separators follow the Excel language, the symbol the reference currency
         for col in money_cols:
             for row in ws.iter_rows(min_row=2, min_col=col, max_col=col):
                 for c in row:
-                    c.number_format = '#,##0.00 "€";[Red]-#,##0.00 "€"'
+                    c.number_format = fmt
         for i, w in enumerate(widths, start=1):
             ws.column_dimensions[ws.cell(1, i).column_letter].width = w
         ws.freeze_panes = "A2"
@@ -2279,6 +2388,7 @@ def create_app(port):
             db.execute("PRAGMA foreign_keys = ON")
         dbm.migrate(db)  # backups of older versions: assigns accounts/categories to a space
         db.commit()
+        load_currency()  # the backup brings its own reference currency
         return jsonify(ok=True)
 
     # ----------------------------------------------------------- import
