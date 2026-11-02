@@ -7,7 +7,7 @@ demo-data/
 __pycache__/
 *.pyc
 
-# internal work notes: kept local only
+# internal work notes live outside the repository (..\dev\note); ignored here too in case one is copied back
 docs/WORKLOG-*.md
 docs/STORIA-SVILUPPO.md
 
