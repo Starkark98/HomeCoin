@@ -5,6 +5,7 @@ import io
 import json
 import os
 import secrets
+import threading
 import time
 from collections import Counter
 
@@ -24,7 +25,7 @@ from . import tools
 from . import util
 from .util import FREQUENCIES, add_months, months_between, parse_date, parse_number, rule_matches
 
-VERSION = "1.1.0"
+VERSION = "1.2.0"
 STATIC_DIR = dbm.BASE_DIR / "static"
 KINDS = ("expense", "income", "transfer")
 ACCOUNT_TYPES = ("corrente", "risparmio", "credito", "prepagata", "contanti", "investimenti", "altro")
@@ -89,6 +90,14 @@ def as_dict(value, name):
         return {}
     if not isinstance(value, dict):
         raise ApiError(f"Invalid data: {name}")
+    return value
+
+
+def as_list(value, name):
+    if value in (None, ""):
+        return []
+    if not isinstance(value, list):
+        raise ApiError(f"Invalid list: {name}")
     return value
 
 
@@ -526,6 +535,20 @@ def create_app(port):
             raise ApiError(f"Permissions not changed: {exc}")
         return jsonify(ok=True, folder_others=others)
 
+    @app.post("/api/auth/quit")
+    def auth_quit():
+        """Close HomeCoin (the server has no window when started from the installer's shortcut): lock, answer, then exit.
+        Under /api/auth/: never allowed with the temporary import code."""
+        try:  # logged now: after locking, the database is closed
+            audit.write("access", "HomeCoin closed")
+        except Exception:
+            pass
+        vault.lock_now()
+        threading.Timer(0.4, app.config.get("HC_EXIT") or (lambda: os._exit(0))).start()
+        resp = jsonify(ok=True)
+        resp.delete_cookie(COOKIE, path="/")
+        return resp
+
     @app.post("/api/auth/ping")
     def auth_ping():  # the user is using the page: postpone auto-lock (the guard already does it)
         return jsonify(ok=True)
@@ -588,6 +611,8 @@ def create_app(port):
             version=VERSION,
             currency=load_currency(),
             data_dir=str(dbm.DATA_DIR),
+            legacy_copies=[] if DEMO else dbm.legacy_copies(),  # old data folders left by the move, to delete
+            last_backup=(db.execute("SELECT value FROM settings WHERE key = 'last_backup_download'").fetchone() or [None])[0],
             portfolio=next((x for x in plist if x["id"] == p), g.portfolio),
             portfolios=plist,
             accounts=accounts_with_value(db, p),
@@ -2162,9 +2187,16 @@ def create_app(port):
                     v = float(str(b[k]).replace(",", "."))
                 except ValueError:
                     raise ApiError("Invalid drift threshold")
-                if isinstance(b[k], (bool, list, dict)) or not 0 < v <= (100 if k == "drift_abs" else 1000):
+                if isinstance(b[k], (bool, list, dict)) or v != v or not 0 <= v <= (100 if k == "drift_abs" else 1000):
                     raise ApiError("Invalid drift threshold")
-                cfg[k] = v
+                cfg[k] = v or None  # 0 = not used, like an empty field
+        for mode, keys in as_dict(b.get("excluded"), "excluded items").items():  # rows left out of the calculation
+            if mode not in ("class", "security"):
+                raise ApiError("Invalid excluded items")
+            keys = as_list(keys, "excluded items")
+            if len(keys) > 200 or not all(isinstance(k, str) and 0 < len(k) <= 40 for k in keys):
+                raise ApiError("Invalid excluded items")
+            cfg["excluded"][mode] = sorted(set(keys))
         if "contribution" in b:
             cfg["contribution"] = as_int(b["contribution"] or 0, "amount to invest", minimum=0)
         if "sells" in b:
@@ -2179,6 +2211,10 @@ def create_app(port):
                 cfg.update({k: v for k, v in json.loads(raw).items() if k in cfg})
             except (ValueError, AttributeError):
                 pass
+        if not isinstance(cfg.get("excluded"), dict):  # settings saved by 1.1.0 have no exclusions
+            cfg["excluded"] = {}
+        for mode in ("class", "security"):
+            cfg["excluded"].setdefault(mode, [])
         return cfg
 
     @app.get("/api/investments/rebalance")
@@ -2331,6 +2367,10 @@ def create_app(port):
                    "exported_at": payload["exported_at"], "keys": vault.keystore_wraps(),
                    **security.seal(vault.dek, json.dumps(payload, ensure_ascii=False).encode("utf-8"))}
         stamp = dt.datetime.now().strftime("%Y%m%d-%H%M")
+        # for the reminder in Settings: the automatic backups stay on this PC, a downloaded copy can be kept elsewhere
+        db.execute("INSERT INTO settings(key, value) VALUES ('last_backup_download', ?) "
+                   "ON CONFLICT(key) DO UPDATE SET value = excluded.value", (dt.date.today().isoformat(),))
+        db.commit()
         return Response(json.dumps(wrapped), mimetype="application/octet-stream",
                         headers={"Content-Disposition": f'attachment; filename="homecoin-backup-{stamp}.hcbackup"'})
 

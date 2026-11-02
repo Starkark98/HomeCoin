@@ -544,6 +544,7 @@ def investments(db, pid, months=24):
 ASSET_CLASSES = ("azioni", "obbligazioni", "monetario", "materie prime", "immobiliare", "crypto", "altro")
 CASH, UNSPECIFIED = "liquidità", "non specificato"  # same keys as the allocation chart
 REBALANCE_DEFAULTS = {"accounts": None, "mode": "class", "targets": {"class": {}, "security": {}},
+                      "excluded": {"class": [], "security": []},
                       "drift_abs": 5.0, "drift_rel": 25.0, "contribution": 0, "sells": False}
 
 
@@ -563,13 +564,19 @@ def rebalance(db, pid, cfg):
     cfg: accounts (ids to count, None = all), mode 'class' (targets per asset class + broker cash) or 'security'
     (targets per security, broker cash, accounts valued only as a whole), targets {'class': {key: %}, 'security': {key: %}},
     drift_abs (percentage points) and drift_rel (% of the target): a row is off when either is exceeded (None = not used),
-    contribution (new money, cents), sells (False = only buys with the new money, True = buys and sells up to the target).
+    contribution (new money, cents), sells (False = only buys with the new money, True = buys and sells up to the target),
+    excluded {'class': [keys], 'security': [keys]}: rows left out (their value does not count in the total, nor their target).
     Values are the ones of the allocation chart (market value of the securities, uninvested cash of accounts with trades,
     whole value of the accounts without priced securities). Nothing is recorded."""
     inv = investments(db, pid, months=1)
     chosen = None if cfg["accounts"] is None else set(cfg["accounts"])
-    accounts, rows = [], {}
+    accounts, rows, left = [], {}, []
     mode, targets = cfg["mode"], cfg["targets"].get(cfg["mode"]) or {}
+    # rows left out of the calculation (e.g. a long-term holding or a class managed apart): shown, never counted.
+    # Securities excluded in "security" mode are also left out of their class in "class" mode
+    excl = cfg.get("excluded") or {}
+    ex_sec = set(excl.get("security") or [])
+    ex_rows = set(excl.get(mode) or [])
 
     def row(key, label, kind, **extra):
         return rows.setdefault(key, {"key": key, "label": label, "kind": kind, "value": 0, "holdings": [], **extra})
@@ -584,7 +591,10 @@ def rebalance(db, pid, cfg):
             unit = h["value"] / h["quantity"] if h["quantity"] else None
             item = {"id": h["id"], "ticker": h["ticker"], "name": h["name"], "value": h["value"], "unit": unit,
                     "account": a["name"], "asset_class": h["asset_class"]}
-            if mode == "class":
+            if mode == "class" and f"h:{h['id']}" in ex_sec:
+                left.append({"key": f"h:{h['id']}", "label": h["ticker"], "kind": "security", "name": h["name"],
+                             "account": a["name"], "asset_class": h["asset_class"], "value": h["value"], "via": "security"})
+            elif mode == "class":
                 row(h["asset_class"], h["asset_class"], "class")["holdings"].append(item)
                 rows[h["asset_class"]]["value"] += h["value"]
             else:
@@ -602,12 +612,15 @@ def rebalance(db, pid, cfg):
     if mode == "class":  # every class can get a target, even one not owned yet
         for k in (*ASSET_CLASSES, CASH):
             row(k, k, "cash" if k == CASH else "class")
+    for k in [k for k in rows if k in ex_rows]:
+        left.append({**rows.pop(k), "via": mode})
+    left.sort(key=lambda r: -r["value"])
     # targets of securities no longer owned or of accounts not counted: listed apart (so they can be cleared), not used
     names = {f"h:{h['id']}": h["ticker"] for h in db.execute(
         "SELECT h.id, h.ticker FROM holdings h JOIN accounts a ON a.id = h.account_id WHERE a.portfolio_id = ?", (pid,))}
     names.update({f"acc:{a['id']}": a["name"] for a in accounts})
     missing = [{"key": k, "label": names.get(k, k), "kind": "missing", "target": float(t)}
-               for k, t in targets.items() if k not in rows and t]
+               for k, t in targets.items() if k not in rows and k not in ex_rows and t]
 
     total = sum(r["value"] for r in rows.values())
     contribution = cfg["contribution"]
@@ -653,7 +666,8 @@ def rebalance(db, pid, cfg):
             for h, part in zip(r["holdings"], _split(r["trade"], [h["value"] for h in r["holdings"]])):
                 h["trade"] = part
                 h["units"] = round(part / h["unit"], 4) if h["unit"] and part else 0
-    return {"rows": lst, "missing": missing, "accounts": accounts, "total": total, "contribution": contribution,
+    return {"rows": lst, "excluded": left, "excluded_total": sum(r["value"] for r in left), "missing": missing,
+            "accounts": accounts, "total": total, "contribution": contribution,
             "total_after": after_total, "sum_targets": sum_targets, "has_targets": has_targets, "needs_rebalance": any(r["off"] for r in lst),
             "max_drift": max((abs(r["drift"]) for r in lst if r["target"] or r["value"]), default=0.0)}
 

@@ -27,7 +27,11 @@ Thanks for your interest in improving HomeCoin!
 ## Testing your change
 
 - Run the demo (`HomeCoin-Demo.cmd`) and check the tabs you touched, in light and dark theme, with the browser console free of errors.
-- For automated tests use a temporary data folder (environment variable `HOMECOIN_DATA_DIR`), never your real `data` folder.
+- For automated tests use a temporary data folder (environment variable `HOMECOIN_DATA_DIR`), never your real data folder (`%LOCALAPPDATA%\HomeCoin\data`).
+
+## Dependencies
+
+`requirements.txt` lists the accepted ranges; `requirements.lock` pins the exact versions with their SHA-256 and is what `setup.ps1` installs (`pip install --require-hashes --only-binary=:all:`). To move to new versions: install and test them, check them with `pip-audit`, then regenerate the lock with the wheels for Windows 64-bit and Python 3.12 and 3.13 (`pip download --no-deps --only-binary=:all: --platform win_amd64 --python-version 3.12 …`, same for 3.13, and the SHA-256 of each file).
 
 ## License of contributions
 

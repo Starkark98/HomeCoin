@@ -1,5 +1,8 @@
 # personal data and backups: never in the repository
 data/
+# old data folder kept after the move to %LOCALAPPDATA% (1.2.0) and an interrupted copy
+data.migrated-*/
+data.migrating/
 # demo version: recreated at every start
 demo-data/
 # local Python environment

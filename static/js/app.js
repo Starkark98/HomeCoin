@@ -246,7 +246,8 @@ const LOCK_VIEWS = {
   },
   setup(st) {
     $('#lock-body').innerHTML = `<form class="lock-body" style="margin:0">
-      <h2>Protect HomeCoin 🛡️</h2>
+      <div class="wiz-steps"><span class="on">1 Password</span><span>2 Recovery key</span><span>3 Your setup</span></div>
+      <h2>Welcome to HomeCoin 🛡️</h2>
       <p class="muted small">Choose the password you will be asked for every time you open it. ${st.legacy_data ? 'Your existing data (and the automatic backups) will be <b>encrypted</b> with AES-256.' : 'All data will be stored encrypted with AES-256.'}
         The password is not saved anywhere: keep it safe.</p>
       ${newPwFields('Password')}
@@ -260,7 +261,7 @@ const LOCK_VIEWS = {
       btn.textContent = 'Encrypting…';
       try {
         const r = await api('/auth/setup', { method: 'POST', body: { password: $('#l-pw').value } });
-        LOCK_VIEWS.recovery(r.recovery_key);
+        LOCK_VIEWS.recovery(r.recovery_key, true);
       } finally { btn.textContent = '🔐 Create password and encrypt the data'; }
     });
   },
@@ -281,18 +282,67 @@ const LOCK_VIEWS = {
       LOCK_VIEWS.recovery(r.recovery_key);
     });
   },
-  recovery(key) {  // key shown only once
+  recovery(key, first = false) {  // key shown only once; on the first setup, then the welcome steps
     $('#lock-body').innerHTML = `<form class="lock-body" style="margin:0">
+      ${first ? '<div class="wiz-steps"><span class="done">1 Password</span><span class="on">2 Recovery key</span><span>3 Your setup</span></div>' : ''}
       <h2>Your recovery key 🗝️</h2>
       <p class="muted small">If you forget the password, this is <b>the only way</b> to reopen your data: nobody (not even the author of HomeCoin) can recover it without this key.
         Write it on paper or save it in a password manager. It will not be shown again.</p>
       <div class="recovery-code" id="l-key">${esc(key)}</div>
       <button type="button" class="btn" id="l-copy">📋 Copy</button>
       <label class="check-row"><input type="checkbox" id="l-ok"> I saved the recovery key in a safe place</label>
-      <button class="btn btn-primary" id="l-go" disabled>Enter HomeCoin →</button></form>`;
+      <button class="btn btn-primary" id="l-go" disabled>${first ? 'Next →' : 'Enter HomeCoin →'}</button></form>`;
     $('#l-copy').onclick = async () => { try { await navigator.clipboard.writeText(key); toast('Key copied'); } catch { toast('Copy failed: select it by hand', 'err'); } };
     $('#l-ok').onchange = (e) => ($('#l-go').disabled = !e.target.checked);
-    $('#l-go').closest('form').onsubmit = (e) => { e.preventDefault(); unlocked(); };
+    $('#l-go').closest('form').onsubmit = (e) => { e.preventDefault(); if (first) LOCK_VIEWS.welcome(); else unlocked(); };
+  },
+  // first start, after password and recovery key: currency, first space and main account (all can be changed later)
+  welcome() {
+    const st = { cur: 'EUR', type: 'family' };
+    const draw = () => {
+      $('#lock-body').innerHTML = `<form class="lock-body" style="margin:0">
+        <div class="wiz-steps"><span class="done">1 Password</span><span class="done">2 Recovery key</span><span class="on">3 Your setup</span></div>
+        <h2>Set up HomeCoin ✨</h2>
+        <p class="muted small">A few choices to start; you can change everything later in Settings and Accounts.</p>
+        <div class="field"><span>Currency of your accounts</span><div class="seg" id="w-cur">${Object.entries(CURRENCIES).map(([k, c]) =>
+          `<button type="button" data-c="${k}" class="${st.cur === k ? 'on' : ''}">${esc(c.symbol)} ${esc(c.name)}</button>`).join('')}</div>
+          <span class="muted small">Amounts are shown as ${esc(new Intl.NumberFormat(CURRENCIES[st.cur].locale, { style: 'currency', currency: st.cur, useGrouping: 'always' }).format(1234.56))}. A label only: nothing is ever converted.</span></div>
+        <div class="field"><span>First space</span><div class="seg" id="w-type">${Object.entries(PF_TYPES).map(([k, t]) =>
+          `<button type="button" data-t="${k}" class="${st.type === k ? 'on' : ''}">${t[2]} ${esc(t[0])}</button>`).join('')}</div>
+          <span class="muted small">${st.type === 'family' ? 'Shared household finances: joint account, mortgage, fair split between people.' : 'Your own finances: salary, savings, investments.'} You can add more spaces later.</span></div>
+        <label class="field">Name of the space<input id="w-name" maxlength="40" value="${esc(st.name ?? PF_TYPES[st.type][1])}"></label>
+        <label class="field">Main account<input id="w-acc" maxlength="60" value="${esc(st.acc ?? (st.type === 'family' ? 'Joint account' : 'Current account'))}"></label>
+        <label class="field">Its balance today <span class="muted small">(optional)</span><input id="w-bal" inputmode="decimal" placeholder="${st.cur === 'USD' ? '0.00' : '0,00'}" value="${esc(st.bal ?? '')}"></label>
+        <div class="lock-err" id="lock-err"></div>
+        <button class="btn btn-primary" id="l-go">Start using HomeCoin →</button></form>`;
+      const keep = () => Object.assign(st, { name: $('#w-name').value, acc: $('#w-acc').value, bal: $('#w-bal').value });
+      $$('#w-cur button').forEach((b) => (b.onclick = () => { keep(); st.cur = b.dataset.c; setCurrency(st.cur); draw(); }));
+      $$('#w-type button').forEach((b) => (b.onclick = () => { keep(); if (st.name === PF_TYPES[st.type][1]) st.name = null; if (/^(Joint|Current) account$/.test(st.acc)) st.acc = null; st.type = b.dataset.t; draw(); }));
+      lockSubmit($('#l-go'), async () => {
+        keep();
+        const bal = parseSignedMoney(st.bal);
+        if (Number.isNaN(bal)) throw new Error('Invalid balance');
+        if (!st.acc.trim()) throw new Error('Enter a name for the main account');
+        if (st.cur !== 'EUR') await api('/settings/currency', { method: 'PUT', body: { currency: st.cur, confirm: true } });
+        const m = await api('/meta');  // new installation: one household space with one empty account
+        const first = m.portfolio, acc = m.accounts[0];
+        const name = st.name.trim() || PF_TYPES[st.type][1];
+        if (st.type === first.type) {
+          await api(`/portfolios/${first.id}`, { method: 'PUT', body: { name, type: first.type, color: first.color, icon: PF_TYPES[st.type][2] } });
+          await api(`/accounts/${acc.id}`, { method: 'PUT', body: { name: st.acc, type: 'corrente', color: acc.color, icon: acc.icon, initial_balance: bal } });
+        } else {  // another type: a new space with its own default categories and tabs, the empty one removed
+          const { id } = await api('/portfolios', { method: 'POST', body: { name, type: st.type, icon: PF_TYPES[st.type][2], color: '#6366f1' } });
+          setPid(id);
+          await api('/accounts', { method: 'POST', body: { name: st.acc, type: 'corrente', initial_balance: bal } });
+          setPid(first.id);
+          await api(`/accounts/${acc.id}`, { method: 'DELETE' });
+          await api(`/portfolios/${first.id}`, { method: 'DELETE' });
+          setPid(id);
+        }
+        unlocked();
+      });
+    };
+    draw();
   },
   missing() {
     $('#lock-body').innerHTML = `<h2>Key file missing ⚠️</h2>
@@ -311,6 +361,16 @@ async function unlocked() {
 async function lockNow() {
   try { await api('/auth/logout', { method: 'POST' }); } catch { /* already locked */ }
   showLock('login');
+}
+// started without a window (installer shortcut): this is how the server is stopped. The shortcut starts it again
+async function quitApp() {
+  if (!(await confirmDialog('HomeCoin will lock and stop. To open it again, use the HomeCoin shortcut (Start menu or desktop).',
+    { ok: '⏻ Close HomeCoin', danger: false, title: 'Close HomeCoin' }))) return;
+  try { await api('/auth/quit', { method: 'POST' }); } catch { /* the server may already be gone */ }
+  document.body.classList.add('locked');
+  wipeView();
+  $('#lock-body').innerHTML = `<div class="lock-body"><h2>HomeCoin is closed 👋</h2>
+    <p class="muted small">Your data is locked and encrypted. You can close this tab. To open HomeCoin again, use its shortcut in the Start menu or on the desktop.</p></div>`;
 }
 // auto-lock: same timeout as the server; using the page postpones the lock even without requests
 ['mousemove', 'keydown', 'click', 'scroll', 'touchstart'].forEach((ev) => document.addEventListener(ev, () => {
@@ -383,7 +443,8 @@ const PF_GUIDE = {
 async function loadMeta() {
   const m = await api('/meta');
   Object.assign(S, { accounts: m.accounts, categories: m.categories, rules: m.rules, tx_count: m.tx_count, version: m.version,
-    data_dir: m.data_dir, portfolio: m.portfolio, portfolios: m.portfolios, allAccounts: m.all_accounts });
+    data_dir: m.data_dir, portfolio: m.portfolio, portfolios: m.portfolios, allAccounts: m.all_accounts,
+    legacyCopies: m.legacy_copies || [], lastBackup: m.last_backup });
   if (m.currency !== CUR) setCurrency(m.currency);
   if (S.pid !== m.portfolio.id) setPid(m.portfolio.id);  // saved space no longer valid
   $('#app-version').textContent = 'v' + m.version;
@@ -2529,13 +2590,17 @@ async function rebalanceCard(det) {
         <label class="field">New money to invest (${CUR_SYM}) <input id="rb-new" inputmode="decimal" value="${moneyInput(cfg.contribution)}" placeholder="${CUR === 'USD' ? '0.00' : '0,00'}"></label>
         <label class="check" title="Without sells, only the new money is used, on the items below target"><input type="checkbox" id="rb-sells" ${cfg.sells ? 'checked' : ''}> Allow sells (exactly back to the targets)</label>
       </div>
-      <div class="table-wrap"><table class="sp-table inv-table rb-table"><thead><tr><th>${cfg.mode === 'class' ? 'Asset class' : 'Security'}</th><th class="right">Value</th><th class="right">Now</th>
+      <div class="table-wrap"><table class="sp-table inv-table rb-table"><thead><tr><th title="Count it in the calculation">Count</th><th>${cfg.mode === 'class' ? 'Asset class' : 'Security'}</th><th class="right">Value</th><th class="right">Now</th>
         <th class="right">Target %</th><th class="right">Drift</th><th>To do</th><th class="right">After</th></tr></thead><tbody>
-        ${res.rows.map((r) => `<tr class="${r.off ? 'rb-off' : ''}"><td>${label(r)}</td><td class="num right">${esc(money0(r.value))}</td><td class="num right">${pct1(r.pct)}</td>
+        ${res.rows.map((r) => `<tr class="${r.off ? 'rb-off' : ''}"><td><input type="checkbox" class="rb-in" data-k="${esc(r.key)}" data-via="${cfg.mode}" checked title="Count it in the calculation"></td>
+          <td>${label(r)}</td><td class="num right">${esc(money0(r.value))}</td><td class="num right">${pct1(r.pct)}</td>
           <td class="right"><input class="rb-t" data-k="${esc(r.key)}" inputmode="decimal" value="${tg[r.key] != null ? num(tg[r.key], 2) : ''}" placeholder="0"></td>
           <td class="num right ${r.off ? 'neg' : 'muted'}">${r.target || r.value ? `${r.drift > 0 ? '+' : ''}${num(r.drift, 1)}` : ''}${r.off ? ' ⚠️' : ''}</td>
-          <td>${trade(r)}</td><td class="num right">${r.trade ? pct1(r.after_pct) : ''}</td></tr>`).join('')}</tbody>
-        <tfoot><tr><td>Total</td><td class="num right">${esc(money0(res.total))}</td><td></td><td class="num right ${res.has_targets ? '' : 'neg'}">${pct1(res.sum_targets)}</td><td></td>
+          <td>${trade(r)}</td><td class="num right">${r.trade ? pct1(r.after_pct) : ''}</td></tr>`).join('')}
+        ${res.excluded.map((r) => `<tr class="rb-out"><td><input type="checkbox" class="rb-in" data-k="${esc(r.key)}" data-via="${r.via}" title="Count it again"></td>
+          <td>${label(r)}<div class="muted small">not counted${r.via === 'security' && cfg.mode === 'class' ? ' (excluded in "By security")' : ''}</div></td>
+          <td class="num right">${esc(money0(r.value))}</td><td colspan="5"></td></tr>`).join('')}</tbody>
+        <tfoot><tr><td></td><td>Total${res.excluded_total ? `<div class="muted small">not counted: ${esc(money0(res.excluded_total))}</div>` : ''}</td><td class="num right">${esc(money0(res.total))}</td><td></td><td class="num right ${res.has_targets ? '' : 'neg'}">${pct1(res.sum_targets)}</td><td></td>
           <td>${res.contribution ? `+ ${esc(money0(res.contribution))} new money` : ''}</td><td class="num right">${res.contribution ? esc(money0(res.total_after)) : ''}</td></tr></tfoot></table></div>
       ${res.missing.length ? `<p class="small"><span class="tag warn">Targets not used</span> ${res.missing.map((m) => `${esc(m.label)} ${pct1(m.target)}`).join(' · ')} <span class="muted">(security no longer owned or account not counted)</span> <button class="btn btn-sm" id="rb-drop">Remove them</button></p>` : ''}
       ${noTrades ? '<p class="muted small">To see the trades, enter the new money to invest or allow sells.</p>' : ''}
@@ -2553,6 +2618,12 @@ async function rebalanceCard(det) {
     $('#rb-rel', box).onchange = (e) => { cfg.drift_rel = numOrNull(e.target.value); calc(); };
     $('#rb-new', box).onchange = (e) => { const c = parseMoney(e.target.value); if (Number.isNaN(c)) return fail(new Error('Invalid amount')); cfg.contribution = c; calc(); };
     $('#rb-sells', box).onchange = (e) => { cfg.sells = e.target.checked; calc(); };
+    $$('.rb-in', box).forEach((c) => (c.onchange = () => {
+      const ex = new Set(cfg.excluded[c.dataset.via] || []);
+      if (c.checked) ex.delete(c.dataset.k); else ex.add(c.dataset.k);
+      cfg.excluded[c.dataset.via] = [...ex];
+      calc();
+    }));
     $$('.rb-t', box).forEach((inp) => (inp.onchange = () => {
       const t = cfg.targets[cfg.mode] ||= {}, v = parseQty(inp.value);
       if (v === '' || +v === 0) delete t[inp.dataset.k]; else t[inp.dataset.k] = v;
@@ -2886,6 +2957,12 @@ async function renderRegistro(v) {
   $$('#au-kind button').forEach((b) => (b.onclick = () => { S.auditKind = b.dataset.k; route(); }));
 }
 
+// last encrypted backup downloaded: a reminder after 30 days (or never), only when there is something to protect
+function backupAge() {
+  const d = S.lastBackup, days = d ? -daysFrom(d) : null;
+  if (!d) return S.tx_count ? '<span class="tag warn">never downloaded</span>' : 'Never downloaded';
+  return `Last downloaded: <b>${esc(fmtDate(d))}</b>${days > 30 ? ` <span class="tag warn">${days} days ago</span>` : ''}`;
+}
 async function renderImpostazioni(v) {
   const th = getTheme();
   v.innerHTML = `<div class="card" style="margin-bottom:18px"><div class="card-head"><div><h3>🗂️ Spaces</h3>
@@ -2910,7 +2987,8 @@ async function renderImpostazioni(v) {
       <div class="settings-row"><div><b>Shortcuts</b><p class="muted small"><span class="kbd">N</span> new transaction · <span class="kbd">Esc</span> closes dialogs</p></div></div>
     </div>
     <div class="card"><div class="card-head"><h3>💾 Backup and restore</h3></div>
-      <div class="settings-row"><div><b>Download full backup</b><p class="muted small">Encrypted <code>.hcbackup</code> file: it opens only with the current password (or recovery key)</p></div><a class="btn btn-sm" href="/api/backup">⬇ Backup</a></div>
+      <div class="settings-row"><div><b>Download full backup</b><p class="muted small">Encrypted <code>.hcbackup</code> file: it opens only with the current password (or recovery key). Keep a copy outside this PC (USB drive, cloud): the automatic backups below stay in the same folder as the data.
+        <br>${backupAge()}</p></div><a class="btn btn-sm" href="/api/backup" id="s-backup">⬇ Backup</a></div>
       <div class="settings-row"><div><b>Restore from backup</b><p class="muted small">Replaces all current data (a copy is saved first). Old .json backups are accepted too</p></div>
         <label class="btn btn-sm">⬆ Restore<input type="file" id="s-restore" accept=".hcbackup,.json" hidden></label></div>
       <div class="settings-row"><div><b>Automatic backups</b><p class="muted small">At every start an encrypted copy of the database is saved (last 15 kept)</p></div></div>
@@ -2927,17 +3005,20 @@ async function renderImpostazioni(v) {
       <div class="settings-row"><div><b>Auto-lock</b><p class="muted small">After this much time without activity the password is needed again</p></div>
         <select id="s-autolock" style="width:auto">${[5, 15, 30, 60, 120].map((m) => `<option value="${m}" ${(AUTH.status?.auto_lock || 15) === m ? 'selected' : ''}>${m < 60 ? m + ' minutes' : m / 60 + (m === 60 ? ' hour' : ' hours')}</option>`).join('')}</select></div>
       <div class="settings-row"><div><b>Lock now</b><p class="muted small">Removes the key from memory and hides the data</p></div><button class="btn btn-sm" id="s-lock">🔒 Lock</button></div>
+      <div class="settings-row"><div><b>Close HomeCoin</b><p class="muted small">Locks and stops HomeCoin; open it again from its shortcut</p></div><button class="btn btn-sm" id="s-quit">⏻ Close</button></div>
       <div class="settings-row"><div><b>Import code</b><p class="muted small" id="s-itoken-state">Temporary code for an import script on this PC. It expires on its own and is revoked when HomeCoin locks. Generate it only if you asked for it yourself.</p></div>
         <div style="display:flex;gap:8px"><button class="btn btn-sm hidden" id="s-itoken-off">Revoke code</button><button class="btn btn-sm" id="s-itoken">🔑 Generate</button></div></div>
     </div>
     <div class="card"><div class="card-head"><h3>🛡️ Privacy</h3></div>
-      <div class="settings-row"><div><b>Data encrypted on your PC</b><p class="muted small"><code class="path">${esc(S.data_dir)}</code></p></div></div>
+      <div class="settings-row"><div><b>Data encrypted on your PC</b><p class="muted small"><code class="path">${esc(S.data_dir)}</code></p>
+        ${S.legacyCopies.length ? `<p class="small"><span class="tag warn">old copy</span> Since version 1.2 the data lives in the folder above. The previous folder was kept, unused: ${S.legacyCopies.map((p) => `<code class="path">${esc(p)}</code>`).join(' ')} — delete it once you have checked that everything is here (it is encrypted, like the data).</p>` : ''}</div></div>
       <div class="settings-row"><div><p class="muted small" style="margin:0">The database and automatic backups are encrypted with AES-256 (SQLCipher); the key is protected by your password (scrypt) and stays in memory only while HomeCoin is unlocked.
-        HomeCoin accepts connections only from this PC (127.0.0.1), uses no external services or CDNs and blocks requests coming from other sites; the only online feature is "Update prices" in Investments, which sends only the tickers to Yahoo Finance. HomeCoin ${esc(S.version)} · by Starkark98.</p></div></div>
+        HomeCoin accepts connections only from this PC (127.0.0.1), uses no external services or CDNs and blocks requests coming from other sites; the only online feature is "Update prices" in Investments, which sends only the tickers to Yahoo Finance. ❔ Help and ☕ Donate at the top open GitHub and Ko-fi in a new browser tab, only when you click them. HomeCoin ${esc(S.version)} · by Starkark98.</p></div></div>
     </div></div>`;
   $('#s-pw').onclick = () => passwordModal();
   $('#s-rk').onclick = () => recoveryModal();
   $('#s-lock').onclick = () => lockNow();
+  $('#s-quit').onclick = () => quitApp();
   const runCheck = () => securityCheck(v);
   $('#sec-go').onclick = runCheck;
   runCheck();
@@ -2978,6 +3059,7 @@ async function renderImpostazioni(v) {
     try { const r = await api('/auth/settings', { method: 'PUT', body: { auto_lock: +e.target.value } }); AUTH.status.auto_lock = r.auto_lock; toast('Auto-lock updated'); } catch (err) { fail(err); }
   };
   $$('#s-theme button').forEach((b) => (b.onclick = () => setTheme(b.dataset.t)));
+  $('#s-backup').addEventListener('click', () => { S.lastBackup = todayIso(); });
   $$('#s-cur button').forEach((b) => (b.onclick = async () => {
     const code = b.dataset.c;
     if (code === CUR) return;
@@ -3135,6 +3217,7 @@ $('#theme-toggle').onclick = () => {
   setTheme(dark ? 'light' : 'dark');
 };
 $('#lock-now').onclick = () => lockNow();
+$('#quit-app').onclick = () => quitApp();
 $('#privacy-toggle').onclick = () => setPrivacy(!privacyOn());
 setPrivacy((() => { try { return localStorage.getItem('homecoin-privacy') === '1'; } catch { return false; } })());
 window.addEventListener('hashchange', () => { if (!document.body.classList.contains('locked')) route(); });

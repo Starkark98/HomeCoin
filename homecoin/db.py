@@ -8,7 +8,21 @@ import sqlcipher3
 from flask import g
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-DATA_DIR = Path(os.environ.get("HOMECOIN_DATA_DIR") or BASE_DIR / "data")
+LEGACY_DATA_DIR = BASE_DIR / "data"  # up to 1.1.0 the data lived inside the program folder
+
+
+def default_data_dir():
+    """Per-user data folder, outside the program folder (so updating or uninstalling never touches it) and outside
+    Documents (often synced to OneDrive and under Controlled Folder Access): %LOCALAPPDATA%\\HomeCoin\\data on Windows.
+    Not a temporary folder: Windows cleans %LOCALAPPDATA%\\Temp, not this one. HOMECOIN_DATA_DIR overrides it."""
+    if os.environ.get("HOMECOIN_DATA_DIR"):
+        return Path(os.environ["HOMECOIN_DATA_DIR"])
+    if os.name == "nt" and os.environ.get("LOCALAPPDATA"):
+        return Path(os.environ["LOCALAPPDATA"]) / "HomeCoin" / "data"
+    return Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local" / "share") / "HomeCoin" / "data"
+
+
+DATA_DIR = default_data_dir()
 BACKUP_DIR = DATA_DIR / "backups"
 DB_PATH = DATA_DIR / "homecoin.db"
 SCHEMA_VERSION = 14
@@ -382,6 +396,84 @@ def backup_now(reason="auto"):
     for f in old:
         f.unlink(missing_ok=True)
     return target
+
+
+class MigrationError(Exception):
+    """The data folder could not be moved: the old one is untouched."""
+
+
+def _has_data(d):
+    return (d / "keystore.json").exists() or (d / "homecoin.db").exists()
+
+
+def _digest(path):
+    import hashlib
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _tree(d):
+    return {p.relative_to(d).as_posix(): p for p in d.rglob("*") if p.is_file()}
+
+
+def migrate_data_folder(src=None, dst=None, now=None):
+    """Moves the data of an older version (program folder\\data) to the per-user data folder, once.
+
+    Copy into a sibling folder, check every file byte by byte (size + SHA-256), then rename the copy into place and the old
+    folder to data.migrated-<date> (kept, never deleted: the user removes it after checking). Any problem: the copy is
+    removed, the old folder stays as it was and MigrationError says why (HomeCoin then does not start, so it never opens
+    an empty new installation next to the real data). Returns None (nothing to do), or a dict with what happened.
+    Must run while HomeCoin is closed (run.py calls it after checking that the port is free)."""
+    import shutil
+    src, dst = Path(src or LEGACY_DATA_DIR), Path(dst or DATA_DIR)
+    if os.environ.get("HOMECOIN_DATA_DIR") and src == LEGACY_DATA_DIR and dst == DATA_DIR:
+        return None  # a folder chosen by hand (demo, tests, a custom path): never moved automatically
+    if src.resolve() == dst.resolve() or not src.is_dir() or not _has_data(src):
+        return None
+    if _has_data(dst):  # already moved earlier (or two installations): use the new one, say the old one is still there
+        return {"moved": False, "old": str(src), "new": str(dst)}
+    if any((src / f"homecoin.db{x}").exists() and (src / f"homecoin.db{x}").stat().st_size for x in ("-wal", "-journal")):
+        raise MigrationError("the database seems to be in use or was not closed cleanly: close every HomeCoin window "
+                             "and start again")
+    tmp = dst.with_name(dst.name + ".migrating")
+    try:
+        if tmp.exists():
+            shutil.rmtree(tmp)  # leftover of an interrupted attempt (the old folder is still the original)
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(src, tmp)
+        before, after = _tree(src), _tree(tmp)
+        if before.keys() != after.keys():
+            raise MigrationError(f"{len(before)} files in the old folder, {len(after)} in the copy")
+        for rel, p in before.items():
+            q = after[rel]
+            if p.stat().st_size != q.stat().st_size or _digest(p) != _digest(q):
+                raise MigrationError(f"the copy of {rel} is different from the original")
+        if dst.exists():
+            dst.rmdir()  # only if empty: _has_data(dst) is False, any other file stops here with an error
+        os.replace(tmp, dst)
+    except MigrationError:
+        shutil.rmtree(tmp, ignore_errors=True)
+        raise
+    except Exception as exc:
+        shutil.rmtree(tmp, ignore_errors=True)
+        raise MigrationError(str(exc)) from exc
+    stamp = (now or dt.datetime.now()).strftime("%Y%m%d-%H%M%S")
+    old = src.with_name(f"{src.name}.migrated-{stamp}")
+    try:  # the data is already safe in the new folder: if the rename fails, the old folder simply stays as it is
+        os.replace(src, old)
+        (old / "MOVED.txt").write_text(f"HomeCoin data moved on {stamp} to:\n{dst}\n\nThis is the old copy, no longer used. "
+                                       "Delete this folder once you have checked that HomeCoin opens your data.\n", "utf-8")
+    except OSError:
+        old = src
+    return {"moved": True, "old": str(old), "new": str(dst), "files": len(before)}
+
+
+def legacy_copies():
+    """Old data folders left by the move (program folder\\data.migrated-*), shown in Settings so they can be deleted."""
+    return sorted(str(p) for p in BASE_DIR.glob(f"{LEGACY_DATA_DIR.name}.migrated-*") if p.is_dir())
 
 
 def migrate(conn):

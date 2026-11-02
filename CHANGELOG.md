@@ -2,6 +2,28 @@
 
 All notable changes to HomeCoin are listed here, newest first.
 
+## 1.2.0 — 2026-11-02
+
+**Installer**
+- `HomeCoin-Setup-<version>.exe`: per-user installation without administrator rights, with its own private copy of Python 3.14 (official build, signed by the Python Software Foundation) and the libraries already included, so nothing else needs to be installed. Start menu shortcut, optional desktop shortcut and optional start with Windows (locked, no browser). Updating = running the new installer; uninstalling keeps the data. The demo with made-up data is included without a shortcut (for testing: see README → Demo version).
+- **❔ Help** and **☕ Donate** at the top right open the documentation on GitHub and the Ko-fi page in a new browser tab (only when clicked; no referrer is sent).
+- HomeCoin runs in the background without a console window; **⏻ Close HomeCoin** (top right and in Settings) locks and stops it, and clicking the shortcut again just opens the page if it is already running.
+
+**Rebalancing**
+- Asset classes or single securities can be left out of the calculation (for example a long-term holding or the broker's cash): they stay listed as "not counted", with their value, and their targets are ignored. A security left out "by security" is also left out of its class.
+- A drift threshold of 0 means "not used", like an empty field.
+
+**First start**
+- A guided first start: password, recovery key (with confirmation that you saved it), currency, first space (household or personal, with its default categories and tabs), main account and its balance.
+
+**Data folder**
+- The data moves to `%LOCALAPPDATA%\HomeCoin\data`: per user, outside the program folder (updating or deleting the program never touches it) and outside Documents (often synced to OneDrive). It is moved automatically once, on the first start: every file is checked against the original (size and SHA-256) before switching, the old folder is kept as `data.migrated-<date>` until you delete it, and if anything goes wrong HomeCoin does not start and nothing changes.
+- Settings shows the data folder, any old copy left to delete, and when you last downloaded an encrypted backup (reminder after 30 days).
+
+**Installation**
+- Dependencies are installed at exact versions, each checked against its SHA-256 (`requirements.lock`, `pip install --require-hashes`, ready-made packages only, for Python 3.12, 3.13 and 3.14), and checked with `pip-audit`.
+- `setup.ps1` refuses the Microsoft Store Python, which would hide the data folder inside its own package.
+
 ## 1.1.0 — 2026-11-02
 
 **Reference currency**
