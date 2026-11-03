@@ -47,13 +47,12 @@ Thank you
 - [Your first start](#your-first-start)
 - [Try the demo first](#try-the-demo-first)
 
-**Guide**
-- [How HomeCoin is organized](#how-homecoin-is-organized)
-- [Typing amounts and dates](#typing-amounts-and-dates)
-- [Spaces](#spaces) · [Accounts](#accounts) · [Transactions](#transactions) · [Importing bank statements](#importing-bank-statements) · [Categories and rules](#categories-and-rules)
-- [Recurring payments](#recurring-payments) · [Calendar](#calendar) · [Budgets](#budgets) · [Goals](#goals) · [Emergency fund](#emergency-fund)
-- [Mortgage and loans](#mortgage-and-loans) · [Fair split](#fair-split) · [Investments](#investments) · [Rebalancing](#rebalancing) · [Savings](#savings)
-- [Dashboard and reports](#dashboard-and-reports) · [Activity log](#activity-log) · [Settings](#settings)
+**Guide** (same order as the app menu)
+- *The basics:* [How HomeCoin is organized](#how-homecoin-is-organized) · [Typing amounts and dates](#typing-amounts-and-dates) · [Spaces](#spaces) · [Dashboard](#dashboard)
+- *Everyday:* [Transactions](#transactions) · [Accounts](#accounts) · [Recurring payments](#recurring-payments) · [Calendar](#calendar)
+- *Planning:* [Budgets](#budgets) · [Goals](#goals) · [Emergency fund](#emergency-fund) · [Mortgage and loans](#mortgage-and-loans) · [Fair split](#fair-split)
+- *Wealth:* [Investments](#investments) · [Rebalancing](#rebalancing) · [Savings](#savings) · [Reports](#reports)
+- *Tools:* [Importing bank statements](#importing-bank-statements) · [Categories and rules](#categories-and-rules) · [Activity log](#activity-log) · [Settings](#settings)
 
 **Your data**
 - [Password and recovery key](#password-and-recovery-key)
@@ -79,18 +78,7 @@ Thank you
 - **Follows your investments.** Value, gains, return, asset allocation and a rebalancing calculator that tells you what to buy or sell to get back to your target.
 - **Keeps your data yours.** It runs on your PC only, the data is encrypted, and nobody (not even the author) can open it without your password.
 
-| | |
-|---|---|
-| ![Dashboard, dark theme](docs/images/02-dashboard-dark.png) | ![Transactions](docs/images/03-transactions.png) |
-| **Dark theme**: follows Windows, or choose it | **Transactions**: filters, search, bulk edit, export |
-| ![New transaction with suggestions from history](docs/images/04-new-transaction.png) | ![Calendar](docs/images/05-calendar.png) |
-| **New transaction**: account, amount and category suggested | **Calendar**: upcoming payments and projected cash |
-| ![Fair split](docs/images/06-fair-split.png) | ![Reports](docs/images/07-reports.png) |
-| **Fair split**: what each person should pay in | **Reports**: categories by month, Excel export |
-| ![Investments](docs/images/08-investments.png) | |
-| **Investments**: value, invested, return, allocation | |
-
-All screenshots come from the demo, with made-up data.
+Each page is shown with a screenshot in the [Guide](#guide) below. All screenshots come from the demo, with made-up data.
 
 ## What you need
 
@@ -148,7 +136,11 @@ The sign-in screen shows the demo password. The demo includes every feature: a h
 
 # Guide
 
-## How HomeCoin is organized
+The guide follows the menu of the app: first the basics, then the pages of each group in the same order as on the left of the screen.
+
+## The basics
+
+### How HomeCoin is organized
 
 - **Left menu**, grouped by what you do:
   - **Everyday:** Transactions, Accounts, Recurring, Calendar
@@ -163,7 +155,7 @@ The sign-in screen shows the demo password. The demo includes every feature: a h
 
 Not every space needs every page: in Settings → Spaces you choose which optional pages each space shows. Hiding a page never deletes its data.
 
-## Typing amounts and dates
+### Typing amounts and dates
 
 - **Amounts follow your currency.** Each currency is written the way its country writes it:
 
@@ -182,7 +174,7 @@ Not every space needs every page: in Settings → Spaces you choose which option
 - The currency is only a **label**: HomeCoin never converts amounts. Choose the currency your accounts are kept in. You can change it in Settings → General; security prices are then downloaded again in the new currency.
 - **Dates** can be typed as `31/12/2026`, `2026-12-31` or picked from the calendar. HomeCoin refuses impossible years (a typo like 2062) to protect your data.
 
-## Spaces
+### Spaces
 
 A space is a separate set of books (a separate ledger) inside the same HomeCoin, with its own accounts, categories, rules and reports. Typical setups:
 
@@ -193,19 +185,27 @@ The type matters: a *Household* space gets shared categories (mortgage, utilitie
 
 **Money between spaces.** A transfer from your personal account to the household account is not an expense or an income: it is shown in both spaces and counts correctly in **net worth** (everything you own minus what you owe). You create, edit, archive or delete spaces in Settings → Spaces.
 
-## Accounts
+### Dashboard
 
-Add every place where you keep money: current accounts, savings accounts, credit and prepaid cards, cash, investment accounts. For each one you set a name, an icon, a color and the **opening balance** (what it held on the day you start using HomeCoin).
+The first page you see: net worth, income, money out, savings, expenses by category, the last months, budgets, upcoming payments and the largest expenses, for the period you choose.
 
-- A **credit card** can have a negative opening balance (what you owe).
-- An account you closed can be **archived**: it disappears from the lists but its history stays in the totals of the past.
-- HomeCoin warns you before a change that would alter your figures (for example changing the type of an account with transactions) and refuses to delete accounts that still have data.
+![Dashboard in the dark theme](docs/images/02-dashboard-dark.png)
+*The Dashboard in the dark theme (it follows Windows, or choose it in Settings).*
 
-## Transactions
+## Everyday
+
+### Transactions
 
 Each transaction is an **expense**, an **income** or a **transfer** between two of your accounts.
 
+![Transactions](docs/images/03-transactions.png)
+*Transactions: filters, search, bulk edit and export.*
+
 - **Adding one:** ＋ New transaction (or <kbd>N</kbd>). As you type the description, HomeCoin suggests previous ones and fills in the usual account, category and amount.
+
+  ![New transaction](docs/images/04-new-transaction.png)
+  *A new transaction: account, amount and category filled in from history and rules.*
+
 - **Finding one:** filter by period, account, category or type, or search the text.
 - **Several at once** (bulk edit): select them to change their category, exclude or include them, or delete them, in one go.
 - **⧉ Duplicate** copies a transaction, handy for one that repeats now and then.
@@ -213,22 +213,15 @@ Each transaction is an **expense**, an **income** or a **transfer** between two 
 - **Duplicates:** HomeCoin warns you when the same amount on the same account was already recorded a few days before, and asks before saving.
 - **Export:** CSV or Excel, from Transactions or from Settings → Backup & data. Numbers and dates are written the way a spreadsheet of your currency's country expects them.
 
-## Importing bank statements
+### Accounts
 
-Most banks let you download your transactions as **CSV or Excel** from online banking. HomeCoin reads them in four steps:
+Add every place where you keep money: current accounts, savings accounts, credit and prepaid cards, cash, investment accounts. For each one you set a name, an icon, a color and the **opening balance** (what it held on the day you start using HomeCoin).
 
-1. **Upload** the file (drag it onto the page or click to choose it).
-2. **Columns:** HomeCoin recognizes date, description and amount (a single signed amount, or separate money in / money out columns, i.e. credits and debits) in Italian and English. Check them and choose the account the statement belongs to.
-3. **Review:** each row gets a category from your [rules](#categories-and-rules) or from history; rows already in HomeCoin are marked *already present* and left out (tick them if you want them anyway). You can change any category before confirming.
-4. **Done.** The file is read only on your PC and is never saved: HomeCoin keeps it in memory just until you finish.
+- A **credit card** can have a negative opening balance (what you owe).
+- An account you closed can be **archived**: it disappears from the lists but its history stays in the totals of the past.
+- HomeCoin warns you before a change that would alter your figures (for example changing the type of an account with transactions) and refuses to delete accounts that still have data.
 
-## Categories and rules
-
-**Categories** group your spending and income (Groceries, Utilities, Salary…). Keep them few and broad: reports are easier to read. Each category can have a color, an icon and a monthly [budget](#budgets).
-
-**Rules** fill in categories automatically: *if the description contains "supermarket", the category is Groceries*. Create them for the payees you see often; HomeCoin suggests keywords from your history. Rules apply to new and imported transactions, and you can apply them again to existing uncategorized ones.
-
-## Recurring payments
+### Recurring payments
 
 Payments that repeat — rent, mortgage, loans, bills, subscriptions, salary, transfers to savings — are set up once in **Recurring**. On each due date HomeCoin records the transaction for you.
 
@@ -238,27 +231,38 @@ Payments that repeat — rent, mortgage, loans, bills, subscriptions, salary, tr
 - **Variable items** (a bill or salary that changes a little every time): mark them as *expected*. HomeCoin does not record them by itself: it links the real transaction when it arrives (by a keyword in the description) and forecasts the next amount as the median of the last six.
 - Pausing an item or changing its dates never creates payments in the past by surprise.
 
-## Calendar
+### Calendar
 
 A **cash-flow forecast**: the payments of the coming months — confirmed recurring items plus estimated ones (variable items and regular income guessed from your history) — on a monthly grid, with the **cash you will have in your accounts** after each payment and the lowest point of the period. Useful to see a tight month coming.
 
-## Budgets
+![Calendar](docs/images/05-calendar.png)
+*Calendar: confirmed and estimated payments, with the cash left after each one.*
+
+## Planning
+
+### Budgets
 
 Set a **monthly limit** for the categories you want to watch, directly on the Budgets page. For each one you see what you have spent this month, the average of past months, and a warning when you are spending faster than the month is passing (*ahead* of pace: 60% of the budget spent after a third of the month, for example) or have gone over.
 
-## Goals
+![Budgets](docs/images/10-budgets.png)
+*Budgets of a closed month: one category went over its limit.*
+
+### Goals
 
 A goal is something you are saving for: a trip, a car, a down payment. Give it an amount and, if you want, a date. Its progress comes either from **the balance of an account** (for example a savings account dedicated to it) or from **an amount you update by hand**.
 
 HomeCoin calculates **how much to put aside each month** to get there on time; in a household space, also each person's share in proportion to income. It warns you if the date has passed or if two goals use the same account (the same money would be counted twice).
 
-## Emergency fund
+### Emergency fund
 
 How many months of expenses your **available reserve** (your liquid assets) would cover if your income stopped: your accounts plus uninvested cash and money market funds on your broker (money you can get within days). Stocks, bonds and other funds are not counted. Set your target in months (often 3 to 6); HomeCoin shows how far you are. The average spending uses your last 6 complete months, and HomeCoin tells you if you have less history than that.
 
-## Mortgage and loans
+### Mortgage and loans
 
 Every recurring item with installments appears here with its **amortization schedule**: each installment split into **principal** (the part that repays the debt) and **interest**, the remaining debt (outstanding principal), interest paid and still to pay, the end date. Installments are constant as long as the rate does not change (French amortization), and are recalculated when it does.
+
+![Mortgage and loans](docs/images/11-mortgage.png)
+*A mixed-rate mortgage and a fixed-rate car loan, with principal and interest per year.*
 
 - **Rate:** fixed, variable or mixed (for example fixed for 10 years, then variable). A variable rate is a reference **index** plus a fixed margin, the **spread**. HomeCoin offers the indexes of your currency:
 
@@ -276,17 +280,25 @@ Every recurring item with installments appears here with its **amortization sche
   The current index value is typed by hand (HomeCoin does not download rates). A loan keeps its index even if you change currency. APR and ancillary costs (insurance, fees) are not included.
 - **Early repayment** (prepayment): try an extra payment and choose whether to shorten the loan (same installment) or lower the installment (same end date). HomeCoin shows the interest you would save.
 
-## Fair split
+### Fair split
 
 For household spaces. Instead of splitting shared costs 50/50, HomeCoin calculates **how much each person should pay into the joint account so that everyone saves the same share of their income** (the same savings rate): whoever earns more pays more, in proportion.
+
+![Fair split](docs/images/06-fair-split.png)
+*Fair split: what each person should pay in, compared with what they actually paid.*
 
 1. Add the people and their net monthly income.
 2. Choose what to share: actual expenses, actual contributions or amounts you enter by hand; for each category, split in proportion, equally, or leave it out.
 3. HomeCoin proposes the monthly contributions, compares them with what each person really paid, and can update the recurring transfers in one click.
 
-## Investments
+## Wealth
+
+### Investments
 
 For investment accounts (broker, pension fund…) there are two ways to work, and you can mix them:
+
+![Investments](docs/images/08-investments.png)
+*Investments: value against contributions, return, XIRR and allocation.*
 
 - **With securities and trades.** Add each security (ETF, stock, bond, fund…) with its **ticker**, the code it is quoted under on Yahoo Finance, for example `VWCE.DE` or `SWDA.MI`. Record buys, sells, dividends, interest and fees. HomeCoin calculates quantities, the **average cost** (weighted average purchase price), **realized gains** (from what you sold) and **unrealized gains** (on what you still hold).
 - **With valuations.** For an account you only know the total of (for example a pension fund), type its value from time to time.
@@ -299,9 +311,12 @@ You then see:
 
 **Update prices** downloads the latest prices from Yahoo Finance, converted into your currency; it sends only the tickers, nothing else.
 
-## Rebalancing
+### Rebalancing
 
 Over time some investments grow faster than others and your portfolio drifts away from the mix you chose. **Rebalancing** brings it back. In Investments → 🧭 Rebalancing: set the **target allocation** (the weight in % of each asset class, or of each security) and HomeCoin shows the **drift** of each one (current weight minus target) and **what to buy or sell to get back on target**.
+
+![Rebalancing](docs/images/09-rebalancing.png)
+*Rebalancing with new money only: what to buy to move back towards the targets, with a note when the money is not enough.*
 
 - **Only new money:** the money you are about to invest goes to what is below target, without selling (no taxes on sales).
 - **Buys and sells:** exactly back to the targets.
@@ -309,22 +324,44 @@ Over time some investments grow faster than others and your portfolio drifts awa
 - Choose which accounts count and leave out classes or securities you manage separately.
 - HomeCoin warns you about anything that could make the result wrong: securities without a price, old prices, targets that don't add up to 100%, not enough new money. It never records trades for you, and taxes and fees are not included.
 
-## Savings
+### Savings
 
 Month by month: how much of your income you **saved** (income minus spending; as a share of income it is your **savings rate**), how much you **invested** (purchases minus sales of securities, money market funds excluded), and your **net worth** over time. Money market funds count as cash.
 
-## Dashboard and reports
+### Reports
 
-- **Dashboard:** net worth, income, money out, savings, expenses by category, the last months, budgets, upcoming payments and the largest expenses, for the period you choose.
-- **Reports:** categories month by month as a table (heatmap) and a chart, with averages, from one month to the whole history; export to Excel.
+Categories month by month as a table (heatmap) and a chart, with averages, from one month to the whole history; export to Excel.
 
-## Activity log
+![Reports](docs/images/07-reports.png)
+*Reports: categories month by month (heatmap), with averages.*
+
+## Tools
+
+### Importing bank statements
+
+Most banks let you download your transactions as **CSV or Excel** from online banking. HomeCoin reads them in four steps:
+
+1. **Upload** the file (drag it onto the page or click to choose it).
+2. **Columns:** HomeCoin recognizes date, description and amount (a single signed amount, or separate money in / money out columns, i.e. credits and debits) in Italian and English. Check them and choose the account the statement belongs to.
+3. **Review:** each row gets a category from your [rules](#categories-and-rules) or from history; rows already in HomeCoin are marked *already present* and left out (tick them if you want them anyway). You can change any category before confirming.
+4. **Done.** The file is read only on your PC and is never saved: HomeCoin keeps it in memory just until you finish.
+
+### Categories and rules
+
+**Categories** group your spending and income (Groceries, Utilities, Salary…). Keep them few and broad: reports are easier to read. Each category can have a color, an icon and a monthly [budget](#budgets).
+
+**Rules** fill in categories automatically: *if the description contains "supermarket", the category is Groceries*. Create them for the payees you see often; HomeCoin suggests keywords from your history. Rules apply to new and imported transactions, and you can apply them again to existing uncategorized ones.
+
+### Activity log
 
 An audit log: the important things that happened in the last 12 months: sign-ins (including wrong passwords), security changes, edits and deletions, imports and exports. It is stored in the encrypted database and cleans itself up.
 
-## Settings
+### Settings
 
 Five tabs:
+
+![Settings](docs/images/12-settings.png)
+*Settings → General: theme, currency, help, support and close.*
 
 - **General:** light or dark theme, reference currency, help, close HomeCoin.
 - **Spaces:** create, edit, archive spaces and choose their pages.
