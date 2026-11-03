@@ -5,6 +5,7 @@ All notable changes to HomeCoin are listed here, newest first.
 ## Unreleased
 
 **Guide**
+- `SECURITY.md`: supported version updated (1.3.x) and signed updates in the scope of reports.
 - The user guide (README) follows the app menu: the basics, then Everyday, Planning, Wealth and Tools. Each page has its screenshot right in its section, all taken again from the current version, with four new ones (budgets, mortgage, rebalancing, settings).
 
 ## 1.3.0 — 2026-11-03
