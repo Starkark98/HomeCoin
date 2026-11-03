@@ -68,8 +68,9 @@ class _Redirects(urllib.request.HTTPRedirectHandler):
 _opener = urllib.request.build_opener(_Redirects)
 
 
-def _get(url, limit, accept="application/octet-stream", to_file=None):
-    """HTTPS GET of a GitHub address, at most `limit` bytes: the bytes, or the file written (with its SHA-256)."""
+def _get(url, limit, accept="application/octet-stream", to_file=None, not_found="No published release found on GitHub"):
+    """HTTPS GET of a GitHub address, at most `limit` bytes: the bytes, or the file written (with its SHA-256).
+    `not_found`: the message when GitHub answers 404 (a missing release, or a file not attached to it)."""
     u = urllib.parse.urlsplit(url)
     if u.scheme != "https" or u.hostname not in ALLOWED_HOSTS:
         raise UpdateError("Unexpected download address")
@@ -90,7 +91,7 @@ def _get(url, limit, accept="application/octet-stream", to_file=None):
                     out.close()
     except urllib.error.HTTPError as e:
         if e.code == 404:
-            raise UpdateError("No published release found on GitHub") from e
+            raise UpdateError(not_found) from e
         if e.code in (403, 429):
             raise UpdateError("GitHub refused the request for now (rate limit): try again later") from e
         raise UpdateError(f"GitHub answered {e.code}") from e
@@ -132,7 +133,8 @@ def check(current):
         raise UpdateError(f"Unexpected release name on GitHub: {tag}")
     ver = ".".join(map(str, latest))
     info = {"latest": ver, "available": latest > parse_version(current),
-            "notes": str(rel.get("body") or "")[:4000], "url": f"{RELEASE_PAGE}/tag/v{ver}", "manifest": None}
+            "notes": str(rel.get("body") or "")[:4000], "url": f"{RELEASE_PAGE}/tag/v{ver}", "manifest": None,
+            "assets": sorted(assets)}  # names of the files attached to the release
     if not info["available"]:
         return info
     names = (f"HomeCoin-{ver}.manifest.json", f"HomeCoin-{ver}.manifest.sig")
@@ -174,18 +176,23 @@ def updates_dir():
     return d
 
 
-def download(manifest, kind, release_assets=None):
-    """Downloads the file of this installation type into the updates folder and checks size and SHA-256."""
+def download(manifest, kind, assets=None):
+    """Downloads the file of this installation type into the updates folder and checks size and SHA-256.
+    `assets`: names of the files attached to the release (from check()), to say clearly which one is missing."""
     f = manifest["files"].get("installer" if kind == "installer" else "zip")
     if not f:
         raise UpdateError("The release has no file for this installation")
-    url = (release_assets or {}).get(f["name"]) or f"{DOWNLOAD_PREFIX}v{manifest['version']}/{f['name']}"
+    missing = (f"{f['name']} is not attached to the release v{manifest['version']} on GitHub: "
+               "install this version by hand, or try again once the file has been added")
+    if assets is not None and f["name"] not in assets:
+        raise UpdateError(missing)
+    url = f"{DOWNLOAD_PREFIX}v{manifest['version']}/{f['name']}"
     for old in updates_dir().glob("HomeCoin-*"):  # files of earlier updates
         old.unlink(missing_ok=True)
     target = updates_dir() / f["name"]
     part = target.with_suffix(target.suffix + ".part")
     try:
-        _, size, digest = _get(url, f["size"], to_file=part)
+        _, size, digest = _get(url, f["size"], to_file=part, not_found=missing)
         if size != f["size"] or digest != f["sha256"]:
             raise UpdateError("The downloaded file does not match the signed release (SHA-256): update refused")
         os.replace(part, target)

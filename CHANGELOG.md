@@ -12,6 +12,9 @@ All notable changes to HomeCoin are listed here, newest first.
 - Exports follow the currency's country: in Excel the currency symbol and the date order (e.g. MM/DD/YYYY in the US, YYYY/MM/DD in Japan); in CSV comma decimals with ";" between columns for the euro, dot decimals with "," elsewhere, so the file opens correctly in a spreadsheet of that country.
 - Fair split: rounding choices fit the currency (e.g. ¥100–¥5,000, ₹10–₹500).
 
+**Updates**
+- If a file is missing from a release on GitHub, Settings → Updates now says which one, instead of "No published release found".
+
 ## 1.2.2 — 2026-11-03
 
 **Calculators warn when the result could mislead**

@@ -637,7 +637,7 @@ def create_app(port):
                 info = updater.check(VERSION)  # again, signed: never trust an earlier answer
                 if not info["available"]:
                     raise ApiError("HomeCoin is already up to date", 409)
-                path = updater.download(info["manifest"], kind)
+                path = updater.download(info["manifest"], kind, info.get("assets"))
                 dbm.backup_now("update")
                 if kind == "installer":
                     updater.launch_installer(path)  # it closes this process and reopens HomeCoin
