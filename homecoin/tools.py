@@ -9,7 +9,8 @@ import urllib.parse
 import urllib.request
 
 from .services import account_balances
-from .util import CURRENCY, OTHER_INVESTMENTS, TECH_CATEGORIES, add_months, currency_of, fmt_money, occurrence, parse_date
+from .util import (OTHER_INVESTMENTS, TECH_CATEGORIES, add_months, currency_of, fmt_decimal, fmt_money, occurrence,
+                   parse_date)
 
 INVEST = "investimenti"
 
@@ -75,15 +76,21 @@ def set_setting(db, key, pid, value):
 # ------------------------------------------------------- mortgage schedule
 
 RATE_TYPES = ("fixed", "variable", "mixed")
-# reference indexes of variable and mixed-rate loans: euro area and United States (same list as RATE_INDEXES in app.js).
-# The schedule uses the current value entered by hand: HomeCoin does not download rates
+# reference indexes of variable and mixed-rate loans, per reference currency (same list as RATE_INDEXES in app.js; the
+# UI offers only those of the installation's currency, the first is the default). Any of them stays valid in a saved loan,
+# e.g. after a change of currency. The schedule uses the current value entered by hand: HomeCoin does not download rates
 RATE_INDEX_GROUPS = {
-    "Europe": ("Euribor 1M", "Euribor 3M", "Euribor 6M", "Euribor 12M"),
-    "United States": ("SOFR 30-day average", "Term SOFR 1M", "Term SOFR 3M", "Term SOFR 6M", "US Treasury 1Y (CMT)",
-                      "US Prime Rate"),
+    "EUR": ("Euribor 3M", "Euribor 1M", "Euribor 6M", "Euribor 12M"),
+    "USD": ("SOFR 30-day average", "Term SOFR 1M", "Term SOFR 3M", "Term SOFR 6M", "US Treasury 1Y (CMT)", "US Prime Rate"),
+    "GBP": ("Bank of England Bank Rate", "SONIA"),
+    "JPY": ("Short-term prime rate (Japan)", "TIBOR 3M", "TONA"),
+    "CHF": ("SARON",),
+    "CAD": ("Canadian prime rate", "CORRA"),
+    "AUD": ("RBA cash rate", "BBSW 3M"),
+    "INR": ("RBI repo rate", "MCLR 1Y"),
 }
 RATE_INDEXES = tuple(i for g in RATE_INDEX_GROUPS.values() for i in g)
-DEFAULT_RATE_INDEX = {"EUR": "Euribor 3M", "USD": "SOFR 30-day average"}
+DEFAULT_RATE_INDEX = {cur: g[0] for cur, g in RATE_INDEX_GROUPS.items()}
 
 
 def rate_fn(rec):
@@ -101,7 +108,7 @@ def rate_fn(rec):
 
 def rate_label(rec):
     kind = rec.get("rate_type") or "fixed"
-    pct = lambda x: f"{x:g}".replace(".", "." if CURRENCY["code"] == "USD" else ",") + "%"  # number format of the currency
+    pct = lambda x: fmt_decimal(x) + "%"  # decimal separator of the currency's country
     var = f"{rec.get('rate_index') or 'index'} + {pct(rec.get('spread') or 0)}"
     if kind == "variable":
         return f"variable: {var}"

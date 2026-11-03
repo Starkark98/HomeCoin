@@ -2,7 +2,8 @@
 import calendar
 import datetime as dt
 import re
-from decimal import Decimal, DecimalException
+from collections import namedtuple
+from decimal import ROUND_HALF_UP, Decimal, DecimalException
 
 FREQUENCIES = {
     "weekly": ("d", 7),
@@ -26,9 +27,25 @@ OTHER_INVESTMENTS = {"Other investments (excluded)", "Altri investimenti (esclus
 TECH_CATEGORIES = BALANCE_ADJUSTMENT | OTHER_INVESTMENTS
 
 # reference currency of the whole installation: a label only (amounts are never converted); market prices are converted
-# into it. code -> (symbol, number format of the UI: it-IT "1.234,56 €" or en-US "$1,234.56")
-CURRENCIES = {"EUR": ("€", "it-IT"), "USD": ("$", "en-US")}
+# into it. Each currency uses the number format of its main country (same table as CURRENCIES in app.js):
+# code -> symbol, UI locale, decimal and thousands separators, decimals shown, symbol before the number, space after it
+Currency = namedtuple("Currency", "symbol locale decimal thousands digits prefix space name")
+CURRENCIES = {
+    "EUR": Currency("€", "it-IT", ",", ".", 2, False, True, "Euro"),               # 1.234,56 €
+    "USD": Currency("$", "en-US", ".", ",", 2, True, False, "US dollar"),          # $1,234.56
+    "GBP": Currency("£", "en-GB", ".", ",", 2, True, False, "British pound"),      # £1,234.56
+    "JPY": Currency("¥", "en-JP", ".", ",", 0, True, False, "Japanese yen"),       # ¥1,235 (no minor unit)
+    "CHF": Currency("CHF", "de-CH", ".", "'", 2, True, True, "Swiss franc"),       # CHF 1'234.56 (as Chrome and Edge write it)
+    "CAD": Currency("$", "en-CA", ".", ",", 2, True, False, "Canadian dollar"),    # $1,234.56
+    "AUD": Currency("$", "en-AU", ".", ",", 2, True, False, "Australian dollar"),  # $1,234.56
+    "INR": Currency("₹", "en-IN", ".", ",", 2, True, False, "Indian rupee"),       # ₹1,23,456.78 (Indian grouping)
+}
 CURRENCY = {"code": "EUR"}  # current one, loaded from the settings when HomeCoin is unlocked (activity log texts)
+# date format of the Excel exports, as in the currency's country (the UI shows "02 Nov 26", the same everywhere)
+DATE_EXCEL = {"EUR": "DD/MM/YYYY", "USD": "MM/DD/YYYY", "GBP": "DD/MM/YYYY", "JPY": "YYYY/MM/DD", "CHF": "DD.MM.YYYY",
+              "CAD": "YYYY-MM-DD", "AUD": "DD/MM/YYYY", "INR": "DD/MM/YYYY"}
+# symbols and codes stripped from typed or imported amounts (longest first: "US$" before "$")
+_MONEY_MARKS = re.compile(r"US\$|C\$|A\$|CA\$|AU\$|Rs\.?|CHF|Fr\.|EUR|USD|GBP|JPY|CAD|AUD|INR|[€$£¥￥₹]")
 
 
 def currency_of(db):
@@ -36,14 +53,39 @@ def currency_of(db):
     return r[0] if r and r[0] in CURRENCIES else "EUR"
 
 
+def _group(int_part, sep, indian=False):
+    """Thousands groups of a string of digits: 1.234.567 or, in India, 12,34,567 (lakh and crore)."""
+    if indian and len(int_part) > 3:
+        head, tail = int_part[:-3], int_part[-3:]
+        pairs = [head[max(0, i - 2):i] for i in range(len(head), 0, -2)][::-1]
+        return sep.join(pairs + [tail])
+    return f"{int(int_part):,}".replace(",", sep)
+
+
+def fmt_number(value, code=None, digits=None):
+    """A number in the format of the currency's country, without the symbol: 1.234,5 · 1,234.5 · 1'234.5."""
+    c = CURRENCIES[code or CURRENCY["code"]]
+    digits = c.digits if digits is None else digits
+    # half away from zero, like the browser (Intl.NumberFormat): ¥0.5 → ¥1, not the "round half to even" of Python
+    d = Decimal(str(abs(value))).quantize(Decimal(1).scaleb(-digits), rounding=ROUND_HALF_UP)
+    int_part, _, frac = f"{d:f}".partition(".")
+    out = _group(int_part, c.thousands, indian=c.locale == "en-IN")
+    return ("−" if value < 0 and d else "") + out + (c.decimal + frac if frac else "")
+
+
 def fmt_money(cents, code=None):
-    """Amount for texts written by the server (activity log): 1.234,56 € or $1,234.56."""
+    """Amount for texts written by the server (activity log, warnings): 1.234,56 € · $1,234.56 · CHF 1'234.56 · ¥1,235."""
     code = code or CURRENCY["code"]
-    s = f"{abs(cents) / 100:,.2f}"
-    sign = "−" if cents < 0 else ""
-    if code == "USD":
-        return f"{sign}${s}"
-    return sign + s.replace(",", "_").replace(".", ",").replace("_", ".") + " €"
+    c = CURRENCIES[code]
+    n = fmt_number(abs(cents) / 100, code)
+    sign = "−" if cents < 0 and n.strip("0.,'") else ""  # no "−0" when the amount rounds to zero
+    sp = " " if c.space else ""
+    return f"{sign}{c.symbol}{sp}{n}" if c.prefix else f"{sign}{n}{sp}{c.symbol}"
+
+
+def fmt_decimal(value, code=None):
+    """A plain decimal (a rate in %, a quantity) with the decimal separator of the currency's country: 3,1 or 3.1."""
+    return f"{value:g}".replace(".", CURRENCIES[code or CURRENCY["code"]].decimal)
 
 
 DATE_FORMATS = (
@@ -70,7 +112,7 @@ def parse_number(value):
         if v != v or v in (float("inf"), float("-inf")):
             raise ValueError("invalid number")
         return v
-    s = str(value).strip().replace("€", "").replace("$", "").replace(" ", "").replace(" ", "").replace("'", "").replace("−", "-")
+    s = _MONEY_MARKS.sub("", str(value).strip()).replace("’", "").replace(" ", "").replace(" ", "").replace("'", "").replace("−", "-")
     if not s:
         return None
     if "," in s and "." in s:
@@ -110,7 +152,7 @@ def parse_amount(value):
     s = str(value).strip()
     if not s:
         return None
-    s = s.replace("€", "").replace("EUR", "").replace("US$", "").replace("$", "").replace("USD", "").replace(" ", "").replace(" ", "").replace("'", "")
+    s = _MONEY_MARKS.sub("", s).replace("’", "").replace("−", "-").replace(" ", "").replace(" ", "").replace("'", "")
     neg = False
     if s.startswith("(") and s.endswith(")"):
         neg, s = True, s[1:-1]

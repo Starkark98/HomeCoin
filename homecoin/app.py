@@ -26,7 +26,7 @@ from . import updater
 from . import util
 from .util import FREQUENCIES, add_months, months_between, parse_date, parse_number, rule_matches
 
-VERSION = "1.2.2"
+VERSION = "1.3.0"
 STATIC_DIR = dbm.BASE_DIR / "static"
 KINDS = ("expense", "income", "transfer")
 ACCOUNT_TYPES = ("corrente", "risparmio", "credito", "prepagata", "contanti", "investimenti", "altro")
@@ -2398,8 +2398,12 @@ def create_app(port):
             c.font = Font(bold=True, color="FFFFFF")
             c.fill = fill
             c.alignment = Alignment(horizontal="center")
-        fmt = ('"$"#,##0.00;[Red]-"$"#,##0.00' if util.currency_of(get_db()) == "USD"
-               else '#,##0.00 "€";[Red]-#,##0.00 "€"')  # separators follow the Excel language, the symbol the reference currency
+        # separators follow the Excel language; symbol, its position and the decimals follow the reference currency
+        cur = util.CURRENCIES[util.currency_of(get_db())]
+        n = "#,##0" + ("." + "0" * cur.digits if cur.digits else "")
+        sym = f'"{cur.symbol}{" " if cur.space else ""}"' if cur.prefix else f'"{" " if cur.space else ""}{cur.symbol}"'
+        one = f"{sym}{n}" if cur.prefix else f"{n}{sym}"
+        fmt = f"{one};[Red]-{one}"
         for col in money_cols:
             for row in ws.iter_rows(min_row=2, min_col=col, max_col=col):
                 for c in row:
@@ -2422,16 +2426,19 @@ def create_app(port):
                 r = list(r)
                 r[0] = parse_date(r[0])
                 ws.append(r)
-                ws.cell(ws.max_row, 1).number_format = "DD/MM/YYYY"
+                ws.cell(ws.max_row, 1).number_format = util.DATE_EXCEL[util.currency_of(get_db())]
             style_sheet(ws, [7], [12, 11, 45, 22, 20, 20, 14, 30, 12])
             ws.auto_filter.ref = ws.dimensions
             return xlsx_response(wb, f"homecoin-transactions-{stamp}.xlsx")
         buf = io.StringIO()
-        w = csv.writer(buf, delimiter=";")
+        # as a spreadsheet of the currency's country expects it: comma decimals with ";" between columns (euro),
+        # dot decimals with "," between columns (pound, dollars, yen, franc, rupee)
+        cur = util.CURRENCIES[util.currency_of(get_db())]
+        w = csv.writer(buf, delimiter=";" if cur.decimal == "," else ",")
         w.writerow(header)
         for r in data:
             r = list(r)
-            r[6] = f"{r[6]:.2f}".replace(".", ",")
+            r[6] = f"{r[6]:.{cur.digits}f}".replace(".", cur.decimal)
             # formula injection protection (CSV opened in Excel): texts starting with = + - @ become plain text
             w.writerow([("'" + v) if isinstance(v, str) and v[:1] in ("=", "+", "-", "@", "\t", "\r") and i != 6 else v
                         for i, v in enumerate(r)])

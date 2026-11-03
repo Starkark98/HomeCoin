@@ -1,6 +1,6 @@
 # CLAUDE.md — HomeCoin
 
-Guidance for Claude Code when working in this repository. Household finance app that runs locally on Windows: Python/Flask server on `127.0.0.1`, encrypted SQLCipher database, vanilla JS single-page UI. Current version: see `VERSION` in `homecoin/app.py` (1.2.2 at the time of writing).
+Guidance for Claude Code when working in this repository. Household finance app that runs locally on Windows: Python/Flask server on `127.0.0.1`, encrypted SQLCipher database, vanilla JS single-page UI. Current version: see `VERSION` in `homecoin/app.py` (1.3.0 at the time of writing).
 
 ## Hard rules
 
@@ -73,7 +73,7 @@ Key concepts:
 - **Spaces** (`portfolios`, internal name; UI "space"): type `family` (Household) or `personal`. The client sends the active space in the `X-Portfolio` header (`?pf=` for export links); server helpers `pf()`, `PF_ACCOUNTS`, `own_account`, `visible_tx`. Transfers to accounts of other spaces are visible in both, are not income/expense, and count in net worth.
 - **Optional tabs** per space: `portfolios.features` (JSON). Core tabs are fixed; `OPTIONAL_FEATURES` = budget, obiettivi, emergenza, calendario, mutuo, ripartizione, investimenti, risparmio; hiding a tab never deletes data.
 - **Amounts are integer cents** everywhere in the API and DB.
-- **Reference currency** (1.1.0): one per installation, `EUR` or `USD`, setting `currency` (global, no `@space`), `util.CURRENCIES`/`util.currency_of`, `PUT /api/settings/currency` (needs `confirm: true`). It is a **label: amounts are never converted**. Market prices are converted into it (`refresh_prices`/`refresh_history` use `{base}{cur}=X`); the columns `price_eur` keep their historical name but hold the price in the reference currency, and a change clears them and `price_history`. UI: `setCurrency()` sets `CUR`, `CUR_SYM`, `LOCALE` (it-IT or en-US) and the formatters; never hard-code `€` or `'it-IT'` (use `money`, `money0`, `moneyK`, `num`, `CUR_SYM`). Server texts use `util.fmt_money` (activity log via `audit.eur`).
+- **Reference currency** (1.1.0; eight since 1.3): one per installation, `EUR USD GBP JPY CHF CAD AUD INR`, setting `currency` (global, no `@space`), `util.CURRENCIES` (namedtuple: symbol, locale, decimal, thousands, digits, prefix, space, name) mirrored by `CURRENCIES` in app.js, `util.currency_of`, `PUT /api/settings/currency` (needs `confirm: true`). It is a **label: amounts are never converted** (still integer cents, also for the yen, which is shown with 0 decimals). Each currency uses its country's format (CHF `'` thousands as Chrome/Edge write it, INR lakh grouping, JPY via `en-JP` for the plain ¥). Market prices are converted into it (`{base}{cur}=X`, London pence handled); `price_eur` keeps its historical name but holds the price in the reference currency, and a change clears it and `price_history`. UI: `setCurrency()` sets `CUR`, `CUR_SYM`, `LOCALE`, `DEC`, `DIGITS`, `SYM_FIRST` and the formatters; **never test a currency code for formatting** (use `DEC`, `DIGITS`, `money`, `money0`, `moneyK`, `moneyInput`, `moneyPlaceholder`, `num`, `CUR_SYM`). Server texts use `util.fmt_money`/`fmt_decimal` (half away from zero, like Intl). Loan indexes: `tools.RATE_INDEX_GROUPS` keyed by currency (first = default), UI offers only the current currency's plus a loan's saved index; any index stays valid server side.
 - **Number input**: one parser everywhere (`util.parse_number` server side, `normNum`/`parseMoney`/`parseSignedMoney`/`parseQty` in app.js). For money "1.500" = 1500 in euro (in dollars the dot is always the decimal separator); for quantities and prices "9.014" = 9.014. Display follows the reference currency.
 - **Rebalancing** (1.1.0): `tools.rebalance` + `GET/POST /api/investments/rebalance` (POST calculates, `save: true` stores the settings in `rebalance@<space>`). Mode `class` (asset classes + `liquidità` = broker cash, `non specificato` = accounts valued as a whole) or `security` (`h:<holding id>`, `cash`, `acc:<account id>`); values are the same as the Allocation chart; buys only (new money to the gaps) or buys and sells (exactly to target); `excluded {class: [...], security: [...]}` leaves rows out (a security excluded in `security` also leaves its class); a threshold of 0 = not used. It never records trades.
 - **Monthly balance** (`tools.savings`): saved = month surplus (income − spent − other spaces), never the change in cash; "invested" = buys − sells of non-money-market securities, shown separately; money-market ETFs (`asset_class` `monetario`) count as cash.
@@ -99,7 +99,8 @@ Key concepts:
 ## Decisions already taken (do not reopen without asking)
 
 - Price source stays **Yahoo Finance**; Investing.com was rejected (no API, scraping forbidden by its terms). Codes not quoted as-is (Morningstar `0P…`, ISIN) are resolved to the full Yahoo symbol (e.g. `.F`).
-- Mortgage: fixed / variable / mixed rate (index + spread); indexes Euribor (Europe) or SOFR / Term SOFR / 1-year Treasury CMT / Prime (United States), list in `tools.RATE_INDEX_GROUPS` and `RATE_INDEXES` in app.js, default by reference currency, current value typed by hand (no download); APR, ARM caps and ancillary costs are deliberately out of scope.
+- Mortgage: fixed / variable / mixed rate (index + spread); indexes per reference currency, list in `tools.RATE_INDEX_GROUPS` and `RATE_INDEXES` in app.js, default by reference currency, current value typed by hand (no download); APR, ARM caps and ancillary costs are deliberately out of scope.
+- Currencies (1.3): eight, chosen for the widest reach with few currencies; no CNY (Yahoo is blocked in mainland China and the UI is English). Number format = the currency's country, no separate format setting.
 - Variable recurring items record nothing on their own: they link the real transaction (keyword + plausible amount) and forecast from the median of the last 6.
 - Calendar: "cash in accounts" (operating accounts only) is distinct from the emergency fund "available reserve" (accounts + uninvested broker cash + money-market ETFs).
 - Estimated regular income/expenses only for significant amounts (≥ 50 € and ≥ 5% of the largest).
@@ -108,7 +109,7 @@ Key concepts:
 
 ## Known gaps
 
-- No automated tests in the repo: the maintainer keeps a regression + fuzz suite outside it (made-up data only); last full run on 1.2.2.
+- No automated tests in the repo: the maintainer keeps a regression + fuzz suite outside it (made-up data only); last full run on 1.3.0.
 - Automatic updates only work once the GitHub repository is public (the API returns 404 for a private one without a token) and for releases published with their signed manifest.
 - `util.STOPWORDS` contains Italian bank words only (adding English ones would change payee keys of existing data).
 - Activity-log rows written before the translation stay in Italian; old investment-plan notes may read half Italian, half English.

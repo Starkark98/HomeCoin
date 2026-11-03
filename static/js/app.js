@@ -5,17 +5,37 @@
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-// reference currency of the installation (Settings): a label only, amounts are never converted. The number format
-// follows it: € → 1.234,56 € (it-IT) · $ → $1,234.56 (en-US)
-const CURRENCIES = { EUR: { symbol: '€', locale: 'it-IT', name: 'Euro' }, USD: { symbol: '$', locale: 'en-US', name: 'US dollar' } };
-let CUR = 'EUR', CUR_SYM = '€', LOCALE = 'it-IT', MONEY, MONEY0, _unitFmt = {};
+// reference currency of the installation (Settings): a label only, amounts are never converted. Each currency uses the
+// number format of its main country (same table as util.CURRENCIES): 1.234,56 € · $1,234.56 · £1,234.56 · ¥1,235 ·
+// CHF 1'234.56 · ₹1,23,456.78. `short` tells apart the three dollars in the currency picker
+const CURRENCIES = {
+  EUR: { symbol: '€', locale: 'it-IT', name: 'Euro', short: '€' },
+  USD: { symbol: '$', locale: 'en-US', name: 'US dollar', short: 'US$' },
+  GBP: { symbol: '£', locale: 'en-GB', name: 'British pound', short: '£' },
+  JPY: { symbol: '¥', locale: 'en-JP', name: 'Japanese yen', short: '¥', steps: [100, 500, 1000, 5000] },  // en-JP: the plain ¥ (ja-JP writes ￥)
+  CHF: { symbol: 'CHF', locale: 'de-CH', name: 'Swiss franc', short: 'CHF' },
+  CAD: { symbol: '$', locale: 'en-CA', name: 'Canadian dollar', short: 'C$' },
+  AUD: { symbol: '$', locale: 'en-AU', name: 'Australian dollar', short: 'A$' },
+  INR: { symbol: '₹', locale: 'en-IN', name: 'Indian rupee', short: '₹', steps: [10, 50, 100, 500] },
+};
+// `steps`: rounding choices of the fair split, in whole units (default 1, 5, 10, 50: the yen and the rupee are worth less)
+// DEC: decimal separator of the currency ('.' or ','), DIGITS: decimals of an amount (0 for the yen),
+// SYM_FIRST: symbol before the number. All the number rules of the UI follow these, never a currency code
+let CUR = 'EUR', CUR_SYM = '€', LOCALE = 'it-IT', DEC = ',', DIGITS = 2, SYM_FIRST = false, MONEY, MONEY0, _unitFmt = {};
 function setCurrency(code) {
   CUR = CURRENCIES[code] ? code : 'EUR';
   ({ symbol: CUR_SYM, locale: LOCALE } = CURRENCIES[CUR]);
   MONEY = new Intl.NumberFormat(LOCALE, { style: 'currency', currency: CUR, useGrouping: 'always' });
   MONEY0 = new Intl.NumberFormat(LOCALE, { style: 'currency', currency: CUR, maximumFractionDigits: 0, useGrouping: 'always' });
+  DEC = new Intl.NumberFormat(LOCALE).formatToParts(1.5).find((p) => p.type === 'decimal').value;
+  DIGITS = MONEY.resolvedOptions().maximumFractionDigits;
+  const parts = MONEY.formatToParts(1).map((p) => p.type);
+  SYM_FIRST = parts.indexOf('currency') < parts.indexOf('integer');
   _unitFmt = {};
 }
+const currencySelect = (id, sel) => `<select id="${id}">${Object.entries(CURRENCIES).map(([k, c]) =>
+  `<option value="${k}" ${sel === k ? 'selected' : ''}>${esc(c.short)} ${esc(c.name)} (${k})</option>`).join('')}</select>`;
+const currencyExample = (code) => new Intl.NumberFormat(CURRENCIES[code].locale, { style: 'currency', currency: code, useGrouping: 'always' }).format(1234.56);
 setCurrency('EUR');
 const money = (c) => MONEY.format((c || 0) / 100);
 const money0 = (c) => MONEY0.format((c || 0) / 100);
@@ -27,27 +47,36 @@ const unitPrice = (v, cur = CUR) => {
   _unitFmt[c] ||= new Intl.NumberFormat(LOCALE, { style: 'currency', currency: c, currencyDisplay: 'narrowSymbol', minimumFractionDigits: 2, maximumFractionDigits: 4 });
   return _unitFmt[c].format(v);
 };
-const moneyInput = (c) => (c ? (c / 100).toFixed(2).replace('.', CUR === 'USD' ? '.' : ',') : '');
+const moneyInput = (c) => (c ? (c / 100).toFixed(DIGITS).replace('.', DEC) : '');
+const moneyPlaceholder = () => (0).toFixed(DIGITS).replace('.', DEC);  // 0,00 · 0.00 · 0
 const pct = (x) => `${Math.round(x * 100)}%`;
-const decInput = (v) => (v == null ? '' : String(v).replace('.', CUR === 'USD' ? '.' : ','));  // plain decimal (rate %, quantity) for inputs
-// reference indexes of variable and mixed-rate loans (same list as tools.RATE_INDEXES); the default follows the currency
+const decInput = (v) => (v == null ? '' : String(v).replace('.', DEC));  // plain decimal (rate %, quantity) for inputs
+// reference indexes of variable and mixed-rate loans, per currency (same list as tools.RATE_INDEX_GROUPS). Only those of
+// the installation's currency are offered (the first is the default); an index saved under another currency stays shown
 const RATE_INDEXES = {
-  Europe: ['Euribor 1M', 'Euribor 3M', 'Euribor 6M', 'Euribor 12M'],
-  'United States': ['SOFR 30-day average', 'Term SOFR 1M', 'Term SOFR 3M', 'Term SOFR 6M', 'US Treasury 1Y (CMT)', 'US Prime Rate'],
+  EUR: ['Euribor 3M', 'Euribor 1M', 'Euribor 6M', 'Euribor 12M'],
+  USD: ['SOFR 30-day average', 'Term SOFR 1M', 'Term SOFR 3M', 'Term SOFR 6M', 'US Treasury 1Y (CMT)', 'US Prime Rate'],
+  GBP: ['Bank of England Bank Rate', 'SONIA'],
+  JPY: ['Short-term prime rate (Japan)', 'TIBOR 3M', 'TONA'],
+  CHF: ['SARON'],
+  CAD: ['Canadian prime rate', 'CORRA'],
+  AUD: ['RBA cash rate', 'BBSW 3M'],
+  INR: ['RBI repo rate', 'MCLR 1Y'],
 };
-const defaultRateIndex = () => (CUR === 'USD' ? 'SOFR 30-day average' : 'Euribor 3M');
+const defaultRateIndex = () => RATE_INDEXES[CUR][0];
+const rateIndexOptions = (current) => [...RATE_INDEXES[CUR], ...(current && !RATE_INDEXES[CUR].includes(current) ? [current] : [])];
 const debounce = (fn, ms = 300) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
 
 // hand-typed numbers, a single rule for the whole app (like util.parse_number on the server):
-// "1.234,56" · "1234,56" · "1234.56" · "1,234.56" · and for amounts "1.500" = 1500 (thousands dot; in dollars the dot
-// is always the decimal one: "1.500" = 1,5)
+// "1.234,56" · "1234,56" · "1234.56" · "1,234.56" · "1’234.56" · "1,23,456.78" · and for amounts "1.500" = 1500 when the
+// currency writes decimals with a comma (euro); where the dot is the decimal separator, "1.500" = 1.5
 function normNum(s, { thousandsDot = true } = {}) {
-  s = String(s ?? '').trim().replace(/[€$£\s ']/g, '').replace(/^−/, '-');
+  s = String(s ?? '').trim().replace(/US\$|C\$|A\$|CHF|Fr\.|[€$£¥￥₹\s '’]/g, '').replace(/^−/, '-');
   if (!s) return '';
   const c = s.lastIndexOf(','), d = s.lastIndexOf('.');
   if (c >= 0 && d >= 0) s = c > d ? s.replace(/\./g, '').replace(',', '.') : s.replace(/,/g, '');  // the last separator is the decimal one
   else if (c >= 0) s = (s.match(/,/g).length > 1 || (thousandsDot && /^[-+]?\d{1,3},\d{3}$/.test(s)) ? s.replace(/,/g, '') : s.replace(',', '.'));
-  else if (d >= 0 && (s.match(/\./g).length > 1 || (thousandsDot && CUR !== 'USD' && /^[-+]?\d{1,3}\.\d{3}$/.test(s)))) s = s.replace(/\./g, '');
+  else if (d >= 0 && (s.match(/\./g).length > 1 || (thousandsDot && DEC === ',' && /^[-+]?\d{1,3}\.\d{3}$/.test(s)))) s = s.replace(/\./g, '');
   return s;
 }
 function parseMoney(s) {  // amount in cents, always positive (the sign comes from the transaction type)
@@ -304,19 +333,18 @@ const LOCK_VIEWS = {
         <div class="wiz-steps"><span class="done">1 Password</span><span class="done">2 Recovery key</span><span class="on">3 Your setup</span></div>
         <h2>Set up HomeCoin ✨</h2>
         <p class="muted small">A few choices to start; you can change everything later in Settings and Accounts.</p>
-        <div class="field"><span>Currency of your accounts</span><div class="seg" id="w-cur">${Object.entries(CURRENCIES).map(([k, c]) =>
-          `<button type="button" data-c="${k}" class="${st.cur === k ? 'on' : ''}">${esc(c.symbol)} ${esc(c.name)}</button>`).join('')}</div>
-          <span class="muted small">Amounts are shown as ${esc(new Intl.NumberFormat(CURRENCIES[st.cur].locale, { style: 'currency', currency: st.cur, useGrouping: 'always' }).format(1234.56))}. A label only: nothing is ever converted.</span></div>
+        <label class="field">Currency of your accounts${currencySelect('w-cur', st.cur)}
+          <span class="muted small">Amounts are shown as ${esc(currencyExample(st.cur))}. A label only: nothing is ever converted.</span></label>
         <div class="field"><span>First space</span><div class="seg" id="w-type">${Object.entries(PF_TYPES).map(([k, t]) =>
           `<button type="button" data-t="${k}" class="${st.type === k ? 'on' : ''}">${t[2]} ${esc(t[0])}</button>`).join('')}</div>
           <span class="muted small">${st.type === 'family' ? 'Shared household finances: joint account, mortgage, fair split between people.' : 'Your own finances: salary, savings, investments.'} You can add more spaces later.</span></div>
         <label class="field">Name of the space<input id="w-name" maxlength="40" value="${esc(st.name ?? PF_TYPES[st.type][1])}"></label>
         <label class="field">Main account<input id="w-acc" maxlength="60" value="${esc(st.acc ?? (st.type === 'family' ? 'Joint account' : 'Current account'))}"></label>
-        <label class="field">Its balance today <span class="muted small">(optional)</span><input id="w-bal" inputmode="decimal" placeholder="${st.cur === 'USD' ? '0.00' : '0,00'}" value="${esc(st.bal ?? '')}"></label>
+        <label class="field">Its balance today <span class="muted small">(optional)</span><input id="w-bal" inputmode="decimal" placeholder="${moneyPlaceholder()}" value="${esc(st.bal ?? '')}"></label>
         <div class="lock-err" id="lock-err"></div>
         <button class="btn btn-primary" id="l-go">Start using HomeCoin →</button></form>`;
       const keep = () => Object.assign(st, { name: $('#w-name').value, acc: $('#w-acc').value, bal: $('#w-bal').value });
-      $$('#w-cur button').forEach((b) => (b.onclick = () => { keep(); st.cur = b.dataset.c; setCurrency(st.cur); draw(); }));
+      $('#w-cur').onchange = (e) => { keep(); st.cur = e.target.value; setCurrency(st.cur); draw(); };
       $$('#w-type button').forEach((b) => (b.onclick = () => { keep(); if (st.name === PF_TYPES[st.type][1]) st.name = null; if (/^(Joint|Current) account$/.test(st.acc)) st.acc = null; st.type = b.dataset.t; draw(); }));
       lockSubmit($('#l-go'), async () => {
         keep();
@@ -549,8 +577,9 @@ function chartTheme() {
 // ================================================================ privacy: hidden amounts (eye icon)
 // Every euro amount on the page is wrapped in <span class="m"> (including ones added later, via MutationObserver);
 // with body.privacy the CSS blurs them. In charts (canvas) axes and tooltips show "•••".
-// European format with the symbol after (1.234,56 € · 6,91 $) or US format with the symbol before ($1,234.56 · -$1.2K)
-const AMOUNT_RE = /[−+-]?\d{1,3}(?:\.\d{3})*(?:,\d+)?\s?K?\s?(?:€|\$|£|¥|CHF)|[−+-]?(?:€|\$|£|¥)\s?\d{1,3}(?:,\d{3})*(?:\.\d+)?K?/g;
+// Symbol after the number (1.234,56 € · 6,91 $) or before it ($1,234.56 · -$1.2K · CHF 1’234.56 · ₹1,23,456.78 · ￥1,235)
+const AMOUNT_NUM = String.raw`\d{1,3}(?:[.,’'  ]\d{2,3})*(?:[.,]\d+)?`;
+const AMOUNT_RE = new RegExp(String.raw`[−+-]?${AMOUNT_NUM}\s?K?\s?(?:€|CHF|\$|£|¥|￥|₹)|[−+-]?(?:€|CHF|US\$|CA\$|A\$|\$|£|¥|￥|₹)\s?[−-]?${AMOUNT_NUM}K?`, 'g');
 const maskAmounts = (v) => (Array.isArray(v) ? v.map(maskAmounts) : typeof v === 'string' ? v.replace(AMOUNT_RE, '•••') : v);
 const privacyOn = () => document.body.classList.contains('privacy');
 function wrapAmounts(root) {
@@ -1242,7 +1271,7 @@ function accountModal(a = null, preset = {}) {
     <div class="form-grid">
       <label class="field full">Name <input id="a-name" maxlength="60" value="${esc(x.name)}" placeholder="E.g. Main bank account, Prepaid card, Cash" autofocus></label>
       <label class="field">Type <select id="a-type">${Object.entries(ACC_TYPES).map(([k, l]) => `<option value="${k}" ${x.type === k ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
-      <label class="field">Opening balance <input id="a-init" inputmode="decimal" value="${moneyInput(x.initial_balance)}" placeholder="${CUR === 'USD' ? '0.00' : '0,00'}"></label>
+      <label class="field">Opening balance <input id="a-init" inputmode="decimal" value="${moneyInput(x.initial_balance)}" placeholder="${moneyPlaceholder()}"></label>
       <div class="full acc-type-help" id="a-help"></div>
       <div class="field full">Color ${swatchPicker('a-color', x.color)}</div>
       <div class="field full">Icon ${emojiPicker('a-icon', x.icon)}</div>
@@ -1476,8 +1505,8 @@ function recurringModal(r = null) {
             `<option value="${k}" ${(x.rate_type || (x.rate != null ? 'fixed' : '')) === k ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
           <label class="field" data-rt="fixed mixed">Fixed rate (%) <input id="r-rate" inputmode="decimal" value="${decInput(x.rate)}" placeholder="3"></label>
           <label class="field" data-rt="mixed">Fixed for (years) <input id="r-fyears" type="number" min="1" max="40" value="${x.fixed_years ?? ''}" placeholder="5" title="e.g. 5 for a 5/1 ARM"></label>
-          <label class="field" data-rt="variable mixed">Index <select id="r-index">${Object.entries(RATE_INDEXES).map(([area, list]) => `<optgroup label="${esc(area)}">${list.map((i) =>
-            `<option ${(x.rate_index || defaultRateIndex()) === i ? 'selected' : ''}>${esc(i)}</option>`).join('')}</optgroup>`).join('')}</select></label>
+          <label class="field" data-rt="variable mixed">Index <select id="r-index">${rateIndexOptions(x.rate_index).map((i) =>
+            `<option ${(x.rate_index || defaultRateIndex()) === i ? 'selected' : ''}>${esc(i)}</option>`).join('')}</select></label>
           <label class="field" data-rt="variable mixed">Spread / margin (%) <input id="r-spread" inputmode="decimal" value="${decInput(x.spread)}" placeholder="${decInput(1.6)}"></label>
           <label class="field" data-rt="variable mixed">Current index value (%) <input id="r-ivalue" inputmode="decimal" value="${decInput(x.index_value)}" placeholder="optional"></label>
         </div></div>
@@ -1820,11 +1849,13 @@ async function renderReport(v) {
   if (d.rows.length) drawReportChart(data, d, single, tab);
 }
 
-// compact amounts for axes and labels: 950 €, 1,2K €, 12K € · $950, $1.2K, $12K
+// compact amounts for axes and labels: 950 €, 1,2K €, 12K € · $950, $1.2K, $12K · CHF 1.2K · ¥1.2K (symbol where the currency puts it)
 const moneyK = (c) => {
   if (Math.abs(c) < 100000) return money0(c);
-  const k = `${(c / 100000).toLocaleString(LOCALE, { maximumFractionDigits: Math.abs(c) >= 1000000 ? 0 : 1 })}K`;
-  return CUR === 'USD' ? (k.startsWith('-') ? `-$${k.slice(1)}` : `$${k}`) : `${k} €`;
+  const k = `${(Math.abs(c) / 100000).toLocaleString(LOCALE, { maximumFractionDigits: Math.abs(c) >= 1000000 ? 0 : 1 })}K`;
+  const sym = MONEY.formatToParts(1).find((p) => p.type === 'currency').value;
+  const gap = /\s/.test(MONEY.formatToParts(1).find((p) => p.type === 'literal')?.value || '') ? ' ' : '';
+  return (c < 0 ? '-' : '') + (SYM_FIRST ? `${sym}${gap}${k}` : `${k}${gap || ' '}${sym}`);
 };
 
 function drawReportChart(data, d, single, tab) {
@@ -2013,8 +2044,9 @@ async function renderRipartizione(v) {
           <label class="field full">Calculation basis <select id="sp-base">${Object.entries(BASE_LABEL).map(([k, l]) => `<option value="${k}" ${s.split_base === k ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
           <label class="field">Averaging period <select id="sp-months">${[3, 6, 12, 24].map((m) => `<option value="${m}" ${+s.split_months === m ? 'selected' : ''}>Last ${m} full months</option>`).join('')}<option value="all" ${s.split_months === 'all' ? 'selected' : ''}>Entire history</option></select></label>
           <label class="field">Margin for unexpected costs (%) <input id="sp-margin" type="number" min="0" max="50" step="1" value="${esc(s.split_margin)}"></label>
-          <label class="field">Round contributions to <select id="sp-round">${[1, 5, 10, 50].map((r) => `<option value="${r}" ${+s.split_round === r ? 'selected' : ''}>${esc(money0(r * 100))}</option>`).join('')}</select></label>
-          <label class="field">Minimum contribution (${CUR_SYM}) <input id="sp-min" type="number" min="0" step="5" value="${esc(s.split_minimum)}"></label>
+          <label class="field">Round contributions to <select id="sp-round">${[...new Set([...(CURRENCIES[CUR].steps || [1, 5, 10, 50]), +s.split_round])].sort((a, b) => a - b)
+            .map((r) => `<option value="${r}" ${+s.split_round === r ? 'selected' : ''}>${esc(money0(r * 100))}</option>`).join('')}</select></label>
+          <label class="field">Minimum contribution (${CUR_SYM}) <input id="sp-min" type="number" min="0" step="${(CURRENCIES[CUR].steps || [1, 5])[1]}" value="${esc(s.split_minimum)}"></label>
         </div></div>
     </div>
     <div class="card" id="sp-manual" style="margin-bottom:18px"><div class="card-head"><div><h3>✏️ Amounts entered by hand</h3>
@@ -2606,7 +2638,7 @@ async function rebalanceCard(det) {
       <div class="rb-controls">
         <label class="field">Drift threshold (points) <input id="rb-abs" inputmode="decimal" value="${cfg.drift_abs ?? ''}" placeholder="off" title="Rebalance when a weight is this many percentage points away from its target"></label>
         <label class="field">or relative (% of the target) <input id="rb-rel" inputmode="decimal" value="${cfg.drift_rel ?? ''}" placeholder="off" title="e.g. 25: a 20% target is off below 15% or above 25%"></label>
-        <label class="field">New money to invest (${CUR_SYM}) <input id="rb-new" inputmode="decimal" value="${moneyInput(cfg.contribution)}" placeholder="${CUR === 'USD' ? '0.00' : '0,00'}"></label>
+        <label class="field">New money to invest (${CUR_SYM}) <input id="rb-new" inputmode="decimal" value="${moneyInput(cfg.contribution)}" placeholder="${moneyPlaceholder()}"></label>
         <label class="check" title="Without sells, only the new money is used, on the items below target"><input type="checkbox" id="rb-sells" ${cfg.sells ? 'checked' : ''}> Allow sells (exactly back to the targets)</label>
       </div>
       ${calcNotes(res.warnings)}
@@ -2998,7 +3030,7 @@ async function renderImpostazioni(v, params) {
       <div class="settings-row"><div><b>Theme</b><p class="muted small">Light, dark or same as the system</p></div>
         <div class="seg" id="s-theme">${[['system', '💻 System'], ['light', '☀️ Light'], ['dark', '🌙 Dark']].map(([k, l]) => `<button data-t="${k}" class="${th === k ? 'on' : ''}">${l}</button>`).join('')}</div></div>
       <div class="settings-row"><div><b>Reference currency</b><p class="muted small">Symbol and number format of every space: ${esc(money(123456))}. A label only: amounts are not converted</p></div>
-        <div class="seg" id="s-cur">${Object.entries(CURRENCIES).map(([k, c]) => `<button data-c="${k}" class="${CUR === k ? 'on' : ''}" title="${esc(c.name)}">${esc(c.symbol)} ${k}</button>`).join('')}</div></div>
+        <div style="width:220px;flex:none">${currencySelect('s-cur', CUR)}</div></div>
       <div class="settings-row"><div><b>Hide amounts</b><p class="muted small">The eye at the top blurs every amount, for when someone is looking at the screen</p></div></div>
       <div class="settings-row"><div><b>Shortcuts</b><p class="muted small"><span class="kbd">N</span> new transaction · <span class="kbd">Esc</span> closes dialogs</p></div></div>
     </div>
@@ -3113,21 +3145,23 @@ async function renderImpostazioni(v, params) {
 function bindSettingsCommon(v) {
   $$('#s-theme button').forEach((b) => (b.onclick = () => setTheme(b.dataset.t)));
   $('#s-backup')?.addEventListener('click', () => { S.lastBackup = todayIso(); });
-  $$('#s-cur button').forEach((b) => (b.onclick = async () => {
-    const code = b.dataset.c;
+  $('#s-cur')?.addEventListener('change', async (e) => {
+    const code = e.target.value;
     if (code === CUR) return;
     const c = CURRENCIES[code];
-    if (!(await confirmDialog(`HomeCoin will show every amount in ${c.name} (${c.symbol}) with the ${code === 'USD' ? 'US number format: $1,234.56' : 'European number format: 1.234,56 €'}. `
-      + 'Amounts are NOT converted: 1.000 stays 1.000, only the symbol changes. Use it only if your accounts are kept in that currency. '
-      + 'Security prices downloaded so far are cleared: use "Update prices" in Investments to get them again in the new currency.',
-    { ok: `Switch to ${code}`, danger: false, title: '⚠️ Change the reference currency' }))) return;
+    if (!(await confirmDialog(`HomeCoin will show every amount in ${c.name} (${code}), written as ${currencyExample(code)}. `
+      + 'Amounts are NOT converted: the numbers stay the same, only the symbol and the format change. Use it only if your accounts are kept in that currency. '
+      + `${DIGITS && !new Intl.NumberFormat(c.locale, { style: 'currency', currency: code }).resolvedOptions().maximumFractionDigits ? `The ${c.name.toLowerCase()} has no decimals: amounts are shown rounded. ` : ''}`
+      + 'Security prices downloaded so far are cleared: use "Update prices" in Investments to get them again in the new currency. '
+      + 'Variable-rate loans keep the index they have.',
+    { ok: `Switch to ${code}`, danger: false, title: '⚠️ Change the reference currency' }))) { e.target.value = CUR; return; }
     try {
       await api('/settings/currency', { method: 'PUT', body: { currency: code, confirm: true } });
       await loadMeta();
       toast(`Reference currency: ${c.name}`);
       route();
-    } catch (e) { fail(e); }
-  }));
+    } catch (err) { e.target.value = CUR; fail(err); }
+  });
   $('#s-pf-new')?.addEventListener('click', () => portfolioModal());
   $$('[data-pf-go]', v).forEach((b) => (b.onclick = () => switchPortfolio(+b.dataset.pfGo)));
   $$('[data-pf-edit]', v).forEach((b) => (b.onclick = () => portfolioModal(S.portfolios.find((p) => p.id === +b.dataset.pfEdit))));

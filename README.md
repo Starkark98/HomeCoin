@@ -2,7 +2,7 @@
 
 # HomeCoin *by Starkark98*
 
-![Version](https://img.shields.io/badge/version-1.2.2-8b5cf6)
+![Version](https://img.shields.io/badge/version-1.3.0-8b5cf6)
 ![Python](https://img.shields.io/badge/Python-3.12%20%7C%203.13%20%7C%203.14-3776AB?logo=python&logoColor=white)
 ![Platform](https://img.shields.io/badge/platform-Windows-0078D6)
 ![Data](https://img.shields.io/badge/data-encrypted%2C%20on%20your%20PC-16a34a)
@@ -129,7 +129,7 @@ The first time, HomeCoin guides you through five short steps:
 
 1. **Choose a password.** At least 8 characters; very common ones are refused. A short sentence is easy to remember and hard to guess.
 2. **Save your recovery key.** It is shown only once. Write it down or keep it in a password manager: it is the only way back in if you forget the password. Without the password and the recovery key, **nobody can open your data, not even the author**.
-3. **Pick your currency**: euro (€) or US dollar ($).
+3. **Pick your currency**: euro (€), US dollar ($), British pound (£), Japanese yen (¥), Swiss franc (CHF), Canadian dollar (C$), Australian dollar (A$) or Indian rupee (₹).
 4. **Create your first space**: *Household* (shared costs, several people paying in) or *Personal* (your own money). See [Spaces](#spaces).
 5. **Add your main account** and, if you want, its current balance.
 
@@ -165,8 +165,21 @@ Not every space needs every page: in Settings → Spaces you choose which option
 
 ## Typing amounts and dates
 
-- **Amounts follow your currency.** In euro: `1.500` means one thousand five hundred, and `1.234,56` or `1234.56` both work. In dollars: `1,500` is one thousand five hundred and `1.5` is one dollar fifty.
-- The currency is only a **label**: HomeCoin never converts amounts. Choose the currency your accounts are kept in.
+- **Amounts follow your currency.** Each currency is written the way its country writes it:
+
+  | Currency | Shown as | Notes |
+  |---|---|---|
+  | Euro (EUR) | `1.234,56 €` | comma for decimals: typing `1.500` means one thousand five hundred |
+  | US dollar (USD) | `$1,234.56` | |
+  | British pound (GBP) | `£1,234.56` | |
+  | Japanese yen (JPY) | `¥1,235` | no decimals: the yen has no cents (no minor unit) |
+  | Swiss franc (CHF) | `CHF 1'234.56` | apostrophe for thousands |
+  | Canadian dollar (CAD) | `$1,234.56` | |
+  | Australian dollar (AUD) | `$1,234.56` | |
+  | Indian rupee (INR) | `₹1,23,456.78` | Indian grouping in lakh and crore |
+
+  Where the dot is the decimal separator, `1.5` is one and a half and `1,500` is one thousand five hundred. You can always type plain numbers like `1234.56`, and HomeCoin also understands amounts pasted with a symbol or a currency code.
+- The currency is only a **label**: HomeCoin never converts amounts. Choose the currency your accounts are kept in. You can change it in Settings → General; security prices are then downloaded again in the new currency.
 - **Dates** can be typed as `31/12/2026`, `2026-12-31` or picked from the calendar. HomeCoin refuses impossible years (a typo like 2062) to protect your data.
 
 ## Spaces
@@ -198,7 +211,7 @@ Each transaction is an **expense**, an **income** or a **transfer** between two 
 - **⧉ Duplicate** copies a transaction, handy for one that repeats now and then.
 - **👁 Exclude:** a transaction you don't want in reports and budgets (for example something you bought for a friend who paid you back) still counts in the account balance but not in your spending.
 - **Duplicates:** HomeCoin warns you when the same amount on the same account was already recorded a few days before, and asks before saving.
-- **Export:** CSV or Excel, from Transactions or from Settings → Backup & data.
+- **Export:** CSV or Excel, from Transactions or from Settings → Backup & data. Numbers and dates are written the way a spreadsheet of your currency's country expects them.
 
 ## Importing bank statements
 
@@ -247,7 +260,20 @@ How many months of expenses your **available reserve** (your liquid assets) woul
 
 Every recurring item with installments appears here with its **amortization schedule**: each installment split into **principal** (the part that repays the debt) and **interest**, the remaining debt (outstanding principal), interest paid and still to pay, the end date. Installments are constant as long as the rate does not change (French amortization), and are recalculated when it does.
 
-- **Rate:** fixed, variable or mixed (for example fixed for 10 years, then variable). A variable rate is a reference **index** plus a fixed margin, the **spread**: Euribor (Europe) or SOFR, Term SOFR, 1-year Treasury (CMT) and Prime (US). The current index value is typed by hand. APR and ancillary costs (insurance, fees) are not included.
+- **Rate:** fixed, variable or mixed (for example fixed for 10 years, then variable). A variable rate is a reference **index** plus a fixed margin, the **spread**. HomeCoin offers the indexes of your currency:
+
+  | Currency | Indexes |
+  |---|---|
+  | EUR | Euribor 1M, 3M, 6M, 12M |
+  | USD | SOFR 30-day average, Term SOFR 1M, 3M, 6M, 1-year Treasury (CMT), US Prime Rate |
+  | GBP | Bank of England Bank Rate, SONIA |
+  | JPY | Short-term prime rate, TIBOR 3M, TONA |
+  | CHF | SARON |
+  | CAD | Canadian prime rate, CORRA |
+  | AUD | RBA cash rate, BBSW 3M |
+  | INR | RBI repo rate, MCLR 1Y |
+
+  The current index value is typed by hand (HomeCoin does not download rates). A loan keeps its index even if you change currency. APR and ancillary costs (insurance, fees) are not included.
 - **Early repayment** (prepayment): try an extra payment and choose whether to shorten the loan (same installment) or lower the installment (same end date). HomeCoin shows the interest you would save.
 
 ## Fair split
@@ -300,7 +326,7 @@ An audit log: the important things that happened in the last 12 months: sign-ins
 
 Five tabs:
 
-- **General:** light or dark theme, currency, help, close HomeCoin.
+- **General:** light or dark theme, reference currency, help, close HomeCoin.
 - **Spaces:** create, edit, archive spaces and choose their pages.
 - **Security:** a check of your protections (with a button to fix what needs fixing), password, recovery key, auto-lock time, lock now.
 - **Backup & data:** download or restore a backup, export, where your data is.
@@ -397,7 +423,7 @@ HomeCoin checks for updates at most once a day, after you sign in, and sends not
 - One user per installation: HomeCoin is a personal tool, not a server. Never expose it on a network.
 - Bank statement formats vary: columns are recognized automatically, but some files may need a quick check in the preview.
 - Prices come from Yahoo Finance and may be delayed, incomplete or missing for some funds.
-- One currency per installation (euro or US dollar). Securities quoted in other currencies are converted using the exchange rates on Yahoo Finance. Mortgage indexes are typed by hand.
+- One currency per installation, chosen among eight (EUR, USD, GBP, JPY, CHF, CAD, AUD, INR): accounts in different currencies cannot be mixed. Securities quoted in other currencies are converted using the exchange rates on Yahoo Finance. Mortgage indexes are typed by hand.
 - The interface is in English.
 
 ## Getting help
@@ -476,4 +502,4 @@ Any copy or modified version must keep the [LICENSE](LICENSE) file, including th
 
 ---
 
-*HomeCoin by **Starkark98** · v1.2.2 · see the [changelog](CHANGELOG.md)*
+*HomeCoin by **Starkark98** · v1.3.0 · see the [changelog](CHANGELOG.md)*

@@ -2,6 +2,16 @@
 
 All notable changes to HomeCoin are listed here, newest first.
 
+## 1.3.0 — 2026-11-03
+
+**Eight currencies**
+- Besides the euro and the US dollar: **British pound, Japanese yen, Swiss franc, Canadian dollar, Australian dollar and Indian rupee**. Each is written the way its country writes it: £1,234.56 · ¥1,235 (no decimals) · CHF 1'234.56 · ₹1,23,456.78 (lakh and crore grouping). Amounts are still never converted; security prices are converted into the chosen currency.
+- Mortgage and loan indexes per currency, and only those of your currency are offered: Bank of England Bank Rate and SONIA, Short-term prime rate, TIBOR and TONA, SARON, Canadian prime rate and CORRA, RBA cash rate and BBSW, RBI repo rate and MCLR. A loan keeps its index if you change currency.
+- The currency picker (first start and Settings → General) is a list with the name and an example of the format.
+- Typed and imported amounts understand the new symbols and codes (£, ¥, ￥, ₹, CHF, C$, A$, Rs.) and the Swiss and Indian separators; the activity log and the "hide amounts" eye follow the currency too.
+- Exports follow the currency's country: in Excel the currency symbol and the date order (e.g. MM/DD/YYYY in the US, YYYY/MM/DD in Japan); in CSV comma decimals with ";" between columns for the euro, dot decimals with "," elsewhere, so the file opens correctly in a spreadsheet of that country.
+- Fair split: rounding choices fit the currency (e.g. ¥100–¥5,000, ₹10–₹500).
+
 ## 1.2.2 — 2026-11-03
 
 **Calculators warn when the result could mislead**
