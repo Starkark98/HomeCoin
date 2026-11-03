@@ -147,23 +147,51 @@ def check_password(pw):
 
 
 # ------------------------------------------------- data folder permissions (Windows)
-# SIDs independent of the Windows language: SYSTEM, Administrators (local administrators)
-_TRUSTED_SIDS = {"S-1-5-18", "S-1-5-32-544"}
+# Done with the Windows tools icacls and whoami, not PowerShell: on PCs where a company policy runs PowerShell in
+# "constrained language mode" (common on work PCs) the PowerShell way failed and the check said "cannot be checked".
+# SIDs are independent of the Windows language. SDDL short names and SIDs of the trusted accounts: SYSTEM,
+# Administrators, and "creator owner" / "owner rights" (they stand for the owner, i.e. your user)
+_TRUSTED_SIDS = {"S-1-5-18", "S-1-5-32-544", "S-1-3-0", "S-1-3-4"}
+_SDDL_SIDS = {"SY": "S-1-5-18", "BA": "S-1-5-32-544", "CO": "S-1-3-0", "OW": "S-1-3-4", "WD": "S-1-1-0",
+              "AU": "S-1-5-11", "BU": "S-1-5-32-545", "IU": "S-1-5-4", "NS": "S-1-5-20", "LS": "S-1-5-19",
+              "PU": "S-1-5-32-547", "BG": "S-1-5-32-546", "AN": "S-1-5-7"}
+_SID_NAMES = {"S-1-1-0": "Everyone", "S-1-5-11": "Authenticated Users", "S-1-5-32-545": "Users", "S-1-5-4": "Interactive users",
+              "S-1-5-20": "Network Service", "S-1-5-19": "Local Service", "S-1-5-32-547": "Power Users", "S-1-5-32-546": "Guests",
+              "S-1-5-7": "Anonymous logon"}
 
 
-def _ps(script, timeout=20):
-    """Windows PowerShell with no profile and no window; PSModulePath cleared (PowerShell 7's one breaks the modules)."""
+def _run(args, timeout=60):
+    """A Windows tool without a window; its output as text (raises if it fails)."""
     import subprocess
-    env = {k: v for k, v in os.environ.items() if k.upper() != "PSMODULEPATH"}
-    r = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", script], env=env,
-                       capture_output=True, text=True, timeout=timeout, creationflags=0x08000000)
+    r = subprocess.run(args, capture_output=True, timeout=timeout, creationflags=0x08000000)
     if r.returncode:
-        raise RuntimeError((r.stderr or r.stdout).strip()[:300])
-    return r.stdout
+        raise RuntimeError((r.stderr or r.stdout).decode(errors="replace").strip()[:300] or f"{args[0]} failed")
+    return r.stdout.decode(errors="replace")
 
 
-def _psq(path):
-    return "'" + str(path).replace("'", "''") + "'"
+def _my_sid():
+    import re
+    m = re.search(r"S-1-5-[\d-]+", _run(["whoami", "/user", "/fo", "csv", "/nh"]))
+    if not m:
+        raise RuntimeError("Windows user not found")
+    return m.group(0)
+
+
+def _allowed_sids(path):
+    """SIDs that the folder's permissions allow in (allow entries only), read with icacls in SDDL form."""
+    import re
+    import tempfile
+    with tempfile.TemporaryDirectory(prefix="hc-acl-") as td:
+        out = os.path.join(td, "acl.txt")
+        _run(["icacls", str(path), "/save", out, "/Q"])
+        with open(out, "rb") as f:  # UTF-16 little endian, with or without the byte order mark
+            sddl = f.read().decode("utf-16-le").lstrip("﻿").strip().splitlines()[-1]
+    sids = []
+    for sid in re.findall(r"\(A;[^;]*;[^;]*;[^;]*;[^;]*;([^)]+)\)", sddl):
+        sid = _SDDL_SIDS.get(sid, sid)
+        if sid not in sids:
+            sids.append(sid)
+    return sids
 
 
 def data_dir_access(path=None):
@@ -172,51 +200,42 @@ def data_dir_access(path=None):
     if os.name != "nt":
         return None
     try:
-        out = _ps("$me = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value; "
-                  f"$acl = (New-Object IO.DirectoryInfo {_psq(path or dbm.DATA_DIR)}).GetAccessControl(); "
-                  "foreach ($r in $acl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier])) { "
-                  "$n = try { $r.IdentityReference.Translate([Security.Principal.NTAccount]).Value } catch { $r.IdentityReference.Value }; "
-                  "\"$($r.IdentityReference.Value)|$n|$me\" }")
+        me = _my_sid()
+        return [_SID_NAMES.get(s, s) for s in _allowed_sids(path or dbm.DATA_DIR) if s not in _TRUSTED_SIDS | {me}]
     except Exception:
         return None
-    others = []
-    for line in out.splitlines():
-        parts = line.strip().split("|")
-        if len(parts) == 3 and parts[0] not in _TRUSTED_SIDS | {parts[2]} and parts[1] not in others:
-            others.append(parts[1])
-    return others
 
 
 def restrict_data_dir(path=None):
     """Restrict the data folder to your user, SYSTEM and administrators. Permissions are set only on the
     folder; files inherit them (reset). Afterwards, check that keystore and database can still be read: otherwise
-    restore the previous permissions (inherited from C:\\Tools)."""
+    restore the previous permissions (inherited from the parent folder)."""
     if os.name != "nt":
         raise AuthError("Available on Windows only")
     d = Path(path or dbm.DATA_DIR)
-    q = _psq(d)
     try:
-        # folder permission list rewritten from scratch: no inheritance, no leftover explicit permissions,
-        # only the three allowed ones (inherited by files and subfolders); then the contents inherit from the folder again
-        _ps("$me = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value; "
-            f"$di = New-Object IO.DirectoryInfo {q}; "
-            "$acl = New-Object Security.AccessControl.DirectorySecurity; "
-            "$acl.SetAccessRuleProtection($true, $false); "
-            "foreach ($sid in @($me, 'S-1-5-18', 'S-1-5-32-544')) { "
-            "$acl.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule((New-Object Security.Principal.SecurityIdentifier $sid), "
-            "'FullControl', 'ContainerInherit,ObjectInherit', 'None', 'Allow'))) }; "
-            "$di.SetAccessControl($acl); "
-            f"& icacls (Join-Path {q} '*') /reset /T /C /Q | Out-Null; "
-            "if ($LASTEXITCODE -and (Get-ChildItem -LiteralPath $di.FullName -Force | Measure-Object).Count) { throw 'icacls (contents) failed' }",
-            timeout=90)
+        me = _my_sid()
+        # no inheritance from the parent folder, only the three allowed accounts (inherited by files and subfolders)…
+        _run(["icacls", str(d), "/inheritance:r", "/grant:r", f"*{me}:(OI)(CI)F", "*S-1-5-18:(OI)(CI)F",
+              "*S-1-5-32-544:(OI)(CI)F", "/Q"], timeout=90)
+        for sid in _allowed_sids(d):  # …and no other explicit permission left on the folder
+            if sid not in _TRUSTED_SIDS | {me}:
+                _run(["icacls", str(d), "/remove:g", f"*{sid}", "/Q"], timeout=90)
+        if any(d.iterdir()):  # the contents inherit from the folder again
+            _run(["icacls", str(d / "*"), "/reset", "/T", "/C", "/Q"], timeout=90)
         for f in [d / "keystore.json", d / "homecoin.db"]:
             if f.exists():
                 f.open("rb").close()
         probe = d / ".hc-probe"
         probe.write_bytes(b"ok")
         probe.unlink()
+        if data_dir_access(d):
+            raise RuntimeError("other accounts can still open the folder")
     except Exception as exc:
-        _ps(f"& icacls {q} /reset /T /C /Q | Out-Null", timeout=90)  # rollback: inherited permissions as before
+        try:  # rollback: permissions inherited from the parent folder, as before
+            _run(["icacls", str(d), "/reset", "/T", "/C", "/Q"], timeout=90)
+        except Exception:
+            pass
         raise RuntimeError(f"{exc} — permissions restored as before") from exc
     return data_dir_access(d)
 

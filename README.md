@@ -2,7 +2,7 @@
 
 # HomeCoin *by Starkark98*
 
-![Version](https://img.shields.io/badge/version-1.3.0-8b5cf6)
+![Version](https://img.shields.io/badge/version-1.3.1-8b5cf6)
 ![Python](https://img.shields.io/badge/Python-3.12%20%7C%203.13%20%7C%203.14-3776AB?logo=python&logoColor=white)
 ![Platform](https://img.shields.io/badge/platform-Windows-0078D6)
 ![Data](https://img.shields.io/badge/data-encrypted%2C%20on%20your%20PC-16a34a)
@@ -180,6 +180,8 @@ A space is a separate set of books (a separate ledger) inside the same HomeCoin,
 
 - **One household space** for the shared account, plus **one personal space per person**.
 - Or just one personal space, if you manage only your own money.
+
+**Each space has its own color and icon.** The color tints a few small things, so you always see where you are: the highlighted page in the menu, the **＋ New transaction** button, the line under the selected tab and the message when you switch space. Everything that carries meaning (warnings, income and expenses, charts, buttons that confirm an action) looks the same in every space. You choose color and icon when you create or edit a space.
 
 The type matters: a *Household* space gets shared categories (mortgage, utilities, groceries, contributions) and the Fair split page; a *Personal* space gets personal categories and the Investments and Savings pages. You can change the pages later.
 
@@ -420,7 +422,7 @@ HomeCoin checks for updates at most once a day, after you sign in, and sends not
 - **Only your PC can reach it.** HomeCoin listens on `127.0.0.1` (the loopback address), which other computers cannot reach, and refuses requests coming from other websites.
 - **Encrypted data** (encryption at rest). The database and every backup are encrypted with AES-256. The key that unlocks them is itself locked by your password and by your recovery key (through a deliberately slow key derivation, scrypt, that makes guessing passwords very expensive), and stays in memory only while HomeCoin is unlocked.
 - **Locked by default.** When HomeCoin starts, nothing can be read until you enter the password; it locks again after inactivity.
-- **Your Windows folder.** Settings → Security checks whether other Windows users on the same PC could open your data folder and can restrict it to you.
+- **Your Windows folder.** Settings → Security checks whether other Windows users on the same PC could open your data folder (its access control list) and can restrict it to you, SYSTEM and the administrators with one click. It uses the standard Windows tools `icacls` and `whoami`, so it also works where a company policy restricts PowerShell.
 
 <details>
 <summary><b>Technical details</b> (for those who want to check)</summary>
@@ -451,6 +453,8 @@ HomeCoin checks for updates at most once a day, after you sign in, and sends not
 **My amounts look wrong after changing the currency.** HomeCoin never converts amounts: the currency is a label. Switch back in Settings → General if your accounts are in the other currency.
 
 **An imported row is marked "already present" but it isn't.** Tick it in the review step to import it anyway: HomeCoin flags rows with the same amount on the same account within 3 days.
+
+**The security check says the data folder is also accessible to other accounts.** It happens when the data is in a folder that other users of the PC can open (for example a folder you chose yourself under `C:\`). The data is encrypted anyway, but they could copy or delete it: click **🔒 Protect** next to the warning to restrict the folder to your Windows user. If anything goes wrong, the previous permissions are put back.
 
 **Where is my data, and how do I keep it safe?** See [Backups](#backups).
 
@@ -539,4 +543,4 @@ Any copy or modified version must keep the [LICENSE](LICENSE) file, including th
 
 ---
 
-*HomeCoin by **Starkark98** · v1.3.0 · see the [changelog](CHANGELOG.md)*
+*HomeCoin by **Starkark98** · v1.3.1 · see the [changelog](CHANGELOG.md)*

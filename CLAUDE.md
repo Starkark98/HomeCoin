@@ -1,6 +1,6 @@
 # CLAUDE.md — HomeCoin
 
-Guidance for Claude Code when working in this repository. Household finance app that runs locally on Windows: Python/Flask server on `127.0.0.1`, encrypted SQLCipher database, vanilla JS single-page UI. Current version: see `VERSION` in `homecoin/app.py` (1.3.0 at the time of writing).
+Guidance for Claude Code when working in this repository. Household finance app that runs locally on Windows: Python/Flask server on `127.0.0.1`, encrypted SQLCipher database, vanilla JS single-page UI. Current version: see `VERSION` in `homecoin/app.py` (1.3.1 at the time of writing).
 
 ## Hard rules
 
@@ -82,6 +82,8 @@ Key concepts:
 - **Database**: encrypted at rest, temp store in memory, `secure_delete`; automatic encrypted backup at the first unlock of every start (last 15); restore runs `migrate()`. `keystore.json` is read and written only through `security.read_keystore`/`write_keystore` (one lock + cache: on Windows `os.replace` fails while another thread has the file open).
 - **Updates** (1.2.1): `GET /api/update` (`?check=1` now, `?auto=1` at most every 20 h if `update_auto`), `PUT /api/update/settings`, `POST /api/update/apply` (session only: `/api/update*` is closed to the import code; backup `*-update.db` first; then exit via `HC_EXIT`, restart via `HC_RESTART` in tests). Settings keys `update_auto`, `update_checked`, `update_info` (global). UI: `loadUpdate()`, chip `#update-chip`, dot `#nav-update-dot`, Settings → Updates tab.
 - **UI layout** (1.2.1): sidebar groups Everyday / Planning / Wealth / Tools (`.nav-group`, hidden when empty); rare actions in the top-right **⋯** menu; Settings tabs `SETTINGS_TABS` (`#/impostazioni?tab=general|spaces|security|data|updates`). New settings go in the tab where a user would look for them; keep the top bar for daily actions only.
+- **Space color** (1.3.1): `applySpaceColor()` sets `--space`/`--space-ink`/`--space-fill`; used only for small "where am I" accents (active menu item, `#quick-add`, selected `.seg` tab line, `.toast.space`). Semantic colors (warnings, income/expense, charts, confirm buttons) never follow the space.
+- **Redraws keep the focus** (1.3.1): `snapFocus()`/`restoreFocus()` around `route()` and calculators that re-render their own inputs (rebalancing); give re-rendered inputs an id or `data-k` + class so they can be found again.
 - **Calculator warnings** (1.2.2): tools return `warnings`/`notes` lists of `{level: 'warn'|'info', text}` for what can make a result misleading (missing or stale prices, data gaps, inputs that cannot be acted on); the UI shows them with `calcNotes()`. Hard errors stay 400s; a new calculator gets both.
 - **Demo** (`homecoin/demo.py`): must keep showing every feature with made-up data; when a feature is added, add sample data for it. `GET /api/demo/statement.csv` (demo only) feeds Import → "Try it with a sample bank statement".
 
@@ -109,7 +111,7 @@ Key concepts:
 
 ## Known gaps
 
-- No automated tests in the repo: the maintainer keeps a regression + fuzz suite outside it (made-up data only); last full run on 1.3.0.
+- No automated tests in the repo: the maintainer keeps a regression + fuzz suite outside it (made-up data only); last full run on 1.3.1.
 - Automatic updates only work once the GitHub repository is public (the API returns 404 for a private one without a token) and for releases published with their signed manifest.
 - `util.STOPWORDS` contains Italian bank words only (adding English ones would change payee keys of existing data).
 - Activity-log rows written before the translation stay in Italian; old investment-plan notes may read half Italian, half English.

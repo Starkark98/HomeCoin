@@ -379,6 +379,7 @@ const LOCK_VIEWS = {
 };
 async function unlocked() {
   document.body.classList.remove('locked');
+  $('#lock-body').innerHTML = '';  // the sign-in form (with the password typed) must not stay in the page once unlocked
   AUTH.lastInput = AUTH.lastPing = Date.now();
   resetPeriods();  // new sign-in: every tab goes back to "Last 12 months"
   if (location.hash && location.hash !== '#/') history.replaceState(null, '', '#/');  // always start again from the Dashboard
@@ -492,10 +493,22 @@ async function switchPortfolio(id) {
   const k = currentRoute().key;
   if (!featureOn(k)) location.hash = '#/dashboard';
   else route();
-  toast(`Space: ${S.portfolio.name}`, 'info');
+  toast(`${S.portfolio.icon} Space: ${S.portfolio.name}`, 'space');
+}
+// the color of the active space tints a few small accents (menu highlight, New transaction, the selected tab, the
+// space-switch message); warnings, amounts, charts and confirmations keep the same colors in every space.
+// Very light colors get dark text, so it stays readable
+function applySpaceColor(hex) {
+  const c = /^#[0-9a-f]{6}$/i.test(hex || '') ? hex : '#6366f1';
+  const lin = (v) => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4);
+  const [r, g, b] = [1, 3, 5].map((i) => lin(parseInt(c.slice(i, i + 2), 16) / 255));
+  const st = document.documentElement.style;
+  st.setProperty('--space', c);
+  st.setProperty('--space-ink', 0.2126 * r + 0.7152 * g + 0.0722 * b > 0.5 ? '#1c1917' : '#ffffff');
 }
 function drawPortfolioSwitcher() {
   const p = S.portfolio;
+  applySpaceColor(p.color);
   $('#pf-switch').innerHTML = `<button class="pf-current" id="pf-btn" style="--pc:${esc(p.color)}">
       <span class="pf-ico">${esc(p.icon)}</span><span class="pf-txt"><b>${esc(p.name)}</b><small>${PF_TYPES[p.type][0]}</small></span><span class="pf-caret">▾</span></button>
     <div class="pf-menu hidden" id="pf-menu">
@@ -640,6 +653,24 @@ function separateStacks(cfg) {
   });
   return cfg;
 }
+// keep the cursor where it was when a page or a calculator redraws itself (e.g. after a recalculation): the field
+// with the same id (or the same data-k and class), its selection and what was being typed in it
+function snapFocus(root) {
+  const a = document.activeElement;
+  if (!a || a === document.body || !root.contains(a)) return null;
+  const sel = a.id ? `#${CSS.escape(a.id)}` : a.dataset.k != null ? `${a.classList[0] ? '.' + CSS.escape(a.classList[0]) : ''}[data-k="${CSS.escape(a.dataset.k)}"]` : null;
+  if (!sel) return null;
+  let start = null, end = null;
+  try { start = a.selectionStart; end = a.selectionEnd; } catch { /* not a text field */ }
+  return { sel, start, end, value: a.value, typing: a.tagName === 'INPUT' && !/checkbox|radio/.test(a.type) };
+}
+function restoreFocus(root, s) {
+  const el = s && root.querySelector(s.sel);
+  if (!el) return;
+  if (s.typing && el.value !== s.value) el.value = s.value;  // text typed while the calculation was running
+  el.focus({ preventScroll: true });
+  try { if (s.start != null) el.setSelectionRange(s.start, s.end); } catch { /* not a text field */ }
+}
 function chart(canvas, cfg) { const c = new Chart(canvas, maskChartConfig(separateStacks(cfg))); S.charts.push(c); return c; }
 function destroyCharts() { S.charts.forEach((c) => c.destroy()); S.charts = []; }
 const moneyAxis = { ticks: { callback: (v) => money0(v) } };
@@ -699,9 +730,11 @@ async function route() {
   $('#page-title').textContent = title;
   $('#page-sub').textContent = S.portfolio ? `${S.portfolio.name} · ${sub}` : sub;
   const v = $('#view');
+  const focus = snapFocus(v);
   v.innerHTML = '<div class="loading">Loading…</div>';
   try {
     await render(v, params);
+    restoreFocus(v, focus);
   } catch (e) {
     v.innerHTML = `<div class="card empty"><div class="big">😕</div><h3>Something went wrong</h3><p>${esc(e.message)}</p></div>`;
   }
@@ -2631,6 +2664,7 @@ async function rebalanceCard(det) {
         : res.needs_rebalance ? `⚠️ Rebalancing needed · largest drift ${num(res.max_drift, 1)} points` : `✅ Within the thresholds · largest drift ${num(res.max_drift, 1)} points`;
     $('.rb-status', det).innerHTML = `<span class="tag ${res.has_targets ? (res.needs_rebalance ? 'warn' : 'ai') : ''}">${esc(status)}</span>`;
     const noTrades = res.has_targets && res.needs_rebalance && !cfg.sells && !res.contribution;
+    const focus = snapFocus(box);
     box.innerHTML = `<div class="rb-controls">
         <div class="seg" id="rb-mode">${[['class', 'By asset class'], ['security', 'By security']].map(([k, l]) => `<button data-m="${k}" class="${cfg.mode === k ? 'on' : ''}">${l}</button>`).join('')}</div>
         <div class="rb-accs">${res.accounts.map((a) => `<label class="check"><input type="checkbox" data-acc="${a.id}" ${!chosen || chosen.has(a.id) ? 'checked' : ''}> ${esc(a.icon)} ${esc(a.name)} <span class="muted small">${esc(money0(a.value))}</span></label>`).join('')}</div>
@@ -2692,6 +2726,7 @@ async function rebalanceCard(det) {
     $('#rb-clear', box).onclick = () => { cfg.targets[cfg.mode] = {}; calc(); };
     $('#rb-save', box).onclick = () => calc(true);
     if ($('#rb-drop', box)) $('#rb-drop', box).onclick = () => { res.missing.forEach((m) => delete cfg.targets[cfg.mode][m.key]); calc(); };
+    restoreFocus(box, focus);
   };
   try {
     ({ config: cfg, result: res } = await api('/investments/rebalance'));
@@ -3342,17 +3377,18 @@ async function offerFolderProtection() {
 function passwordModal() {
   const m = openModal('Change password', `<div class="form-grid">
       <label class="field full">Current password<input type="password" id="p-cur" autocomplete="current-password" autofocus></label>
-      <label class="field full">New password<input type="password" id="l-pw" autocomplete="new-password"></label>
-      <div class="full pw-meter"><span id="l-meter"></span></div>
-      <label class="field full">Confirm new password<input type="password" id="l-pw2" autocomplete="new-password"></label></div>
+      <label class="field full">New password<input type="password" id="p-new" autocomplete="new-password"></label>
+      <div class="full pw-meter"><span id="p-meter"></span></div>
+      <label class="field full">Confirm new password<input type="password" id="p-new2" autocomplete="new-password"></label></div>
     <p class="muted small">The data is not re-encrypted: only the protection of the key changes. The recovery key stays valid.</p>
     <div class="modal-foot"><button class="btn" data-no>Cancel</button><button class="btn btn-primary" id="p-go">Change password</button></div>`);
-  pwMeter($('#l-pw', m), $('#l-meter', m));
+  // fields of this dialog only (ids of their own): the sign-in screen has fields with other ids in the same page
+  pwMeter($('#p-new', m), $('#p-meter', m));
   $('[data-no]', m).onclick = closeModal;
-  $('#p-go').onclick = async () => {
+  $('#p-go', m).onclick = async () => {
     try {
-      checkNew($('#l-pw').value, $('#l-pw2').value);
-      await api('/auth/password', { method: 'POST', body: { current: $('#p-cur').value, password: $('#l-pw').value } });
+      checkNew($('#p-new', m).value, $('#p-new2', m).value);
+      await api('/auth/password', { method: 'POST', body: { current: $('#p-cur', m).value, password: $('#p-new', m).value } });
       closeModal(); toast('Password changed');
     } catch (err) { fail(err); }
   };
@@ -3362,9 +3398,9 @@ function recoveryModal(onDone) {
     <label class="field">Current password<input type="password" id="p-cur" autocomplete="current-password" autofocus></label>
     <div class="modal-foot"><button class="btn" data-no>Cancel</button><button class="btn btn-primary" id="p-go">Generate</button></div>`);
   $('[data-no]', m).onclick = closeModal;
-  $('#p-go').onclick = async () => {
+  $('#p-go', m).onclick = async () => {
     try {
-      const r = await api('/auth/recovery-key', { method: 'POST', body: { current: $('#p-cur').value } });
+      const r = await api('/auth/recovery-key', { method: 'POST', body: { current: $('#p-cur', m).value } });
       const m2 = openModal('Your new recovery key', `<p class="muted small">Save it in a safe place: it will not be shown again.</p>
         <div class="recovery-code">${esc(r.recovery_key)}</div>
         <div class="modal-foot"><button class="btn" id="k-copy">📋 Copy</button><button class="btn btn-primary" data-no>Done</button></div>`);

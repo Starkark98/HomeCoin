@@ -2,7 +2,17 @@
 
 All notable changes to HomeCoin are listed here, newest first.
 
-## Unreleased
+## 1.3.1 — 2026-11-03
+
+**Smoother calculators**
+- After a recalculation the cursor stays where you were: in the rebalancing calculator (and on pages that reload after a change, like the emergency fund target) moving to the next field with Tab or a click no longer loses the focus, the selection or what you were typing.
+
+**Your space's color**
+- The color of the active space now tints a few small accents: the highlighted page in the menu, the **＋ New transaction** button, the line under the selected tab and the space-switch message. Warnings, amounts, charts and confirmations keep the same colors in every space; very light colors get dark text to stay readable.
+
+**Fixes**
+- **Change password** never accepted the confirmation: the dialog read the "new password" field of the sign-in screen (same name, hidden in the page) instead of its own. The dialog now uses only its own fields, and the sign-in form is cleared as soon as HomeCoin is unlocked, so the password typed to sign in no longer stays in the page.
+- **Security check → data folder**: on PCs where a company policy restricts PowerShell ("constrained language mode", common on work PCs) the check said "cannot be checked on this system" and *Restrict to my user* failed. Both now use the standard Windows tools `icacls` and `whoami`, which are not affected.
 
 **Guide**
 - `SECURITY.md`: supported version updated (1.3.x) and signed updates in the scope of reports.
