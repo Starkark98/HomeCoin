@@ -2340,12 +2340,12 @@ async function renderMutuo(v) {
     if ($('#sim-n').value === '') $('#sim-n').value = p.paid;
     try {
       const r = await api('/tools/mortgage/simulate', { method: 'POST', body: { recurring_id: p.id, extra: parseMoney($('#sim-x').value), after_payment: +$('#sim-n').value, mode: $('#sim-m').value } });
-      $('#sim-out').innerHTML = r.closed ? `<div class="sp-warn card">🎉 With this amount the loan is paid off: you save ${money0(r.interest_saved)} in interest.</div>`
+      $('#sim-out').innerHTML = calcNotes(r.notes) + (r.closed ? `<div class="sp-warn card">🎉 With this amount the loan is paid off: you save ${money0(r.interest_saved)} in interest.</div>`
         : `<div class="rec-stats" style="grid-template-columns:repeat(4,minmax(0,1fr))">
             <div class="rec-stat"><span>Interest saved</span><b class="pos">${money0(r.interest_saved)}</b></div>
             <div class="rec-stat"><span>New installment</span><b>${money(r.new_installment)}</b></div>
             <div class="rec-stat"><span>Installments left</span><b>${r.new_remaining}${r.months_saved ? ` (−${r.months_saved})` : ''}</b></div>
-            <div class="rec-stat"><span>New end date</span><b>${esc(fmtDate(r.new_end))}</b></div></div>`;
+            <div class="rec-stat"><span>New end date</span><b>${esc(fmtDate(r.new_end))}</b></div></div>`);
     } catch (e) { $('#sim-out').innerHTML = `<p class="neg small">${esc(e.message)}</p>`; }
   }, 300);
   ['#sim-p', '#sim-x', '#sim-n', '#sim-m'].forEach((id) => $(id).addEventListener('input', sim));
@@ -2362,6 +2362,7 @@ async function renderEmergenza(v) {
     <div class="card" style="margin-bottom:18px"><div class="card-head"><div><h3>🛟 ${family ? 'Household emergency fund' : 'Emergency fund'}</h3>
       <p class="muted small" style="margin:3px 0 0">How many months of expenses the <b>available reserve</b> would cover: the accounts plus uninvested broker cash and money market ETFs (available within a few days), using the average spending of the last ${em.months_basis} months. Stocks, bonds and funds do not count.</p></div>
       <label class="field" style="flex-direction:row;align-items:center;gap:8px">Target <input id="em-target" type="number" min="1" max="36" step="1" value="${em.target_months}" style="width:70px"> months</label></div>
+      ${calcNotes(em.notes)}
       <div class="em-grid">
         <div class="em-big"><div class="em-months ${ratio >= 1 ? 'pos' : ratio >= 0.5 ? '' : 'neg'}">${months == null ? '—' : num(months)}</div><div class="muted">months covered</div></div>
         <div style="flex:1;min-width:0">
@@ -2398,6 +2399,7 @@ async function renderObiettivi(v) {
         <div class="bar"><i style="width:${(gl.progress * 100).toFixed(1)}%"></i></div></div>
       <div class="rec-stats">${gl.target_date ? `<div class="rec-stat"><span>Per month</span><b>${money0(gl.monthly_needed)}</b></div><div class="rec-stat"><span>Months</span><b>${gl.months_left}</b></div>` : '<div class="rec-stat"><span>Deadline</span><b>none</b></div><div class="rec-stat"><span></span><b></b></div>'}
         <div class="rec-stat"><span>${gl.per_person ? 'Each' : ''}</span><b>${gl.per_person ? gl.per_person.map((p) => `${esc(p.name.slice(0, 4))} ${money0(p.monthly)}`).join(' · ') : ''}</b></div></div>
+      ${calcNotes(gl.notes)}
       <div class="rec-actions"><button class="btn btn-sm" data-gl="${gl.id}">✏️ Edit</button></div></div>`).join('')
       || `<div class="card empty"><div class="big">🏁</div><h3>No goals</h3><p>${family ? 'Holiday, new car, home improvements…' : 'Trip, car, course, home down payment…'} Set the amount and the date: HomeCoin calculates how much to set aside each month${family ? ' and each person\'s share based on income' : ''}.</p></div>`}</div>`;
   $('#gl-new').onclick = () => goalModal();
@@ -2560,6 +2562,10 @@ async function renderInvestimenti(v) {
 const qtyFmt = (q) => num(q, 6);
 
 // rebalancing calculator: targets per asset class or per security, drift thresholds, buys only (new money) or buys and sells
+// warnings and notes of a calculator, from the server: [{level: 'warn' | 'info', text}]
+function calcNotes(notes) {
+  return notes?.length ? `<ul class="calc-notes">${notes.map((w) => `<li class="${w.level === 'warn' ? 'warn' : 'info'}">${w.level === 'warn' ? '⚠️' : 'ℹ️'} ${esc(w.text)}</li>`).join('')}</ul>` : '';
+}
 async function rebalanceCard(det) {
   const box = $('.rb-body', det);
   let cfg, res;
@@ -2589,7 +2595,7 @@ async function rebalanceCard(det) {
     const tg = cfg.targets[cfg.mode] || {};
     const chosen = cfg.accounts == null ? null : new Set(cfg.accounts);
     const status = !res.total ? 'No investments to rebalance in the accounts chosen'
-      : !res.has_targets ? `Targets add up to ${pct1(res.sum_targets)}: they must make 100%`
+      : !res.has_targets ? `Targets: ${pct1(res.sum_targets)} of 100%`
         : res.needs_rebalance ? `⚠️ Rebalancing needed · largest drift ${num(res.max_drift, 1)} points` : `✅ Within the thresholds · largest drift ${num(res.max_drift, 1)} points`;
     $('.rb-status', det).innerHTML = `<span class="tag ${res.has_targets ? (res.needs_rebalance ? 'warn' : 'ai') : ''}">${esc(status)}</span>`;
     const noTrades = res.has_targets && res.needs_rebalance && !cfg.sells && !res.contribution;
@@ -2603,6 +2609,7 @@ async function rebalanceCard(det) {
         <label class="field">New money to invest (${CUR_SYM}) <input id="rb-new" inputmode="decimal" value="${moneyInput(cfg.contribution)}" placeholder="${CUR === 'USD' ? '0.00' : '0,00'}"></label>
         <label class="check" title="Without sells, only the new money is used, on the items below target"><input type="checkbox" id="rb-sells" ${cfg.sells ? 'checked' : ''}> Allow sells (exactly back to the targets)</label>
       </div>
+      ${calcNotes(res.warnings)}
       <div class="table-wrap"><table class="sp-table inv-table rb-table"><thead><tr><th title="Count it in the calculation">Count</th><th>${cfg.mode === 'class' ? 'Asset class' : 'Security'}</th><th class="right">Value</th><th class="right">Now</th>
         <th class="right">Target %</th><th class="right">Drift</th><th>To do</th><th class="right">After</th></tr></thead><tbody>
         ${res.rows.map((r) => `<tr class="${r.off ? 'rb-off' : ''}"><td><input type="checkbox" class="rb-in" data-k="${esc(r.key)}" data-via="${cfg.mode}" checked title="Count it in the calculation"></td>
@@ -3336,21 +3343,24 @@ function recoveryModal(onDone) {
 // ================================================================ startup
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && $('#modal-root').innerHTML) closeModal();
+  if (e.key === 'Escape') moreMenu(false);
   if (document.body.classList.contains('locked')) return;
   if ((e.key === 'n' || e.key === 'N') && !e.ctrlKey && !e.metaKey && !e.altKey && !/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName) && !$('#modal-root').innerHTML) {
     e.preventDefault(); txModal();
   }
 });
 $('#quick-add').onclick = () => txModal();
-$('#theme-toggle').onclick = () => {
-  const dark = document.documentElement.getAttribute('data-theme') === 'dark' ||
-    (!document.documentElement.getAttribute('data-theme') && matchMedia('(prefers-color-scheme: dark)').matches);
-  setTheme(dark ? 'light' : 'dark');
-};
+$('#theme-toggle').onclick = () => setTheme(isDark() ? 'light' : 'dark');
 $('#lock-now').onclick = () => lockNow();
 $('#quit-app').onclick = () => quitApp();
 // "⋯" menu: the actions used less often (theme, help, donate, close), out of the way of the everyday ones
-const moreMenu = (open) => { $('#more-menu').classList.toggle('hidden', !open); $('#more-btn').setAttribute('aria-expanded', open ? 'true' : 'false'); };
+const isDark = () => document.documentElement.getAttribute('data-theme') === 'dark' ||
+  (!document.documentElement.getAttribute('data-theme') && matchMedia('(prefers-color-scheme: dark)').matches);
+const moreMenu = (open) => {
+  if (open) $('#theme-toggle').innerHTML = isDark() ? '<span class="mi">☀️</span><span>Light theme</span>' : '<span class="mi">🌙</span><span>Dark theme</span>';
+  $('#more-menu').classList.toggle('hidden', !open);
+  $('#more-btn').setAttribute('aria-expanded', open ? 'true' : 'false');
+};
 $('#more-btn').onclick = (e) => { e.stopPropagation(); moreMenu($('#more-menu').classList.contains('hidden')); };
 $('#more-menu').addEventListener('click', () => moreMenu(false));
 document.addEventListener('click', (e) => { if (!e.target.closest('.more')) moreMenu(false); });

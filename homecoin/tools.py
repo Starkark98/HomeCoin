@@ -9,7 +9,7 @@ import urllib.parse
 import urllib.request
 
 from .services import account_balances
-from .util import CURRENCY, OTHER_INVESTMENTS, TECH_CATEGORIES, add_months, currency_of, occurrence, parse_date
+from .util import CURRENCY, OTHER_INVESTMENTS, TECH_CATEGORIES, add_months, currency_of, fmt_money, occurrence, parse_date
 
 INVEST = "investimenti"
 
@@ -184,10 +184,20 @@ def simulate_prepayment(plan, extra, after_payment, mode):
     n, fn = plan["installments"], rate_fn(plan["_rec"])
     sched = plan["schedule"]
     k = max(0, min(after_payment, len(sched)))
-    residual = (sched[k - 1]["residual"] if k else plan["principal"]) - extra
+    before = sched[k - 1]["residual"] if k else plan["principal"]
+    residual = before - extra
+    notes = []
+    if after_payment < plan["paid"]:
+        notes.append({"level": "info", "text": f"Installment {after_payment} is already paid: this is a what-if on the past."})
+    if after_payment >= len(sched):
+        notes.append({"level": "warn", "text": "The loan is already fully repaid at that installment."})
+    if not plan.get("rate_known"):
+        notes.append({"level": "warn", "text": "The rate is not specified: calculated at 0%, so no interest is saved. Set the rate in Recurring."})
     if residual <= 0:
+        if residual < 0 and after_payment < len(sched):
+            notes.append({"level": "info", "text": f"The amount is more than the residual debt: {fmt_money(round(before))} is enough to close the loan."})
         return {"closed": True, "interest_saved": sum(r["interest"] for r in sched[k:]), "new_installment": 0,
-                "new_remaining": 0, "new_end": sched[k - 1]["date"] if k else sched[0]["date"]}
+                "new_remaining": 0, "new_end": sched[k - 1]["date"] if k else sched[0]["date"], "notes": notes}
     remaining_n = n - k
     old_interest = sum(r["interest"] for r in sched[k:])
     start = parse_date(sched[k]["date"]) if k < len(sched) else parse_date(sched[-1]["date"])
@@ -197,7 +207,7 @@ def simulate_prepayment(plan, extra, after_payment, mode):
         new = amortization(residual, fn, remaining_n, start, k0=k)
     return {"closed": False, "new_installment": round(new[0]["installment"]), "new_remaining": len(new),
             "new_end": new[-1]["date"], "interest_saved": round(old_interest - sum(r["interest"] for r in new)),
-            "months_saved": remaining_n - len(new)}
+            "months_saved": remaining_n - len(new), "notes": notes}
 
 
 # ---------------------------------------------------- cash and emergency fund
@@ -368,7 +378,19 @@ def emergency(db, pid):
     fixed = sum(r["amount"] * MONTHLY_FACTOR.get(r["frequency"], 1) for r in db.execute(
         """SELECT r.amount, r.frequency FROM recurring r JOIN accounts a ON a.id = r.account_id
            WHERE a.portfolio_id = ? AND r.kind = 'expense' AND r.active = 1""", (pid,)))
-    return {"liquidity": liquidity, "operational": operational, "broker_cash": liquidity - operational,
+    notes = []
+    first = db.execute("""SELECT MIN(t.date) FROM transactions t JOIN accounts a ON a.id = t.account_id
+                          WHERE a.portfolio_id = ? AND t.kind = 'expense'""", (pid,)).fetchone()[0]
+    if first and first > d_from:  # fewer than `months` of history: the average is too low
+        f, e = parse_date(first), parse_date(d_to)
+        have = max(0, (e.year - f.year) * 12 + e.month - f.month + (f.day == 1))
+        notes.append({"level": "warn", "text": f"Only {have} complete {'month' if have == 1 else 'months'} of expenses recorded: "
+                                               f"the average over {months} months is lower than your real spending."})
+    elif not exp:
+        notes.append({"level": "info", "text": f"No expenses in the last {months} complete months: the months covered cannot be calculated."})
+    if liquidity < 0:
+        notes.append({"level": "warn", "text": "The available reserve is negative: some accounts (e.g. a credit card) are below zero."})
+    return {"notes": notes, "liquidity": liquidity, "operational": operational, "broker_cash": liquidity - operational,
             "accounts": [{"id": a["id"], "name": a["name"], "balance": a["balance"], "color": a["color"], "group": a["group"]}
                          for a in accs],
             "avg_expenses": round(exp), "fixed_monthly": round(fixed), "months_basis": months,
@@ -385,16 +407,26 @@ def goals(db, pid, today=None):
     people = [dict(p) for p in db.execute("SELECT name, income FROM people WHERE portfolio_id = ? ORDER BY position, id", (pid,))]
     tot_income = sum(p["income"] for p in people)
     out = []
-    for g in db.execute("SELECT g.*, a.name AS account_name FROM goals g LEFT JOIN accounts a ON a.id = g.account_id "
-                        "WHERE g.portfolio_id = ? ORDER BY g.position, g.id", (pid,)):
-        g = dict(g)
+    rows = [dict(g) for g in db.execute("SELECT g.*, a.name AS account_name FROM goals g LEFT JOIN accounts a ON a.id = g.account_id "
+                                        "WHERE g.portfolio_id = ? ORDER BY g.position, g.id", (pid,))]
+    for g in rows:
+        g["notes"] = []
+        shared = [o["name"] for o in rows if o is not g and o["account_id"] and o["account_id"] == g["account_id"]]
+        if shared:  # the same balance counted for several goals
+            g["notes"].append({"level": "warn", "text": f"{g['account_name']} is also used by {', '.join(shared)}: "
+                                                         "its balance counts for each goal, so the progress is overstated."})
         cur = (mv[g["account_id"]]["value"] if g["account_id"] in mv else balances.get(g["account_id"], 0)) \
             if g["account_id"] else g["saved"]
         g["current"] = max(0, cur)
         g["progress"] = min(1.0, g["current"] / g["target"])
         g["missing"] = max(0, g["target"] - g["current"])
+        if g["account_id"] and cur < 0:
+            g["notes"].append({"level": "warn", "text": f"{g['account_name']} is below zero: the goal counts as not started."})
         if g["target_date"]:
             td = parse_date(g["target_date"])
+            if td < today and g["missing"]:
+                g["overdue"] = True
+                g["notes"].append({"level": "warn", "text": "The target date has passed: move it forward to get a realistic monthly amount."})
             months_left = max(1, (td.year - today.year) * 12 + td.month - today.month)
             g["months_left"] = months_left
             g["monthly_needed"] = round(g["missing"] / months_left)
@@ -543,6 +575,8 @@ def investments(db, pid, months=24):
 
 ASSET_CLASSES = ("azioni", "obbligazioni", "monetario", "materie prime", "immobiliare", "crypto", "altro")
 CASH, UNSPECIFIED = "liquidità", "non specificato"  # same keys as the allocation chart
+STALE_PRICE_DAYS = 7        # market prices older than this: suggest updating them before rebalancing
+STALE_VALUATION_DAYS = 92   # accounts valued as a whole (e.g. a pension fund): latest valuation older than a quarter
 REBALANCE_DEFAULTS = {"accounts": None, "mode": "class", "targets": {"class": {}, "security": {}},
                       "excluded": {"class": [], "security": []},
                       "drift_abs": 5.0, "drift_rel": 25.0, "contribution": 0, "sells": False}
@@ -581,11 +615,29 @@ def rebalance(db, pid, cfg):
     def row(key, label, kind, **extra):
         return rows.setdefault(key, {"key": key, "label": label, "kind": kind, "value": 0, "holdings": [], **extra})
 
+    # what can make the result misleading, collected while reading the accounts (shown above the table)
+    unpriced, estimated, stale, neg_cash, old_valuation = [], [], [], [], []
+    week_ago = (dt.date.today() - dt.timedelta(days=STALE_PRICE_DAYS)).isoformat()
+    quarter_ago = (dt.date.today() - dt.timedelta(days=STALE_VALUATION_DAYS)).isoformat()
     for a in inv["accounts"]:
         included = chosen is None or a["id"] in chosen
         accounts.append({"id": a["id"], "name": a["name"], "icon": a["icon"], "value": a["value"], "included": included})
         if not included:
             continue
+        for h in a["holdings"]:
+            if abs(h["quantity"] or 0) < 1e-9:
+                continue
+            if not h["value"]:
+                unpriced.append(h["ticker"])
+            elif h.get("estimated_price"):
+                estimated.append(h["ticker"])
+            elif (h.get("price_date") or "") < week_ago:
+                stale.append(h["ticker"])
+        if a["has_trades"] and (a["cash"] or 0) < 0:
+            neg_cash.append((a["name"], a["cash"]))
+        if not a["has_trades"] and not any(h["value"] for h in a["holdings"]) and a["value"] > 0 and \
+                (a.get("value_date") or "") < quarter_ago:
+            old_valuation.append(a["name"])
         priced = [h for h in a["holdings"] if h["value"]]
         for h in priced:
             unit = h["value"] / h["quantity"] if h["quantity"] else None
@@ -640,6 +692,7 @@ def rebalance(db, pid, cfg):
             (cfg["drift_rel"] is not None and r["target"] > 0 and abs(r["drift_rel"]) > cfg["drift_rel"]) or
             (both_off and abs(r["drift"]) > 0.5))
         r["trade"] = 0
+    short = None  # new money missing to reach every target (buys only)
     if has_targets and after_total > 0:
         goal = [r["target"] / 100 * after_total for r in lst]
         if cfg["sells"]:  # exactly to the target: buys and sells, the difference is the new money
@@ -657,6 +710,8 @@ def rebalance(db, pid, cfg):
                 trades = _split(contribution, gaps)
         for r, t in zip(lst, trades):
             r["trade"] = t
+        if not cfg["sells"] and 0 < contribution < sum(gaps):
+            short = round(sum(gaps)) - contribution
     for r in lst:
         r["after"] = r["value"] + r["trade"]
         r["after_pct"] = r["after"] / after_total * 100 if after_total > 0 else 0.0
@@ -666,7 +721,41 @@ def rebalance(db, pid, cfg):
             for h, part in zip(r["holdings"], _split(r["trade"], [h["value"] for h in r["holdings"]])):
                 h["trade"] = part
                 h["units"] = round(part / h["unit"], 4) if h["unit"] and part else 0
-    return {"rows": lst, "excluded": left, "excluded_total": sum(r["value"] for r in left), "missing": missing,
+
+    warnings = []
+
+    def warn(level, text):  # level: 'warn' = the result may be wrong, 'info' = good to know
+        warnings.append({"level": level, "text": text})
+    names_of = lambda xs: ", ".join(xs[:5]) + (f" and {len(xs) - 5} more" if len(xs) > 5 else "")
+    if unpriced:
+        warn("warn", f"No price for {names_of(unpriced)}: not counted. Use \"Update prices\" or enter the price by hand.")
+    for name, cash in neg_cash:
+        warn("warn", f"{name} shows negative cash ({fmt_money(cash)}): a transfer to the account is probably missing. "
+                     "Cash is not counted until it is fixed.")
+    if estimated:
+        warn("info", f"Price of {names_of(estimated)} taken from the last trade (no market price yet).")
+    if stale:
+        warn("info", f"Prices of {names_of(stale)} are more than {STALE_PRICE_DAYS} days old: update them for an accurate calculation.")
+    if old_valuation:
+        warn("info", f"The latest valuation of {names_of(old_valuation)} is more than 3 months old.")
+    ignored = round(sum(float(targets.get(k) or 0) for k in ex_rows), 2)
+    if ignored:
+        warn("info", f"Targets of the rows not counted ({ignored:g}%) are ignored.")
+    if total > 0 and targets and not has_targets:
+        gap = round(100 - sum_targets, 2)
+        warn("warn", f"Targets add up to {sum_targets:g}%: {'assign another ' + format(gap, 'g') if gap > 0 else 'remove ' + format(-gap, 'g')}% to reach 100%.")
+    if short:
+        warn("info", f"The new money is not enough to reach every target: about {fmt_money(short)} more would be needed. "
+                     "It goes to the items furthest below target.")
+    whole = [r["label"] if r["kind"] == "account" else "accounts valued as a whole" for r in lst
+             if r["trade"] and (r["kind"] == "account" or r["key"] == UNSPECIFIED)]
+    if whole:
+        warn("info", f"The amount for {names_of(whole)} is only an indication: there are no securities to buy or sell there.")
+    if has_targets and any(r["trade"] < 0 and r["kind"] != "cash" for r in lst):
+        warn("info", "Sales may have taxes and fees, not included in the amounts.")
+    if has_targets and cfg["drift_abs"] is None and cfg["drift_rel"] is None:
+        warn("info", "No drift threshold: every weight more than 0.5 points away from its target is flagged.")
+    return {"rows": lst, "excluded": left, "warnings": warnings, "excluded_total": sum(r["value"] for r in left), "missing": missing,
             "accounts": accounts, "total": total, "contribution": contribution,
             "total_after": after_total, "sum_targets": sum_targets, "has_targets": has_targets, "needs_rebalance": any(r["off"] for r in lst),
             "max_drift": max((abs(r["drift"]) for r in lst if r["target"] or r["value"]), default=0.0)}

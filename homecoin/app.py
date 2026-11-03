@@ -26,7 +26,7 @@ from . import updater
 from . import util
 from .util import FREQUENCIES, add_months, months_between, parse_date, parse_number, rule_matches
 
-VERSION = "1.2.1"
+VERSION = "1.2.2"
 STATIC_DIR = dbm.BASE_DIR / "static"
 KINDS = ("expense", "income", "transfer")
 ACCOUNT_TYPES = ("corrente", "risparmio", "credito", "prepagata", "contanti", "investimenti", "altro")
@@ -2092,12 +2092,13 @@ def create_app(port):
         own_invest_account(aid)
         db, t = get_db(), trade_from_body(body(), aid)
         before = tools.negative_position(db, aid)
-        db.execute(f"INSERT INTO trades(account_id, {', '.join(t)}) VALUES (?, {', '.join('?' * len(t))})", (aid, *t.values()))
+        tid = db.execute(f"INSERT INTO trades(account_id, {', '.join(t)}) VALUES (?, {', '.join('?' * len(t))})",
+                         (aid, *t.values())).lastrowid
         check_positions(db, aid, before)
         tools.sync_holdings(db, aid)
         db.commit()
         trade_note(db, t)
-        return jsonify(ok=True), 201
+        return jsonify(ok=True, id=tid), 201
 
     @app.put("/api/trades/<int:tid>")
     def trade_update(tid):

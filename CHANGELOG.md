@@ -2,6 +2,23 @@
 
 All notable changes to HomeCoin are listed here, newest first.
 
+## 1.2.2 — 2026-11-03
+
+**Calculators warn when the result could mislead**
+- Rebalancing: securities without a price (not counted), negative broker cash, prices estimated from the last trade or more than 7 days old, a pension-fund-style valuation older than 3 months, targets that do not add up to 100% (with how much to add or remove), new money not enough to reach every target, amounts on accounts valued as a whole (nothing to buy or sell there), targets of rows left out, sales with taxes and fees not included, no drift threshold.
+- Goals: target date already passed, the same account used by several goals (progress counted twice), linked account below zero.
+- Emergency fund: fewer than 6 months of expenses recorded (the average is too low), no expenses, negative reserve.
+- Early repayment simulation: installment already paid (what-if on the past), loan already repaid, rate not specified (0%), an amount larger than the residual debt (and how much is enough).
+
+**Interface**
+- The **⋯** menu is tidier: aligned icons, Settings next to the theme switch (which now says what it will do: *Dark theme* or *Light theme*), Help and Support marked as external links, *Close HomeCoin* apart at the bottom; Esc closes it.
+
+**Documentation**
+- The README is now a complete user guide (opened by *Help* in the app): install, first start, every page step by step, your data, updates, privacy, common questions. Plain words, with the correct technical terms next to them.
+
+**API**
+- Creating a trade returns its id, like the other creations.
+
 ## 1.2.1 — 2026-11-02
 
 **Updates from HomeCoin**

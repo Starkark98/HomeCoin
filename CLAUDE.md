@@ -1,6 +1,6 @@
 # CLAUDE.md — HomeCoin
 
-Guidance for Claude Code when working in this repository. Household finance app that runs locally on Windows: Python/Flask server on `127.0.0.1`, encrypted SQLCipher database, vanilla JS single-page UI. Current version: see `VERSION` in `homecoin/app.py` (1.2.1 at the time of writing).
+Guidance for Claude Code when working in this repository. Household finance app that runs locally on Windows: Python/Flask server on `127.0.0.1`, encrypted SQLCipher database, vanilla JS single-page UI. Current version: see `VERSION` in `homecoin/app.py` (1.2.2 at the time of writing).
 
 ## Hard rules
 
@@ -10,6 +10,8 @@ Guidance for Claude Code when working in this repository. Household finance app 
 - **Only two network calls**, both optional: the price update to Yahoo Finance (tickers only) and the update check/download from GitHub releases (`updater.py`: HTTPS to GitHub hosts only, nothing about the user sent). No CDN, no telemetry, no other online service. Neither runs in the demo.
 - **Updates are signed.** Never weaken `updater.py`: Ed25519 signature on the manifest with the embedded `PUBLIC_KEY`, newer version only, size + SHA-256 of every file, ZIP paths validated, git working trees never updated. The private key lives outside the repository (maintainer only); changing `PUBLIC_KEY` cuts off every installed copy.
 - Do not commit or push without the maintainer's confirmation.
+- **Honest attribution, everywhere:** every idea, feature, concept and design choice is the maintainer's (Starkark98); the code is written with the support of Claude Code. The project is free; its purpose is to help people take care of their money and build good habits (not charity). Never invent other purposes.
+- **The README is the user guide** (the in-app *Help* opens it): plain English, step by step, and the correct technical term next to each plain explanation (e.g. "the annual return that accounts for when you added money: XIRR, a money-weighted return"). Accessible but professional. When a feature changes, update its section in the README in the same change. The "Why it exists" text is the maintainer's own words: never rewrite it.
 
 ## Commands (Windows, PowerShell)
 
@@ -80,6 +82,7 @@ Key concepts:
 - **Database**: encrypted at rest, temp store in memory, `secure_delete`; automatic encrypted backup at the first unlock of every start (last 15); restore runs `migrate()`. `keystore.json` is read and written only through `security.read_keystore`/`write_keystore` (one lock + cache: on Windows `os.replace` fails while another thread has the file open).
 - **Updates** (1.2.1): `GET /api/update` (`?check=1` now, `?auto=1` at most every 20 h if `update_auto`), `PUT /api/update/settings`, `POST /api/update/apply` (session only: `/api/update*` is closed to the import code; backup `*-update.db` first; then exit via `HC_EXIT`, restart via `HC_RESTART` in tests). Settings keys `update_auto`, `update_checked`, `update_info` (global). UI: `loadUpdate()`, chip `#update-chip`, dot `#nav-update-dot`, Settings → Updates tab.
 - **UI layout** (1.2.1): sidebar groups Everyday / Planning / Wealth / Tools (`.nav-group`, hidden when empty); rare actions in the top-right **⋯** menu; Settings tabs `SETTINGS_TABS` (`#/impostazioni?tab=general|spaces|security|data|updates`). New settings go in the tab where a user would look for them; keep the top bar for daily actions only.
+- **Calculator warnings** (1.2.2): tools return `warnings`/`notes` lists of `{level: 'warn'|'info', text}` for what can make a result misleading (missing or stale prices, data gaps, inputs that cannot be acted on); the UI shows them with `calcNotes()`. Hard errors stay 400s; a new calculator gets both.
 - **Demo** (`homecoin/demo.py`): must keep showing every feature with made-up data; when a feature is added, add sample data for it. `GET /api/demo/statement.csv` (demo only) feeds Import → "Try it with a sample bank statement".
 
 ## Conventions
@@ -105,7 +108,7 @@ Key concepts:
 
 ## Known gaps
 
-- No automated tests in the repo: the maintainer keeps a regression + fuzz suite outside it (made-up data only); last full run on 1.2.1.
+- No automated tests in the repo: the maintainer keeps a regression + fuzz suite outside it (made-up data only); last full run on 1.2.2.
 - Automatic updates only work once the GitHub repository is public (the API returns 404 for a private one without a token) and for releases published with their signed manifest.
 - `util.STOPWORDS` contains Italian bank words only (adding English ones would change payee keys of existing data).
 - Activity-log rows written before the translation stay in Italian; old investment-plan notes may read half Italian, half English.
