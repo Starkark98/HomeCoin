@@ -6,6 +6,7 @@ All notable changes to HomeCoin are listed here, newest first.
 
 **Documentation**
 - README: new "Why it exists" text.
+- User guide checked against the app and made more precise: the Settings → General tab (About HomeCoin with the version), when automatic backups are made, what "cash" means in the Calendar, how variable recurring items are forecast, the auto-lock times, and two new answers in "Questions and problems" (which version you have, a page missing from the menu).
 - Contributing guide, security policy and bug report template brought up to date: where to find the version (Settings → General → About HomeCoin), the demo for both the installed and the ZIP version, the signed update check from GitHub among the outbound calls, Python 3.14 in the dependency lock, and the rule to update the user guide with every change.
 
 ## 1.3.1 — 2026-11-03

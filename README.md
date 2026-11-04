@@ -22,7 +22,7 @@ HomeCoin keeps track of your money in one place: accounts, expenses and income, 
 
 ## Why it exists
 
-Although understanding basic economic principles—and especially personal finance—is essential for leading a fulfilling, happy life and achieving our goals, no one teaches us how to manage our money effectively, much less provides us with the tools we need to do so.
+Although understanding basic economic principles, and especially personal finance, is essential for leading a fulfilling, happy life and achieving our goals, no one teaches us how to manage our money effectively, much less provides us with the tools we need to do so.
 
 HomeCoin was created precisely to offer a comprehensive “all-in-one” tool for managing our finances, one that adapts to each person’s unique situation and makes managing our money easy and enjoyable.
 
@@ -51,7 +51,7 @@ Starkark98
 - *The basics:* [How HomeCoin is organized](#how-homecoin-is-organized) · [Typing amounts and dates](#typing-amounts-and-dates) · [Spaces](#spaces) · [Dashboard](#dashboard)
 - *Everyday:* [Transactions](#transactions) · [Accounts](#accounts) · [Recurring payments](#recurring-payments) · [Calendar](#calendar)
 - *Planning:* [Budgets](#budgets) · [Goals](#goals) · [Emergency fund](#emergency-fund) · [Mortgage and loans](#mortgage-and-loans) · [Fair split](#fair-split)
-- *Wealth:* [Investments](#investments) · [Rebalancing](#rebalancing) · [Savings](#savings) · [Reports](#reports)
+- *Wealth:* [Investments](#investments) (with [Rebalancing](#rebalancing)) · [Savings](#savings) · [Reports](#reports)
 - *Tools:* [Importing bank statements](#importing-bank-statements) · [Categories and rules](#categories-and-rules) · [Activity log](#activity-log) · [Settings](#settings)
 
 **Your data**
@@ -93,7 +93,7 @@ Each page is shown with a screenshot in the [Guide](#guide) below. All screensho
 1. Open the latest [release](https://github.com/Starkark98/HomeCoin/releases) and download **`HomeCoin-Setup-<version>.exe`**.
 2. *Optional but wise:* check that the file is genuine. Every file has a unique fingerprint (its SHA-256 hash): in PowerShell, type `Get-FileHash .\HomeCoin-Setup-<version>.exe` and compare the result with the one written in the release. If they match, the file is exactly the one published.
 3. Run the file. Windows may say *"Windows protected your PC"* (Microsoft Defender SmartScreen), because the installer does not carry a digital publisher signature yet (it is not code-signed): click **More info → Run anyway**.
-4. Choose whether you want a desktop shortcut and whether HomeCoin should start with Windows. That's all.
+4. Choose whether you want a desktop shortcut and whether HomeCoin should start with Windows (it then starts locked, without opening the browser). That's all.
 
 HomeCoin is installed for your Windows user only, in `%LOCALAPPDATA%\Programs\HomeCoin`. It needs no administrator rights and does not touch the rest of the system.
 
@@ -148,7 +148,8 @@ The guide follows the menu of the app: first the basics, then the pages of each 
   - **Wealth:** Investments, Savings, Reports
   - **Tools:** Import, Categories, Activity log, Settings
 - **Top left:** the space you are in, and the switch to the others.
-- **Top right:** 👁 hides all amounts (useful when someone is looking at your screen), 🔒 locks HomeCoin, **⋯** has the theme, Settings, this guide, the Ko-fi page and *Close HomeCoin*. **＋ New transaction** is always there.
+- **Bottom left:** the version of HomeCoin you are using.
+- **Top right:** 👁 hides all amounts (useful when someone is looking at your screen), 🔒 locks HomeCoin, **⋯** has the light/dark theme switch, Settings, *Help* (this guide), *Support HomeCoin* (Ko-fi) and *Close HomeCoin*. **＋ New transaction** is always there.
 - **Shortcuts:** <kbd>N</kbd> adds a transaction, <kbd>Esc</kbd> closes windows and menus.
 - **Click to dig in** (drill-down). Click a category, a bar of a chart or a cell of a report and you get the list of the transactions behind it.
 - **Warnings.** When something does not add up (a missing price, a date already passed, too little history for an average), HomeCoin tells you with a yellow ⚠️ or a grey ℹ️ note right where it matters.
@@ -230,12 +231,12 @@ Payments that repeat — rent, mortgage, loans, bills, subscriptions, salary, tr
 - **Frequency:** weekly, monthly, every 2, 3 or 6 months, yearly.
 - **Loans in installments:** add the number of installments, the amount borrowed and the rate, and the loan appears in [Mortgage and loans](#mortgage-and-loans).
 - **Investment plans** (regular savings plans, also known as dollar-cost averaging; *PAC* in Italy): a monthly transfer to an investment account can buy units of a security automatically, at an estimated price; HomeCoin reminds you to confirm the real price later.
-- **Variable items** (a bill or salary that changes a little every time): mark them as *expected*. HomeCoin does not record them by itself: it links the real transaction when it arrives (by a keyword in the description) and forecasts the next amount as the median of the last six.
+- **Variable items** (a bill or salary that changes a little every time): mark them as *expected*. HomeCoin does not record them by itself: it links the real transaction when it arrives (by a keyword in the description) and forecasts the next amount as the median (the middle value) of the last six payments. After a raise or a new tariff you can tell it to use the amount you set instead, until the median catches up. If a payment is more than a week late, you get a warning.
 - Pausing an item or changing its dates never creates payments in the past by surprise.
 
 ### Calendar
 
-A **cash-flow forecast**: the payments of the coming months — confirmed recurring items plus estimated ones (variable items and regular income guessed from your history) — on a monthly grid, with the **cash you will have in your accounts** after each payment and the lowest point of the period. Useful to see a tight month coming.
+A **cash-flow forecast**: the payments of the coming months — confirmed recurring items plus estimated ones (variable items and regular income guessed from your history) — on a monthly grid, with the **cash you will have** after each payment and the lowest point of the period. Useful to see a tight month coming. *Cash* here means your day-to-day accounts (current and savings accounts, cards, cash), where payments actually go through; money on a broker is not counted.
 
 ![Calendar](docs/images/05-calendar.png)
 *Calendar: confirmed and estimated payments, with the cash left after each one.*
@@ -365,9 +366,9 @@ Five tabs:
 ![Settings](docs/images/12-settings.png)
 *Settings → General: theme, currency, help, support and close.*
 
-- **General:** light or dark theme, reference currency, help, close HomeCoin.
+- **General:** theme (light, dark or the same as Windows), reference currency, a reminder of the shortcuts, and **About HomeCoin**: your version, Help, Support and Close HomeCoin.
 - **Spaces:** create, edit, archive spaces and choose their pages.
-- **Security:** a check of your protections (with a button to fix what needs fixing), password, recovery key, auto-lock time, lock now.
+- **Security:** a check of your protections (with a button to fix what needs fixing), password, recovery key, auto-lock time (5 minutes to 2 hours, 15 by default), lock now.
 - **Backup & data:** download or restore a backup, export, where your data is.
 - **Updates:** see if there is a new version and install it.
 
@@ -384,8 +385,8 @@ Five tabs:
 
 ## Backups
 
-- **Automatic:** every time you unlock HomeCoin, an encrypted copy of the database is saved next to the data (the last 15 are kept).
-- **Downloaded:** Settings → Backup & data → **Backup** saves an encrypted `.hcbackup` file. Keep a copy **outside your PC** (USB drive, cloud storage): the automatic copies don't help if the disk breaks. HomeCoin reminds you if you haven't downloaded one for 30 days.
+- **Automatic:** every time you unlock HomeCoin, and before every import, restore and update, an encrypted copy of the database is saved next to the data (the last 15 are kept).
+- **Downloaded:** Settings → Backup & data → **Backup** saves an encrypted `.hcbackup` file. Keep a copy **outside your PC** (USB drive, cloud storage): the automatic copies don't help if the disk breaks. The same page shows when you last downloaded one, with a warning after 30 days.
 - A backup opens only in HomeCoin, with the password (or recovery key) that was valid when it was made.
 - **Restore** (same tab) replaces all current data with the backup; HomeCoin saves a copy of the current data first.
 - Exports to CSV or Excel are **not encrypted**: HomeCoin reminds you before each one.
@@ -455,6 +456,10 @@ HomeCoin checks for updates at most once a day, after you sign in, and sends not
 **An imported row is marked "already present" but it isn't.** Tick it in the review step to import it anyway: HomeCoin flags rows with the same amount on the same account within 3 days.
 
 **The security check says the data folder is also accessible to other accounts.** It happens when the data is in a folder that other users of the PC can open (for example a folder you chose yourself under `C:\`). The data is encrypted anyway, but they could copy or delete it: click **🔒 Protect** next to the warning to restrict the folder to your Windows user. If anything goes wrong, the previous permissions are put back.
+
+**Which version do I have?** It is written at the bottom of the left menu and in Settings → General → About HomeCoin.
+
+**A page I need is missing from the menu.** Each space shows only its own pages: turn it on in Settings → Spaces (✏️ next to the space). Hiding a page never deletes its data.
 
 **Where is my data, and how do I keep it safe?** See [Backups](#backups).
 
