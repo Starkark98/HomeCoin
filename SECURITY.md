@@ -17,9 +17,9 @@ Report them privately through GitHub: open the **Security** tab of this reposito
 
 - a description of the problem and its possible impact;
 - the steps or a minimal example to reproduce it;
-- the HomeCoin version (shown at the bottom of Settings) and the Windows, Python and browser versions involved.
+- the HomeCoin version (Settings → General → About HomeCoin, or at the bottom of the menu), whether it is the installed or the ZIP version, and the Windows and browser versions involved.
 
-**Never include real data**: no database, backups, `keystore.json`, recovery keys, passwords, bank statements, amounts or names. Use the demo version (`HomeCoin-Demo.cmd`) or made-up examples.
+**Never include real data**: no database, backups, `keystore.json`, recovery keys, passwords, bank statements, amounts or names. Use the [demo version](README.md#try-the-demo-first) or made-up examples.
 
 ## What to expect
 

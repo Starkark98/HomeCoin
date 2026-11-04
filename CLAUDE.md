@@ -18,7 +18,7 @@ Guidance for Claude Code when working in this repository. Household finance app 
 Python is not on PATH: always use the project environment.
 
 ```powershell
-.\setup.ps1                                   # creates .venv, installs requirements.lock with --require-hashes (Python 3.12/3.13, not the Store one)
+.\setup.ps1                                   # creates .venv, installs requirements.lock with --require-hashes (Python 3.12–3.14, not the Store one)
 .\HomeCoin.cmd                                # real instance → http://127.0.0.1:8765 (options: --port N, --no-browser)
 .\HomeCoin-Demo.cmd                           # demo on 8766, sample data recreated at every start in demo-data\
 .venv\Scripts\python.exe demo.py --port 8799 --no-browser   # demo for browser tests

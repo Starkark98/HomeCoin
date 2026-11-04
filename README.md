@@ -24,17 +24,17 @@ HomeCoin keeps track of your money in one place: accounts, expenses and income, 
 
 Although understanding basic economic principles—and especially personal finance—is essential for leading a fulfilling, happy life and achieving our goals, no one teaches us how to manage our money effectively, much less provides us with the tools we need to do so.
 
-HomeCoin was created precisely to offer a comprehensive “all-in-one” tool for managing our finances—one that adapts to each person’s unique situation and makes managing our money easy and enjoyable.
+HomeCoin was created precisely to offer a comprehensive “all-in-one” tool for managing our finances, one that adapts to each person’s unique situation and makes managing our money easy and enjoyable.
 
 The project is independent and completely free, available on this official GitHub repository. It is continuously updated and maintained solely by me, and I’m especially open to advice and suggestions for ongoing improvement.
 
-Taking care of our finances isn’t as difficult as we’re led to believe—it can even be enjoyable and fun!
+Taking care of our finances isn’t as difficult as we’re led to believe...it can even be enjoyable and fun!
 
 Every additional coin saved and invested thanks to HomeCoin will be a source of satisfaction and deep pride for me.
 
-Thank you
+Thank you!
 
-*Starkark98*
+Starkark98
 
 ---
 

@@ -2,6 +2,12 @@
 
 All notable changes to HomeCoin are listed here, newest first.
 
+## Unreleased
+
+**Documentation**
+- README: new "Why it exists" text.
+- Contributing guide, security policy and bug report template brought up to date: where to find the version (Settings → General → About HomeCoin), the demo for both the installed and the ZIP version, the signed update check from GitHub among the outbound calls, Python 3.14 in the dependency lock, and the rule to update the user guide with every change.
+
 ## 1.3.1 — 2026-11-03
 
 **Smoother calculators**

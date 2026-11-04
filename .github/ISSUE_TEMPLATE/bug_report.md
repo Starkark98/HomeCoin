@@ -5,23 +5,24 @@ title: "[Bug] "
 labels: bug
 ---
 
-> ⚠️ **Never post real data** on this page: no amounts, names, accounts, bank statements, databases, backups or keys. Reproduce the problem with the demo version (`HomeCoin-Demo.cmd`). Security problems must be reported privately: see SECURITY.md.
+> ⚠️ **Never post real data** on this page: no amounts, names, accounts, bank statements, databases, backups or keys. Reproduce the problem with the demo version (see "Try the demo first" in the README). Security problems must be reported privately: see SECURITY.md.
 
 **What happened**
 A clear description of the problem.
 
 **Error message**
-The text shown in the app, or the lines in HomeCoin's terminal window (check that they contain no personal data).
+The text shown in the app, a screenshot of the demo, or (ZIP version only) the lines in HomeCoin's black window. Check that they contain no personal data.
 
 ```
 (paste here)
 ```
 
 **Environment**
-- HomeCoin version (bottom of Settings):
+- HomeCoin version (Settings → General → About HomeCoin, or at the bottom of the menu):
+- Installed with the installer, or the ZIP version:
 - Windows version:
-- Python version (`.venv\Scripts\python --version`):
 - Browser:
+- Reference currency:
 - Happens in the demo too: yes / no
 
 **Steps to reproduce**
