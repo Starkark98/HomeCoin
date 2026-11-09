@@ -25,7 +25,7 @@ def default_data_dir():
 DATA_DIR = default_data_dir()
 BACKUP_DIR = DATA_DIR / "backups"
 DB_PATH = DATA_DIR / "homecoin.db"
-SCHEMA_VERSION = 14
+SCHEMA_VERSION = 15
 KEEP_BACKUPS = 15
 
 SCHEMA = """
@@ -536,6 +536,8 @@ def migrate(conn):
         conn.execute("ALTER TABLE categories ADD COLUMN flow TEXT NOT NULL DEFAULT ''")
         # legacy migration of old Italian databases: keep the Italian name
         conn.execute("UPDATE categories SET flow = 'other' WHERE kind = 'expense' AND name = 'Versamenti conto casa'")
+    if "amortization" not in {r[1] for r in conn.execute("PRAGMA table_info(recurring)")}:  # v15: loan method
+        conn.execute("ALTER TABLE recurring ADD COLUMN amortization TEXT")  # NULL = French (constant installment), 'constant' = constant principal
     if "amount_fixed" not in {r[1] for r in conn.execute("PRAGMA table_info(recurring)")}:  # v14
         conn.execute("ALTER TABLE recurring ADD COLUMN amount_fixed INTEGER NOT NULL DEFAULT 0")  # expected items: chosen amount, not the median
     if "expected" not in {r[1] for r in conn.execute("PRAGMA table_info(recurring)")}:  # v13: expected recurring items

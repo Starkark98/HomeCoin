@@ -1534,6 +1534,8 @@ function recurringModal(r = null) {
       <label class="field">Amount financed <input id="r-principal" inputmode="decimal" value="${moneyInput(x.principal)}" placeholder="Optional (for the interest calculation)"></label>
       <div class="field full rate-box"><span>Loan interest rate <span class="muted small">(for the amortization schedule; excluding APR and additional costs)</span></span>
         <div class="rate-grid">
+          <label class="field">Repayment <select id="r-amort" title="How each installment is made up">${[['french', 'Constant installment (French)'], ['constant', 'Constant principal (Italian, SAC)']].map(([k, l]) =>
+            `<option value="${k}" ${(x.amortization || 'french') === k ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
           <label class="field">Type <select id="r-rtype">${[['', '— not specified'], ['fixed', 'Fixed'], ['variable', 'Variable'], ['mixed', 'Mixed']].map(([k, l]) =>
             `<option value="${k}" ${(x.rate_type || (x.rate != null ? 'fixed' : '')) === k ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
           <label class="field" data-rt="fixed mixed">Fixed rate (%) <input id="r-rate" inputmode="decimal" value="${decInput(x.rate)}" placeholder="3"></label>
@@ -1585,7 +1587,9 @@ function recurringModal(r = null) {
     ['#r-inst', '#r-principal'].forEach((s) => $(s, m).closest('label').classList.toggle('hidden', on));
     $('.rate-box', m).classList.toggle('hidden', on);
     $('#r-past', m)?.closest('label').classList.toggle('hidden', on);
+    if ($('#r-amort', m)) syncAmortSoon();
   };
+  const syncAmortSoon = () => setTimeout(() => $('#r-amort', m)?.dispatchEvent(new Event('change')), 0);
   $('#r-var', m).onchange = syncVar;
   $('#r-inst', m).addEventListener('input', syncVar);
   $$('#r-kind button', m).forEach((b) => (b.onclick = () => { kind = b.dataset.kind; draw(); }));
@@ -1628,10 +1632,24 @@ function recurringModal(r = null) {
     $$('[data-rt]', m).forEach((el) => el.classList.toggle('hidden', !t || !el.dataset.rt.split(' ').includes(t)));
   };
   $('#r-rtype', m).onchange = syncRate; syncRate();
+  // constant principal: every installment is different, so the amount comes from the schedule
+  const constantOn = () => $('#r-amort', m).value === 'constant' && !$('.rate-box', m).classList.contains('hidden');
+  const syncAmort = () => {
+    const on = constantOn(), a = $('#r-amount', m);
+    a.disabled = on;
+    if (on) a.value = '';
+    a.placeholder = on ? 'Calculated from the schedule' : '0,00';
+    $('#r-principal', m).placeholder = on ? 'Required for constant principal' : 'Optional (for the interest calculation)';
+  };
+  $('#r-amort', m).onchange = syncAmort; syncAmort();
   $('[data-cancel]', m).onclick = closeModal;
   $('#r-save', m).onclick = async () => {
-    const amount = parseMoney($('#r-amount', m).value);
-    if (!amount || Number.isNaN(amount)) { toast('Enter the amount', 'err'); return; }
+    const constant = constantOn();
+    const amount = constant ? null : parseMoney($('#r-amount', m).value);
+    if (constant && (kind !== 'expense' || !$('#r-inst', m).value || !parseMoney($('#r-principal', m).value))) {
+      toast('Constant principal needs an expense with the number of installments and the amount financed', 'err'); return;
+    }
+    if (!constant && (!amount || Number.isNaN(amount))) { toast('Enter the amount', 'err'); return; }
     const body = {
       name: $('#r-name', m).value, kind, amount, frequency: $('#r-freq', m).value, start_date: $('#r-start', m).value,
       account_id: +$('#r-account', m).value, to_account_id: kind === 'transfer' ? +$('#r-to', m).value : null,
@@ -1644,9 +1662,9 @@ function recurringModal(r = null) {
       post_past: !r && $('#r-past', m).checked,
       holding_id: kind === 'transfer' && !$('#r-pac-wrap', m).classList.contains('hidden') && $('#r-pac', m).value ? +$('#r-pac', m).value : null,
       expected: !$('#r-var-wrap', m).classList.contains('hidden') && $('#r-var', m).checked, match_text: $('#r-match', m).value.trim(),
-      amount_fixed: $('#r-fixed', m).checked,
+      amount_fixed: $('#r-fixed', m).checked, amortization: constant ? 'constant' : 'french',
     };
-    if (body.expected) Object.assign(body, { installments: null, principal: null, rate_type: null, rate: null, post_past: false });
+    if (body.expected) Object.assign(body, { installments: null, principal: null, rate_type: null, rate: null, post_past: false, amortization: 'french' });
     try {
       const res = await api(r ? `/recurring/${r.id}` : '/recurring', { method: r ? 'PUT' : 'POST', body });
       toast(res.created ? `Recurring item saved · ${res.created} transactions recorded` : 'Recurring item saved');
@@ -1695,6 +1713,7 @@ async function renderImport(v) {
       try {
         I.upload = await api('/import/upload', { method: 'POST', body: fd });
         I.mapping = { ...I.upload.mapping };
+        I.dateOrder = I.upload.date_order; I.dateOrderSource = I.upload.date_order_source;
         I.account_id = I.account_id || activeAccounts()[0]?.id;
         I.invert = false; I.step = 2; route();
       } catch (e) { fail(e); route(); }
@@ -1722,6 +1741,8 @@ async function renderImport(v) {
         <div class="map-grid">${fields.map(([k, l]) => `<label class="field">${l}<select data-map="${k}">${opt(I.mapping[k])}</select></label>`).join('')}</div>
         <div class="form-grid" style="grid-template-columns:repeat(auto-fill,minmax(240px,1fr))">
           <label class="field">Import into account <select id="i-acc">${accountOptions(I.account_id)}</select></label>
+          <label class="field">Date format <select id="i-dord">${[['dmy', 'Day / month / year (31/12/2026)'], ['mdy', 'Month / day / year (12/31/2026)']].map(([k, l]) => `<option value="${k}" ${I.dateOrder === k ? 'selected' : ''}>${l}</option>`).join('')}</select>
+            <span class="muted small" id="i-dord-note">${I.dateOrderSource === 'file' ? 'Recognized from the dates in the file' : 'The dates in the file fit both: check that this is right'}</span></label>
           <label class="check" style="align-self:end;padding-bottom:10px"><input type="checkbox" id="i-inv" ${I.invert ? 'checked' : ''}> Invert the sign (e.g. credit card statements)</label>
         </div>
         <p class="muted small">Use <b>Amount</b> if the file has a single column with positive/negative values, or <b>Money out</b> + <b>Money in</b> if they are separate.</p>
@@ -1729,13 +1750,23 @@ async function renderImport(v) {
       <div class="card" style="padding:8px"><div class="table-wrap"><table class="preview-table"><thead><tr>${u.headers.map((h, i) => `<th class="${mapped.has(i) ? 'mapped' : ''}">${esc(h)}</th>`).join('')}</tr></thead>
         <tbody>${u.preview.map((r) => `<tr>${r.map((c) => `<td>${esc(c ?? '')}</td>`).join('')}</tr>`).join('')}</tbody></table></div></div>
       <div class="modal-foot"><button class="btn" id="i-back">← Another file</button><button class="btn btn-primary" id="i-next">Analyze transactions →</button></div>`;
-    $$('[data-map]').forEach((s) => (s.onchange = () => { I.mapping[s.dataset.map] = s.value === '' ? null : +s.value; }));
+    $$('[data-map]').forEach((s) => (s.onchange = async () => {
+      I.mapping[s.dataset.map] = s.value === '' ? null : +s.value;
+      if (s.dataset.map !== 'date') return;
+      try {  // another date column: recognize its day/month order again
+        const r = await api('/import/date-order', { method: 'POST', body: { token: u.token, column: I.mapping.date } });
+        I.dateOrder = r.date_order; I.dateOrderSource = r.date_order_source;
+        $('#i-dord').value = I.dateOrder;
+        $('#i-dord-note').textContent = I.dateOrderSource === 'file' ? 'Recognized from the dates in the file' : 'The dates in the file fit both: check that this is right';
+      } catch (e) { fail(e); }
+    }));
+    $('#i-dord').onchange = (e) => { I.dateOrder = e.target.value; I.dateOrderSource = 'user'; $('#i-dord-note').textContent = ''; };
     $('#i-acc').onchange = (e) => (I.account_id = +e.target.value);
     $('#i-inv').onchange = (e) => (I.invert = e.target.checked);
     $('#i-back').onclick = () => { I.step = 1; route(); };
     $('#i-next').onclick = async () => {
       try {
-        const res = await api('/import/analyze', { method: 'POST', body: { token: u.token, mapping: I.mapping, account_id: I.account_id, invert: I.invert } });
+        const res = await api('/import/analyze', { method: 'POST', body: { token: u.token, mapping: I.mapping, account_id: I.account_id, invert: I.invert, date_order: I.dateOrder || 'dmy' } });
         I.rows = res.rows.map((r) => ({ ...r, include: !r.error && !r.duplicate }));
         I.step = 3; route();
       } catch (e) { fail(e); }
@@ -2359,7 +2390,7 @@ async function renderMutuo(v) {
       <div class="kpi g-amber"><div class="k-label">⏳ Interest remaining</div><div class="k-value">${money0(tot('interest_left'))}</div><div class="k-sub">until the end of the schedules</div></div>
     </div>
     ${plans.map((p, i) => `<div class="card mt-plan" style="margin-bottom:18px">
-      <div class="card-head"><div><h3>${esc(p.name)}</h3><p class="muted small" style="margin:3px 0 0">${esc(p.account)} · ${money0(p.principal)} in ${p.installments} installments · rate ${p.rate_known ? esc(p.rate_label) : '<span class="tag warn">not specified: calculated at 0%</span>'} · ends ${esc(fmtDate(p.end_date))}</p></div>
+      <div class="card-head"><div><h3>${esc(p.name)}</h3><p class="muted small" style="margin:3px 0 0">${esc(p.account)} · ${money0(p.principal)} in ${p.installments} installments · rate ${p.rate_known ? esc(p.rate_label) : '<span class="tag warn">not specified: calculated at 0%</span>'} · ends ${esc(fmtDate(p.end_date))}${p.amortization === 'constant' ? `<br>Constant principal: installments go down from ${money0(p.first_installment)} to ${money0(p.last_installment)}` : ''}</p></div>
         <a class="btn btn-sm" href="#/movimenti?${qs({ recurring_id: p.id })}">📄 Installments paid</a></div>
       ${p.index_missing ? `<div class="sp-warn card" style="margin-bottom:12px">⚠️ The current value of the ${esc(p.rate_index)} is missing: the variable part of the schedule is indicative (calculated with a 0% index, i.e. spread only, ${decInput(p.spread)}%). Enter it in the mortgage's recurring item (Recurring → Edit → Rate).</div>` : ''}
       ${p.rate_change ? `<div class="mt-change">🔁 From installment ${p.rate_change.n} (${esc(fmtDate(p.rate_change.date))}) the rate becomes <b>${num(p.rate_change.rate, 3)}%</b>${p.index_missing ? ' (estimated)' : ''} and the installment becomes about <b>${money(p.rate_change.installment)}</b>.</div>` : ''}
@@ -2378,7 +2409,7 @@ async function renderMutuo(v) {
         <div class="table-wrap" style="max-height:340px;overflow:auto"><table class="sp-table"><thead><tr><th>No.</th><th>Date</th><th class="right">Rate</th><th class="right">Installment</th><th class="right">Principal</th><th class="right">Interest</th><th class="right">Remaining</th></tr></thead>
         <tbody>${p.schedule.map((r) => `<tr class="${r.n <= p.paid ? 'is-paid' : ''}"><td>${r.n}</td><td>${esc(fmtDate(r.date))}</td><td class="right muted">${num(r.rate, 3)}%</td><td class="right">${money(r.installment)}</td><td class="right">${money(r.capital)}</td><td class="right">${money(r.interest)}</td><td class="right">${money0(r.residual)}</td></tr>`).join('')}</tbody></table></div></details>
     </div>`).join('')}
-    <div class="card"><div class="card-head"><div><h3>🧮 Simulate an early repayment</h3><p class="muted small" style="margin:3px 0 0">You pay an extra amount: you can reduce the term (same installment) or the installment (same term).</p></div></div>
+    <div class="card"><div class="card-head"><div><h3>🧮 Simulate an early repayment</h3><p class="muted small" style="margin:3px 0 0">You pay an extra amount: you can reduce the term (same installment, or the same principal share with constant principal) or the installment (same term).</p></div></div>
       <div class="form-grid" style="grid-template-columns:repeat(auto-fill,minmax(180px,1fr))">
         <label class="field">Loan <select id="sim-p">${plans.filter((p) => p.paid < p.installments).map((p) => `<option value="${p.id}">${esc(p.name)}</option>`).join('')}</select></label>
         <label class="field">Extra amount (${CUR_SYM}) <input id="sim-x" inputmode="decimal" value="10000"></label>

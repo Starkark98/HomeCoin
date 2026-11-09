@@ -1,6 +1,6 @@
 # CLAUDE.md — HomeCoin
 
-Guidance for Claude Code when working in this repository. Household finance app that runs locally on Windows: Python/Flask server on `127.0.0.1`, encrypted SQLCipher database, vanilla JS single-page UI. Current version: see `VERSION` in `homecoin/app.py` (1.3.1 at the time of writing).
+Guidance for Claude Code when working in this repository. Household finance app that runs locally on Windows: Python/Flask server on `127.0.0.1`, encrypted SQLCipher database, vanilla JS single-page UI. Current version: see `VERSION` in `homecoin/app.py` (1.4.0 at the time of writing).
 
 ## Hard rules
 
@@ -77,6 +77,8 @@ Key concepts:
 - **Number input**: one parser everywhere (`util.parse_number` server side, `normNum`/`parseMoney`/`parseSignedMoney`/`parseQty` in app.js). For money "1.500" = 1500 in euro (in dollars the dot is always the decimal separator); for quantities and prices "9.014" = 9.014. Display follows the reference currency.
 - **Rebalancing** (1.1.0): `tools.rebalance` + `GET/POST /api/investments/rebalance` (POST calculates, `save: true` stores the settings in `rebalance@<space>`). Mode `class` (asset classes + `liquidità` = broker cash, `non specificato` = accounts valued as a whole) or `security` (`h:<holding id>`, `cash`, `acc:<account id>`); values are the same as the Allocation chart; buys only (new money to the gaps) or buys and sells (exactly to target); `excluded {class: [...], security: [...]}` leaves rows out (a security excluded in `security` also leaves its class); a threshold of 0 = not used. It never records trades.
 - **Monthly balance** (`tools.savings`): saved = month surplus (income − spent − other spaces), never the change in cash; "invested" = buys − sells of non-money-market securities, shown separately; money-market ETFs (`asset_class` `monetario`) count as cash.
+- **Loans** (1.4.0): `recurring.amortization` NULL = French (constant installment), `'constant'` = constant principal (Italian / SAC). Use `tools.loan_plan(rec)` for a schedule and `tools.scheduled_amount(rec, n)` for the amount of installment n: constant-principal loans record each installment from the schedule and keep `recurring.amount` = the next installment (so every other `amount` reader stays right).
+- **Import dates** (1.4.0): `importer.detect_date_order()` reads day/month vs month/day from the file; ambiguous files fall back to `util.DATE_ORDER_DEFAULT` by currency (USD = month first). `parse_date(value, order)`.
 - **Investment plans**: a recurring transfer with `holding_id` buys units automatically at an estimated price (`external_id` `pac:<rid>:<date>`, note "estimated price"); editing the trade marks it "verified price"; unverified after 30 days → reminder.
 - **Security guard**: Host check (DNS rebinding), `Sec-Fetch-Site: cross-site` rejected, writes need `X-HomeCoin: 1` + local Origin (CSRF), strict CSP, Permissions-Policy, no server signature, session cookie `hc_session_{port}` (`hc_session_demo_{port}` in demo), all `/api/*` except `/api/auth/*` return 401 while locked.
 - **Database**: encrypted at rest, temp store in memory, `secure_delete`; automatic encrypted backup at the first unlock of every start (last 15); restore runs `migrate()`. `keystore.json` is read and written only through `security.read_keystore`/`write_keystore` (one lock + cache: on Windows `os.replace` fails while another thread has the file open).
@@ -111,7 +113,7 @@ Key concepts:
 
 ## Known gaps
 
-- No automated tests in the repo: the maintainer keeps a regression + fuzz suite outside it (made-up data only); last full run on 1.3.1.
+- No automated tests in the repo: the maintainer keeps a regression + fuzz suite outside it (made-up data only); last full run on 1.4.0.
 - Automatic updates only work once the GitHub repository is public (the API returns 404 for a private one without a token) and for releases published with their signed manifest.
 - `util.STOPWORDS` contains Italian bank words only (adding English ones would change payee keys of existing data).
 - Activity-log rows written before the translation stay in Italian; old investment-plan notes may read half Italian, half English.

@@ -92,6 +92,13 @@ DATE_FORMATS = (
     "%d/%m/%Y", "%d-%m-%Y", "%d.%m.%Y", "%Y-%m-%d", "%Y/%m/%d",
     "%d/%m/%y", "%d-%m-%y", "%d.%m.%y", "%Y%m%d",
 )
+# month first, as in US bank statements (03/04/2026 = March 4): used only when the file is in that order
+DATE_FORMATS_MDY = (
+    "%m/%d/%Y", "%m-%d-%Y", "%m.%d.%Y", "%Y-%m-%d", "%Y/%m/%d",
+    "%m/%d/%y", "%m-%d-%y", "%m.%d.%y", "%Y%m%d",
+)
+# default order of the day and month when a file does not show it (all days 1-12): the currency's country
+DATE_ORDER_DEFAULT = {"USD": "mdy"}
 
 STOPWORDS = {
     "pagamento", "pagam", "pag", "pos", "carta", "del", "della", "dello", "dei", "delle", "presso",
@@ -184,8 +191,9 @@ def parse_amount(value):
     return -cents if neg else cents
 
 
-def parse_date(value):
-    """Convert dates (objects, Excel serials, IT/ISO text) into datetime.date. None if invalid."""
+def parse_date(value, order="dmy"):
+    """Convert dates (objects, Excel serials, day-first/ISO text; month-first with order="mdy") into datetime.date.
+    None if invalid."""
     if value is None or value == "":
         return None
     if isinstance(value, dt.datetime):
@@ -199,7 +207,7 @@ def parse_date(value):
             return dt.date(1899, 12, 30) + dt.timedelta(days=int(value))
         value = str(int(value))
     s = str(value).strip().split(" ")[0].split("T")[0]
-    for fmt in DATE_FORMATS:
+    for fmt in (DATE_FORMATS_MDY if order == "mdy" else DATE_FORMATS):
         try:
             return dt.datetime.strptime(s, fmt).date()
         except ValueError:

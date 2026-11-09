@@ -117,11 +117,31 @@ def rate_label(rec):
     return f"fixed {pct(rec.get('rate') or 0)}" if rec.get("rate") is not None else "rate not specified"
 
 
-def amortization(principal, rate, n, start, installment=None, k0=0):
-    """French amortization. `rate` = constant annual rate % or a function k -> rate (absolute k, 0 = first installment).
-    Without `installment` the installment is recalculated at every rate change on the residual and remaining installments;
-    with `installment` the installment stays fixed and the term changes (used for early repayment 'shorten term')."""
+AMORTIZATION_METHODS = ("french", "constant")
+
+
+def amortization(principal, rate, n, start, installment=None, k0=0, method="french", capital=None):
+    """Amortization schedule. `rate` = constant annual rate % or a function k -> rate (absolute k, 0 = first installment).
+    method "french": constant installment. Without `installment` the installment is recalculated at every rate change on
+    the residual and remaining installments; with `installment` it stays fixed and the term changes (early repayment
+    'shorten term').
+    method "constant" (constant principal: Italian amortization, SAC in Brazil): every installment repays the same share
+    of principal, `capital` (default principal / n), plus the interest on the residual, so installments go down over time.
+    With a given `capital` and a smaller residual the term gets shorter (early repayment 'shorten term')."""
     fn = rate if callable(rate) else (lambda k, r=rate: r or 0)
+    if method == "constant":
+        rows, residual, share = [], principal, capital or (principal / n if n else 0)
+        for j in range(n):
+            k = k0 + j
+            r = fn(k)
+            interest = residual * r / 100 / 12
+            cap = residual if j == n - 1 else min(residual, share)  # the last installment closes any rounding left
+            residual = max(0.0, residual - cap)
+            rows.append({"n": k + 1, "date": occurrence(start, "monthly", j).isoformat(), "installment": cap + interest,
+                         "capital": cap, "interest": interest, "residual": residual, "rate": r})
+            if residual <= 0.5:
+                break
+        return rows
     rows, residual, last_rate, inst = [], principal, None, installment
     for j in range(n):
         k = k0 + j
@@ -141,12 +161,31 @@ def amortization(principal, rate, n, start, installment=None, k0=0):
     return rows
 
 
+def method_of(rec):
+    return "constant" if rec.get("amortization") == "constant" else "french"
+
+
+def loan_plan(rec, principal=None):
+    """Full schedule of a recurring item with installments, with its rate and amortization method."""
+    return amortization(principal or rec["principal"], rate_fn(rec), rec["installments"], parse_date(rec["start_date"]),
+                        method=method_of(rec))
+
+
+def scheduled_amount(rec, n, plan=None):
+    """Amount of installment n (0 = first) of a recurring item. Constant-principal loans: from the schedule, since every
+    installment is different; anything else: the amount of the recurring item."""
+    if method_of(rec) == "constant" and rec.get("principal") and rec.get("installments"):
+        plan = plan or loan_plan(rec)
+        if plan:
+            return max(1, round(plan[min(n, len(plan) - 1)]["installment"]))
+    return rec["amount"]
+
+
 def residual_at(rec, when):
     """Outstanding principal of a loan at a date (None if it is not a loan with a principal)."""
     if not rec["installments"] or not rec["principal"]:
         return None
-    start = parse_date(rec["start_date"])
-    plan = amortization(rec["principal"], rate_fn(rec), rec["installments"], start)
+    plan = loan_plan(dict(rec))
     paid = [r for r in plan if r["date"] <= when.isoformat()]
     return paid[-1]["residual"] if paid else rec["principal"]
 
@@ -159,9 +198,7 @@ def mortgage_plans(db, pid, today=None):
            WHERE a.portfolio_id = ? AND r.kind = 'expense' AND r.installments IS NOT NULL ORDER BY r.amount DESC""", (pid,)):
         rec = dict(rec)
         principal = rec["principal"] or rec["amount"] * rec["installments"]
-        start = parse_date(rec["start_date"])
-        fn = rate_fn(rec)
-        plan = amortization(principal, fn, rec["installments"], start)
+        plan = loan_plan(rec, principal)
         done = [r for r in plan if r["date"] <= today.isoformat()]
         left = plan[len(done):]
         current = left[0] if left else plan[-1]
@@ -169,6 +206,8 @@ def mortgage_plans(db, pid, today=None):
         variable = rec.get("rate_type") in ("variable", "mixed")
         out.append({
             "id": rec["id"], "name": rec["name"], "account": rec["account_name"],
+            "amortization": method_of(rec), "first_installment": round(plan[0]["installment"]),
+            "last_installment": round(plan[-1]["installment"]),
             "rate_type": rec.get("rate_type") or "fixed", "rate": rec["rate"], "fixed_years": rec.get("fixed_years"),
             "rate_index": rec.get("rate_index"), "spread": rec.get("spread"), "index_value": rec.get("index_value"),
             "rate_label": rate_label(rec), "current_rate": current["rate"],
@@ -208,7 +247,11 @@ def simulate_prepayment(plan, extra, after_payment, mode):
     remaining_n = n - k
     old_interest = sum(r["interest"] for r in sched[k:])
     start = parse_date(sched[k]["date"]) if k < len(sched) else parse_date(sched[-1]["date"])
-    if mode == "duration":  # same installment, fewer installments
+    method = method_of(plan["_rec"])
+    if method == "constant":  # same principal share (shorter) or the residual spread over the same term (lower)
+        share = sched[k]["capital"] if mode == "duration" and k < len(sched) else None
+        new = amortization(residual, fn, remaining_n, start, k0=k, method="constant", capital=share)
+    elif mode == "duration":  # same installment, fewer installments
         new = amortization(residual, fn, remaining_n, start, installment=sched[k]["installment"] if k < len(sched) else None, k0=k)
     else:  # same term, lower installment (also recalculated at rate changes)
         new = amortization(residual, fn, remaining_n, start, k0=k)

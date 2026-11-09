@@ -8,6 +8,11 @@ from .util import CURRENCIES, CURRENCY, occurrence, normalize_desc, rule_matches
 MAX_GENERATE = 5000  # safety limit for recurring items with very old dates
 
 
+def scheduled_amount(r, n, plan=None):
+    from .tools import scheduled_amount as amount  # tools imports this module: imported here
+    return amount(r, n, plan)
+
+
 def account_balances(db, portfolio_id=None):
     """Account balances (of one space, or of all spaces if portfolio_id is None)."""
     rows = db.execute(
@@ -77,6 +82,10 @@ def _process_recurring(db, today=None):
         r = dict(r)
         start = parse_date(r["start_date"])
         n = r["generated"]
+        plan = None
+        if r.get("amortization") == "constant" and r["principal"] and r["installments"]:
+            from .tools import loan_plan
+            plan = loan_plan(r)  # constant principal: every installment has its own amount
         while n < MAX_GENERATE:
             d = occurrence(start, r["frequency"], n)
             if d > today or not _limit_ok(r, n, d):
@@ -92,7 +101,7 @@ def _process_recurring(db, today=None):
                 """INSERT INTO transactions(date, amount, kind, account_id, to_account_id, category_id,
                                             description, recurring_id, source)
                    VALUES (?,?,?,?,?,?,?,?, 'recurring')""",
-                (d.isoformat(), r["amount"], r["kind"], r["account_id"],
+                (d.isoformat(), scheduled_amount(r, n, plan) if plan else r["amount"], r["kind"], r["account_id"],
                  r["to_account_id"] if r["kind"] == "transfer" else None,
                  r["category_id"] if r["kind"] != "transfer" else None, label, r["id"]),
             )
@@ -102,6 +111,10 @@ def _process_recurring(db, today=None):
             created += 1
         if n != r["generated"]:
             db.execute("UPDATE recurring SET generated = ? WHERE id = ?", (n, r["id"]))
+        if plan:  # the amount shown everywhere (lists, emergency fund, fair split) is the next installment
+            nxt = scheduled_amount(r, n, plan)
+            if nxt != r["amount"]:
+                db.execute("UPDATE recurring SET amount = ? WHERE id = ?", (nxt, r["id"]))
     from .forecast import link_expected
     link_expected(db)
     db.commit()
@@ -162,10 +175,17 @@ def recurring_view(r):
         r["total_amount"] = n * r["amount"]
         r["last_date"] = occurrence(start, r["frequency"], n - 1).isoformat()
         r["progress"] = r["paid"] / n
+        constant = r.get("amortization") == "constant" and r["principal"]
+        if constant:  # every installment is different: totals from the schedule
+            from .tools import loan_plan
+            plan = loan_plan(r)
+            amounts = [round(x["installment"]) for x in plan[:n]]
+            r["remaining_amount"] = sum(amounts[r["paid"]:])
+            r["total_amount"] = sum(amounts)
         if r["principal"]:
-            if r.get("rate_type") or r.get("rate") is not None:  # known rate: interest from the schedule (excluding ancillary costs)
-                from .tools import amortization, rate_fn
-                plan = amortization(r["principal"], rate_fn(r), r["installments"], start)
+            if constant or r.get("rate_type") or r.get("rate") is not None:  # known rate: interest from the schedule (excluding ancillary costs)
+                from .tools import loan_plan
+                plan = loan_plan(r)
                 r["interest"] = round(sum(x["interest"] for x in plan))
             else:
                 r["interest"] = r["total_amount"] - r["principal"]
@@ -195,13 +215,17 @@ def upcoming(db, days=60, today=None, portfolio_id=None):
             continue
         start = parse_date(r["start_date"])
         n = r["generated"]
+        plan = None
+        if r.get("amortization") == "constant" and r["principal"] and r["installments"]:
+            from .tools import loan_plan
+            plan = loan_plan(r)
         for _ in range(400):
             d = occurrence(start, r["frequency"], n)
             if d > horizon or not _limit_ok(r, n, d):
                 break
             out.append({
                 "recurring_id": r["id"], "date": d.isoformat(), "name": r["name"], "kind": r["kind"],
-                "amount": r["amount"], "account_name": r["account_name"],
+                "amount": scheduled_amount(r, n, plan) if plan else r["amount"], "account_name": r["account_name"],
                 "account_id": r["account_id"], "to_account_id": r["to_account_id"],
                 "category_name": r["category_name"], "category_icon": r["category_icon"],
                 "category_color": r["category_color"],

@@ -2,7 +2,7 @@
 
 # HomeCoin *by Starkark98*
 
-![Version](https://img.shields.io/badge/version-1.3.1-8b5cf6)
+![Version](https://img.shields.io/badge/version-1.4.0-8b5cf6)
 ![Python](https://img.shields.io/badge/Python-3.12%20%7C%203.13%20%7C%203.14-3776AB?logo=python&logoColor=white)
 ![Platform](https://img.shields.io/badge/platform-Windows-0078D6)
 ![Data](https://img.shields.io/badge/data-encrypted%2C%20on%20your%20PC-16a34a)
@@ -229,7 +229,7 @@ Add every place where you keep money: current accounts, savings accounts, credit
 Payments that repeat — rent, mortgage, loans, bills, subscriptions, salary, transfers to savings — are set up once in **Recurring**. On each due date HomeCoin records the transaction for you.
 
 - **Frequency:** weekly, monthly, every 2, 3 or 6 months, yearly.
-- **Loans in installments:** add the number of installments, the amount borrowed and the rate, and the loan appears in [Mortgage and loans](#mortgage-and-loans).
+- **Loans in installments:** add the number of installments, the amount borrowed and the rate, and the loan appears in [Mortgage and loans](#mortgage-and-loans). With *constant principal* repayment you don't type the amount: HomeCoin records each installment with its own amount, taken from the schedule.
 - **Investment plans** (regular savings plans, also known as dollar-cost averaging; *PAC* in Italy): a monthly transfer to an investment account can buy units of a security automatically, at an estimated price; HomeCoin reminds you to confirm the real price later.
 - **Variable items** (a bill or salary that changes a little every time): mark them as *expected*. HomeCoin does not record them by itself: it links the real transaction when it arrives (by a keyword in the description) and forecasts the next amount as the median (the middle value) of the last six payments. After a raise or a new tariff you can tell it to use the amount you set instead, until the median catches up. If a payment is more than a week late, you get a warning.
 - Pausing an item or changing its dates never creates payments in the past by surprise.
@@ -262,11 +262,14 @@ How many months of expenses your **available reserve** (your liquid assets) woul
 
 ### Mortgage and loans
 
-Every recurring item with installments appears here with its **amortization schedule**: each installment split into **principal** (the part that repays the debt) and **interest**, the remaining debt (outstanding principal), interest paid and still to pay, the end date. Installments are constant as long as the rate does not change (French amortization), and are recalculated when it does.
+Every recurring item with installments appears here with its **amortization schedule**: each installment split into **principal** (the part that repays the debt) and **interest**, the remaining debt (outstanding principal), interest paid and still to pay, the end date.
 
 ![Mortgage and loans](docs/images/11-mortgage.png)
-*A mixed-rate mortgage and a fixed-rate car loan, with principal and interest per year.*
+*A mixed-rate mortgage (constant installment) and a car loan with constant principal, with principal and interest per year.*
 
+- **Repayment method** (in Recurring → the loan → *Repayment*):
+  - **Constant installment** (French amortization, the most common): you pay the same amount every month as long as the rate does not change. At the start most of it is interest; over time the principal part grows. When the rate changes, the installment is recalculated.
+  - **Constant principal** (Italian amortization; *SAC* in Brazil): every installment repays the same share of the debt, plus the interest on what is left. Installments start higher and go down every month, and the total interest is lower. HomeCoin records each installment with its own amount.
 - **Rate:** fixed, variable or mixed (for example fixed for 10 years, then variable). A variable rate is a reference **index** plus a fixed margin, the **spread**. HomeCoin offers the indexes of your currency:
 
   | Currency | Indexes |
@@ -281,7 +284,7 @@ Every recurring item with installments appears here with its **amortization sche
   | INR | RBI repo rate, MCLR 1Y |
 
   The current index value is typed by hand (HomeCoin does not download rates). A loan keeps its index even if you change currency. APR and ancillary costs (insurance, fees) are not included.
-- **Early repayment** (prepayment): try an extra payment and choose whether to shorten the loan (same installment) or lower the installment (same end date). HomeCoin shows the interest you would save.
+- **Early repayment** (prepayment): try an extra payment and choose whether to shorten the loan (same installment; with constant principal, the same share of principal each month) or lower the installment (same end date). HomeCoin shows the interest you would save.
 
 ### Fair split
 
@@ -346,6 +349,7 @@ Most banks let you download your transactions as **CSV or Excel** from online ba
 
 1. **Upload** the file (drag it onto the page or click to choose it).
 2. **Columns:** HomeCoin recognizes date, description and amount (a single signed amount, or separate money in / money out columns, i.e. credits and debits) in Italian and English. Check them and choose the account the statement belongs to.
+   - **Date format.** Banks write dates as day/month/year (31/12/2026) or, in the US, month/day/year (12/31/2026). HomeCoin reads the order from the dates in the file (a first number over 12 can only be a day). When every date fits both, for example 03/04/2026, it assumes the order of your currency's country and tells you to check it. You can always change it in the *Date format* box.
 3. **Review:** each row gets a category from your [rules](#categories-and-rules) or from history; rows already in HomeCoin are marked *already present* and left out (tick them if you want them anyway). You can change any category before confirming.
 4. **Done.** The file is read only on your PC and is never saved: HomeCoin keeps it in memory just until you finish.
 
@@ -385,7 +389,7 @@ Five tabs:
 
 ## Backups
 
-- **Automatic:** every time you unlock HomeCoin, and before every import, restore and update, an encrypted copy of the database is saved next to the data (the last 15 are kept).
+- **Automatic:** every time HomeCoin starts (when you first unlock it), and before every import, restore and update, an encrypted copy of the database is saved next to the data (the last 15 are kept). They protect you from mistakes, not from a broken or stolen PC: for that you need the downloaded backup below.
 - **Downloaded:** Settings → Backup & data → **Backup** saves an encrypted `.hcbackup` file. Keep a copy **outside your PC** (USB drive, cloud storage): the automatic copies don't help if the disk breaks. The same page shows when you last downloaded one, with a warning after 30 days.
 - A backup opens only in HomeCoin, with the password (or recovery key) that was valid when it was made.
 - **Restore** (same tab) replaces all current data with the backup; HomeCoin saves a copy of the current data first.
@@ -548,4 +552,4 @@ Any copy or modified version must keep the [LICENSE](LICENSE) file, including th
 
 ---
 
-*HomeCoin by **Starkark98** · v1.3.1 · see the [changelog](CHANGELOG.md)*
+*HomeCoin by **Starkark98** · v1.4.0 · see the [changelog](CHANGELOG.md)*

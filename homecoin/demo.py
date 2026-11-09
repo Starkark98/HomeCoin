@@ -103,10 +103,11 @@ def build(today=None):
              category_id=_cat(conn, fam, "Contributions to household"), start_date=start.replace(day=1).isoformat())
         spesa, rist, casa_c, trasp, salute = (_cat(conn, fam, n) for n in
                                               ("Groceries", "Restaurants & bars", "Home & furniture", "Transport", "Health & personal care"))
-        # a fixed-rate car loan next to the mortgage (Mortgage & loans tab), a cash wallet and an old closed account
-        _rec(conn, name="Car loan", kind="expense", amount=34600, account_id=comune, category_id=_cat(conn, fam, "Mortgage & loans"),
+        # a fixed-rate car loan with constant principal (installments going down) next to the mortgage (Mortgage & loans
+        # tab), a cash wallet and an old closed account
+        _rec(conn, name="Car loan", kind="expense", amount=38100, account_id=comune, category_id=_cat(conn, fam, "Mortgage & loans"),
              start_date=add_months(start, -6).replace(day=15).isoformat(), installments=60, principal=1800000,
-             rate_type="fixed", rate=5.4, notes="Sample fixed-rate loan")
+             rate_type="fixed", rate=5.4, amortization="constant", notes="Sample fixed-rate loan with constant principal")
         cash = _acc(conn, fam, "Cash", "contanti", "💶", "#f59e0b", 8000)
         old = _acc(conn, fam, "Old savings book", "risparmio", "📕", "#94a3b8", 120000)
         _tx(conn, start + dt.timedelta(days=9), 120000, "transfer", old, desc="Savings book closed", to=comune,

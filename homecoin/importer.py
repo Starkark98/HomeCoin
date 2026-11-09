@@ -124,6 +124,42 @@ def guess_mapping(headers):
     return mapping
 
 
+_DM = re.compile(r"^\s*(\d{1,2})[/.\-](\d{1,2})[/.\-](\d{2}|\d{4})(?:\D|$)")
+
+
+def detect_date_order(rows, col, default="dmy"):
+    """Order of day and month in a date column: "dmy" (31/12/2026) or "mdy" (12/31/2026, US statements).
+    Decided by the values themselves (a first number over 12 is a day, a second number over 12 is a day);
+    when every value fits both (days 1-12 only) the default of the currency's country is used.
+    Returns (order, source) with source "file" or "default"."""
+    if col is None:
+        return default, "default"
+    day_first = month_first = 0
+    for r in rows[:MAX_ROWS]:
+        v = r[col] if col < len(r) else None
+        if not isinstance(v, str):
+            continue  # Excel dates and serial numbers carry no ambiguity
+        m = _DM.match(v)
+        if not m:
+            continue
+        a, b = int(m.group(1)), int(m.group(2))
+        if a > 12 and b <= 12:
+            day_first += 1
+        elif b > 12 and a <= 12:
+            month_first += 1
+    if day_first and not month_first:
+        return "dmy", "file"
+    if month_first and not day_first:
+        return "mdy", "file"
+    if day_first and month_first:  # inconsistent file: the majority wins, the rest shows up as invalid dates
+        return ("dmy" if day_first >= month_first else "mdy"), "file"
+    return default, "default"
+
+
+def _is_date(v):
+    return parse_date(v) is not None or parse_date(v, "mdy") is not None
+
+
 def guess_mapping_from_data(rows, mapping):
     """Without headers, infer the date/amount/description columns from the values."""
     sample = rows[:30]
@@ -134,13 +170,13 @@ def guess_mapping_from_data(rows, mapping):
     taken = {v for v in mapping.values() if v is not None}
     if mapping["date"] is None:
         for c in range(width):
-            if c not in taken and ratio(c, lambda v: parse_date(v) is not None) > 0.8:
+            if c not in taken and ratio(c, _is_date) > 0.8:
                 mapping["date"] = c
                 taken.add(c)
                 break
     if mapping["amount"] is None and mapping["debit"] is None and mapping["credit"] is None:
         for c in range(width):
-            if c not in taken and ratio(c, lambda v: parse_amount(v) is not None and parse_date(v) is None) > 0.8:
+            if c not in taken and ratio(c, lambda v: parse_amount(v) is not None and not _is_date(v)) > 0.8:
                 mapping["amount"] = c
                 taken.add(c)
                 break
@@ -156,8 +192,9 @@ def guess_mapping_from_data(rows, mapping):
     return mapping
 
 
-def parse_rows(rows, header_row, mapping, invert=False):
-    """Return the normalized transactions: date, description, amount (cents), kind, raw_category."""
+def parse_rows(rows, header_row, mapping, invert=False, date_order="dmy"):
+    """Return the normalized transactions: date, description, amount (cents), kind, raw_category.
+    date_order: "dmy" or "mdy" for dates written as text (see detect_date_order)."""
     out = []
     data = rows[header_row + 1:] if header_row >= 0 else rows
     for i, r in enumerate(data):
@@ -165,7 +202,7 @@ def parse_rows(rows, header_row, mapping, invert=False):
             idx = mapping.get(field)
             return r[idx] if idx is not None and idx < len(r) else None
 
-        d = parse_date(cell("date"))
+        d = parse_date(cell("date"), date_order)
         desc = str(cell("description") or "").strip()
         if mapping.get("amount") is not None:
             cents = parse_amount(cell("amount"))

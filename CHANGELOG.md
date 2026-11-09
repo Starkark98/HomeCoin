@@ -2,10 +2,20 @@
 
 All notable changes to HomeCoin are listed here, newest first.
 
-## Unreleased
+## 1.4.0 — 2026-11-09
+
+**US bank statements**
+- Importing a statement with dates written month first (12/31/2026, as US banks do) no longer reads them the wrong way round: before, 03/04/2026 became April 3 and 12/31/2026 was refused. HomeCoin now reads the order from the dates in the file; when every date fits both orders it assumes the one of your currency's country and asks you to check it. A new *Date format* box in the columns step lets you change it.
+
+**Constant-principal loans**
+- New repayment method for loans: **constant principal** (Italian amortization, *SAC* in Brazil), next to the constant installment (French amortization). Every installment repays the same share of the debt plus the interest on the rest, so installments go down over time.
+- HomeCoin records each installment with its own amount from the schedule; Recurring, Calendar, Mortgage and loans, the emergency fund and the early-repayment simulation all use it. Works with fixed, variable and mixed rates.
+- The demo's car loan now uses constant principal.
 
 **Documentation**
+- User guide: the date format of imported statements, the two repayment methods, new screenshots.
 - README: new "Why it exists" text.
+- Automatic backups described exactly: one at every start, and before every import, restore and update.
 - User guide checked against the app and made more precise: the Settings → General tab (About HomeCoin with the version), when automatic backups are made, what "cash" means in the Calendar, how variable recurring items are forecast, the auto-lock times, and two new answers in "Questions and problems" (which version you have, a page missing from the menu).
 - Contributing guide, security policy and bug report template brought up to date: where to find the version (Settings → General → About HomeCoin), the demo for both the installed and the ZIP version, the signed update check from GitHub among the outbound calls, Python 3.14 in the dependency lock, and the rule to update the user guide with every change.
 

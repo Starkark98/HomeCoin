@@ -26,7 +26,7 @@ from . import updater
 from . import util
 from .util import FREQUENCIES, add_months, months_between, parse_date, parse_number, rule_matches
 
-VERSION = "1.3.1"
+VERSION = "1.4.0"
 STATIC_DIR = dbm.BASE_DIR / "static"
 KINDS = ("expense", "income", "transfer")
 ACCOUNT_TYPES = ("corrente", "risparmio", "credito", "prepagata", "contanti", "investimenti", "altro")
@@ -1288,10 +1288,18 @@ def create_app(port):
         expected = 1 if b.get("expected") else 0
         if expected and (kind == "transfer" or b.get("installments")):
             raise ApiError("A variable amount applies to income and expenses, not to transfers or installments")
+        method = b.get("amortization") or "french"
+        if method not in tools.AMORTIZATION_METHODS:
+            raise ApiError("Invalid amortization method")
+        if method == "constant" and (kind != "expense" or not b.get("installments") or not b.get("principal")):
+            raise ApiError("Constant principal needs an expense with the loan amount and the number of installments")
+        constant = method == "constant"
         return {
             "holding_id": holding_id, "expected": expected, "amount_fixed": 1 if expected and b.get("amount_fixed") else 0,
             "match_text": as_text(b.get("match_text"), 60) if expected else "",
-            "name": name, "kind": kind, "amount": as_int(b.get("amount"), "amount", minimum=1),
+            "amortization": "constant" if constant else None,
+            # constant principal: the amount is calculated from the schedule (installment by installment)
+            "name": name, "kind": kind, "amount": as_int(b.get("amount"), "amount", minimum=1, required=not constant) or 1,
             "account_id": account_id, "to_account_id": to_account_id, "category_id": category_id,
             "frequency": freq, "start_date": start, "end_date": end,
             "installments": as_int(b.get("installments"), "number of installments", required=False, minimum=1),
@@ -1346,6 +1354,7 @@ def create_app(port):
         not_archived(r["account_id"], r["to_account_id"])
         r["generated"] = 0 if b.get("post_past") else count_past_occurrences(r)
         r["pac_since"] = dt.date.today().isoformat() if r["holding_id"] else None  # automatic purchases from today onward
+        r["amount"] = tools.scheduled_amount(r, r["generated"])  # constant principal: the next installment
         db = get_db()
         cols = ",".join(r)
         cur = db.execute(f"INSERT INTO recurring({cols}) VALUES ({','.join('?' * len(r))})", tuple(r.values()))
@@ -1368,6 +1377,7 @@ def create_app(port):
             # recorded stay and it restarts from today, without duplicating them or catching up on past ones in bulk
             # (for those there is "link transactions")
             r["generated"] = count_past_occurrences(r)
+        r["amount"] = tools.scheduled_amount(r, r.get("generated", old["generated"]))  # constant principal: next installment
         db.execute(f"UPDATE recurring SET {', '.join(f'{k}=?' for k in r)} WHERE id=?", (*r.values(), rid))
         db.commit()
         created = process_recurring(db)
@@ -2575,10 +2585,27 @@ def create_app(port):
             mapping = {k: None for k in importer.FIELD_KEYWORDS}
         data_rows = rows[header_row + 1:]
         mapping = importer.guess_mapping_from_data(data_rows, mapping)
+        date_order, order_source = importer.detect_date_order(
+            data_rows, mapping["date"], util.DATE_ORDER_DEFAULT.get(util.currency_of(get_db()), "dmy"))
         token = secrets.token_urlsafe(16)
         _imports[token] = {"rows": rows, "header_row": header_row, "filename": f.filename, "at": time.time()}
         return jsonify(token=token, filename=f.filename, headers=headers, header_row=header_row,
-                       mapping=mapping, preview=data_rows[:8], total=len(data_rows))
+                       mapping=mapping, preview=data_rows[:8], total=len(data_rows),
+                       date_order=date_order, date_order_source=order_source)
+
+    @app.post("/api/import/date-order")
+    def import_date_order():
+        """Order of day and month for the date column chosen by hand in the columns step."""
+        b = body()
+        item = _imports.get(as_key(b.get("token")))
+        if not item:
+            raise ApiError("Import session expired: upload the file again")
+        col = as_int(b.get("column"), "column", required=False)
+        width = len(item["rows"][0])
+        col = col if col is not None and 0 <= col < width else None
+        order, source = importer.detect_date_order(item["rows"][item["header_row"] + 1:], col,
+                                                   util.DATE_ORDER_DEFAULT.get(util.currency_of(get_db()), "dmy"))
+        return jsonify(date_order=order, date_order_source=source)
 
     @app.post("/api/import/analyze")
     def import_analyze():
@@ -2597,7 +2624,10 @@ def create_app(port):
             raise ApiError("Select the date column")
         if mapping["amount"] is None and mapping["debit"] is None and mapping["credit"] is None:
             raise ApiError("Select the amount column (or income/expense columns)")
-        parsed = importer.parse_rows(item["rows"], item["header_row"], mapping, bool(b.get("invert")))
+        order = b.get("date_order") or "dmy"
+        if order not in ("dmy", "mdy"):
+            raise ApiError("Invalid date format")
+        parsed = importer.parse_rows(item["rows"], item["header_row"], mapping, bool(b.get("invert")), order)
 
         db = get_db()
         cat = Categorizer(db, pf())
