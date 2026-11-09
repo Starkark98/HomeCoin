@@ -782,7 +782,7 @@ body.privacy .m { filter: blur(7px); user-select: none; }
 .acc-type-help li { margin: 2px 0; }
 .acc-help-head { font-size: 13px; }
 body.demo::before {
-  content: "🎬 DEMO VERSION · sample data, recreated at every start"; position: fixed; z-index: 1000; left: 50%; top: 6px;
+  content: "🎬 " attr(data-demo); position: fixed;  /* text set in the interface language by app.js */ z-index: 1000; left: 50%; top: 6px;
   transform: translateX(-50%); padding: 5px 14px; border-radius: 999px; font-size: 12px; font-weight: 700; pointer-events: none;
   background: #f59e0b; color: #1c1917; box-shadow: 0 4px 14px rgba(0,0,0,.25);
 }

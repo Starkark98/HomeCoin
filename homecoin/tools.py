@@ -8,8 +8,9 @@ import re
 import urllib.parse
 import urllib.request
 
+from . import i18n
 from .services import account_balances
-from .util import (OTHER_INVESTMENTS, TECH_CATEGORIES, add_months, currency_of, fmt_decimal, fmt_money, occurrence,
+from .util import (OTHER_INVESTMENTS, SYSTEM_CODES, TECH_CATEGORIES, add_months, currency_of, fmt_decimal, fmt_money, occurrence,
                    parse_date)
 
 INVEST = "investimenti"
@@ -83,13 +84,15 @@ RATE_INDEX_GROUPS = {
     "EUR": ("Euribor 3M", "Euribor 1M", "Euribor 6M", "Euribor 12M"),
     "USD": ("SOFR 30-day average", "Term SOFR 1M", "Term SOFR 3M", "Term SOFR 6M", "US Treasury 1Y (CMT)", "US Prime Rate"),
     "GBP": ("Bank of England Bank Rate", "SONIA"),
-    "JPY": ("Short-term prime rate (Japan)", "TIBOR 3M", "TONA"),
     "CHF": ("SARON",),
     "CAD": ("Canadian prime rate", "CORRA"),
     "AUD": ("RBA cash rate", "BBSW 3M"),
-    "INR": ("RBI repo rate", "MCLR 1Y"),
+    "MXN": ("TIIE 28", "TIIE de Fondeo"),
+    "BRL": ("TR", "IPCA", "Selic", "CDI"),  # IPCA: inflation, for inflation-linked loans
 }
-RATE_INDEXES = tuple(i for g in RATE_INDEX_GROUPS.values() for i in g)
+# indexes of currencies HomeCoin no longer offers: a loan saved with one of them keeps it (shown and accepted)
+LEGACY_RATE_INDEXES = ("Short-term prime rate (Japan)", "TIBOR 3M", "TONA", "RBI repo rate", "MCLR 1Y")
+RATE_INDEXES = tuple(i for g in RATE_INDEX_GROUPS.values() for i in g) + LEGACY_RATE_INDEXES
 DEFAULT_RATE_INDEX = {cur: g[0] for cur, g in RATE_INDEX_GROUPS.items()}
 
 
@@ -111,10 +114,11 @@ def rate_label(rec):
     pct = lambda x: fmt_decimal(x) + "%"  # decimal separator of the currency's country
     var = f"{rec.get('rate_index') or 'index'} + {pct(rec.get('spread') or 0)}"
     if kind == "variable":
-        return f"variable: {var}"
+        return i18n.t("variable: {rate}", rate=var)
     if kind == "mixed":
-        return f"mixed: {pct(rec.get('rate') or 0)} fixed for {rec.get('fixed_years') or 0} years, then {var}"
-    return f"fixed {pct(rec.get('rate') or 0)}" if rec.get("rate") is not None else "rate not specified"
+        return i18n.t("mixed: {fixed} fixed for {years} years, then {variable}", fixed=pct(rec.get('rate') or 0),
+                      years=rec.get('fixed_years') or 0, variable=var)
+    return i18n.t("fixed {rate}", rate=pct(rec.get('rate') or 0)) if rec.get("rate") is not None else i18n.t("rate not specified")
 
 
 AMORTIZATION_METHODS = ("french", "constant")
@@ -234,14 +238,14 @@ def simulate_prepayment(plan, extra, after_payment, mode):
     residual = before - extra
     notes = []
     if after_payment < plan["paid"]:
-        notes.append({"level": "info", "text": f"Installment {after_payment} is already paid: this is a what-if on the past."})
+        notes.append({"level": "info", "text": i18n.t("Installment {after_payment} is already paid: this is a what-if on the past.", after_payment=after_payment)})
     if after_payment >= len(sched):
-        notes.append({"level": "warn", "text": "The loan is already fully repaid at that installment."})
+        notes.append({"level": "warn", "text": i18n.t("The loan is already fully repaid at that installment.")})
     if not plan.get("rate_known"):
-        notes.append({"level": "warn", "text": "The rate is not specified: calculated at 0%, so no interest is saved. Set the rate in Recurring."})
+        notes.append({"level": "warn", "text": i18n.t("The rate is not specified: calculated at 0%, so no interest is saved. Set the rate in Recurring.")})
     if residual <= 0:
         if residual < 0 and after_payment < len(sched):
-            notes.append({"level": "info", "text": f"The amount is more than the residual debt: {fmt_money(round(before))} is enough to close the loan."})
+            notes.append({"level": "info", "text": i18n.t("The amount is more than the residual debt: {amount} is enough to close the loan.", amount=fmt_money(round(before)))})
         return {"closed": True, "interest_saved": sum(r["interest"] for r in sched[k:]), "new_installment": 0,
                 "new_remaining": 0, "new_end": sched[k - 1]["date"] if k else sched[0]["date"], "notes": notes}
     remaining_n = n - k
@@ -414,7 +418,7 @@ def emergency(db, pid):
                   and (db.execute("SELECT asset_class FROM holdings WHERE id = ?", (hid,)).fetchone() or [""])[0] == "monetario")
         avail = book_balance(db, a, today) + mon
         if avail > 0:
-            accs.append({"id": a["id"], "name": f"{a['name']} (cash and money market)", "balance": avail, "color": a["color"],
+            accs.append({"id": a["id"], "name": i18n.t("{name} (cash and money market)", name=a['name']), "balance": avail, "color": a["color"],
                          "group": "broker", "cash": book_balance(db, a, today), "money_market": mon})
     liquidity = sum(a["balance"] for a in accs)
     operational = sum(a["balance"] for a in accs if a["group"] == "conti")  # = the Calendar's "cash in accounts"
@@ -434,12 +438,11 @@ def emergency(db, pid):
     if first and first > d_from:  # fewer than `months` of history: the average is too low
         f, e = parse_date(first), parse_date(d_to)
         have = max(0, (e.year - f.year) * 12 + e.month - f.month + (f.day == 1))
-        notes.append({"level": "warn", "text": f"Only {have} complete {'month' if have == 1 else 'months'} of expenses recorded: "
-                                               f"the average over {months} months is lower than your real spending."})
+        notes.append({"level": "warn", "text": i18n.tn("Only {n} complete month of expenses recorded: the average over {months} months is lower than your real spending.", "Only {n} complete months of expenses recorded: the average over {months} months is lower than your real spending.", have, months=months)})
     elif not exp:
-        notes.append({"level": "info", "text": f"No expenses in the last {months} complete months: the months covered cannot be calculated."})
+        notes.append({"level": "info", "text": i18n.t("No expenses in the last {months} complete months: the months covered cannot be calculated.", months=months)})
     if liquidity < 0:
-        notes.append({"level": "warn", "text": "The available reserve is negative: some accounts (e.g. a credit card) are below zero."})
+        notes.append({"level": "warn", "text": i18n.t("The available reserve is negative: some accounts (e.g. a credit card) are below zero.")})
     return {"notes": notes, "liquidity": liquidity, "operational": operational, "broker_cash": liquidity - operational,
             "accounts": [{"id": a["id"], "name": a["name"], "balance": a["balance"], "color": a["color"], "group": a["group"]}
                          for a in accs],
@@ -463,20 +466,19 @@ def goals(db, pid, today=None):
         g["notes"] = []
         shared = [o["name"] for o in rows if o is not g and o["account_id"] and o["account_id"] == g["account_id"]]
         if shared:  # the same balance counted for several goals
-            g["notes"].append({"level": "warn", "text": f"{g['account_name']} is also used by {', '.join(shared)}: "
-                                                         "its balance counts for each goal, so the progress is overstated."})
+            g["notes"].append({"level": "warn", "text": i18n.t("{account_name} is also used by {value}: its balance counts for each goal, so the progress is overstated.", account_name=g['account_name'], value=', '.join(shared))})
         cur = (mv[g["account_id"]]["value"] if g["account_id"] in mv else balances.get(g["account_id"], 0)) \
             if g["account_id"] else g["saved"]
         g["current"] = max(0, cur)
         g["progress"] = min(1.0, g["current"] / g["target"])
         g["missing"] = max(0, g["target"] - g["current"])
         if g["account_id"] and cur < 0:
-            g["notes"].append({"level": "warn", "text": f"{g['account_name']} is below zero: the goal counts as not started."})
+            g["notes"].append({"level": "warn", "text": i18n.t("{account_name} is below zero: the goal counts as not started.", account_name=g['account_name'])})
         if g["target_date"]:
             td = parse_date(g["target_date"])
             if td < today and g["missing"]:
                 g["overdue"] = True
-                g["notes"].append({"level": "warn", "text": "The target date has passed: move it forward to get a realistic monthly amount."})
+                g["notes"].append({"level": "warn", "text": i18n.t("The target date has passed: move it forward to get a realistic monthly amount.")})
             months_left = max(1, (td.year - today.year) * 12 + td.month - today.month)
             g["months_left"] = months_left
             g["monthly_needed"] = round(g["missing"] / months_left)
@@ -519,13 +521,15 @@ VERIFY_DAYS = 30        # investment plan purchases with an estimated price, sti
 
 def pac_unverified(db, pid, today=None):
     """Automatic investment plan purchases that still have the estimated price after more than VERIFY_DAYS days.
-    Matches both the current English note ("estimated price") and the Italian one of older databases ("prezzo stimato")."""
+    The note says "estimated price" in the language it was written in (any of them, or the Italian of older databases)."""
     limit = ((today or dt.date.today()) - dt.timedelta(days=VERIFY_DAYS)).isoformat()
+    markers = sorted(i18n.estimated_markers())
+    like = " OR ".join("o.notes LIKE ?" for _ in markers)
     out = []
-    for o in db.execute("""SELECT o.*, h.ticker, a.name AS account_name
+    for o in db.execute(f"""SELECT o.*, h.ticker, a.name AS account_name
                            FROM trades o JOIN accounts a ON a.id = o.account_id LEFT JOIN holdings h ON h.id = o.holding_id
-                           WHERE a.portfolio_id = ? AND o.source = 'recurring' AND (o.notes LIKE '%prezzo stimato%' OR o.notes LIKE '%estimated price%') AND o.date <= ?
-                           ORDER BY o.date""", (pid, limit)):
+                           WHERE a.portfolio_id = ? AND o.source = 'recurring' AND ({like}) AND o.date <= ?
+                           ORDER BY o.date""", (pid, *[f"%{m}%" for m in markers], limit)):
         o = dict(o)
         parts = (o["external_id"] or "").split(":")
         o["recurring_id"] = int(parts[1]) if len(parts) == 3 and parts[1].isdigit() else None
@@ -778,33 +782,31 @@ def rebalance(db, pid, cfg):
         warnings.append({"level": level, "text": text})
     names_of = lambda xs: ", ".join(xs[:5]) + (f" and {len(xs) - 5} more" if len(xs) > 5 else "")
     if unpriced:
-        warn("warn", f"No price for {names_of(unpriced)}: not counted. Use \"Update prices\" or enter the price by hand.")
+        warn("warn", i18n.t("No price for {value}: not counted. Use \"Update prices\" or enter the price by hand.", value=names_of(unpriced)))
     for name, cash in neg_cash:
-        warn("warn", f"{name} shows negative cash ({fmt_money(cash)}): a transfer to the account is probably missing. "
-                     "Cash is not counted until it is fixed.")
+        warn("warn", i18n.t("{name} shows negative cash ({cash}): a transfer to the account is probably missing. Cash is not counted until it is fixed.", name=name, cash=fmt_money(cash)))
     if estimated:
-        warn("info", f"Price of {names_of(estimated)} taken from the last trade (no market price yet).")
+        warn("info", i18n.t("Price of {value} taken from the last trade (no market price yet).", value=names_of(estimated)))
     if stale:
-        warn("info", f"Prices of {names_of(stale)} are more than {STALE_PRICE_DAYS} days old: update them for an accurate calculation.")
+        warn("info", i18n.t("Prices of {value} are more than {stale_price_days} days old: update them for an accurate calculation.", value=names_of(stale), stale_price_days=STALE_PRICE_DAYS))
     if old_valuation:
-        warn("info", f"The latest valuation of {names_of(old_valuation)} is more than 3 months old.")
+        warn("info", i18n.t("The latest valuation of {value} is more than 3 months old.", value=names_of(old_valuation)))
     ignored = round(sum(float(targets.get(k) or 0) for k in ex_rows), 2)
     if ignored:
-        warn("info", f"Targets of the rows not counted ({ignored:g}%) are ignored.")
+        warn("info", i18n.t("Targets of the rows not counted ({ignored}%) are ignored.", ignored=f"{ignored:g}"))
     if total > 0 and targets and not has_targets:
         gap = round(100 - sum_targets, 2)
-        warn("warn", f"Targets add up to {sum_targets:g}%: {'assign another ' + format(gap, 'g') if gap > 0 else 'remove ' + format(-gap, 'g')}% to reach 100%.")
+        warn("warn", (i18n.t("Targets add up to {sum_targets}%: assign another {gap}% to reach 100%.", sum_targets=f"{sum_targets:g}", gap=format(gap, "g")) if gap > 0 else i18n.t("Targets add up to {sum_targets}%: remove {gap}% to reach 100%.", sum_targets=f"{sum_targets:g}", gap=format(-gap, "g"))))
     if short:
-        warn("info", f"The new money is not enough to reach every target: about {fmt_money(short)} more would be needed. "
-                     "It goes to the items furthest below target.")
+        warn("info", i18n.t("The new money is not enough to reach every target: about {short} more would be needed. It goes to the items furthest below target.", short=fmt_money(short)))
     whole = [r["label"] if r["kind"] == "account" else "accounts valued as a whole" for r in lst
              if r["trade"] and (r["kind"] == "account" or r["key"] == UNSPECIFIED)]
     if whole:
-        warn("info", f"The amount for {names_of(whole)} is only an indication: there are no securities to buy or sell there.")
+        warn("info", i18n.t("The amount for {value} is only an indication: there are no securities to buy or sell there.", value=names_of(whole)))
     if has_targets and any(r["trade"] < 0 and r["kind"] != "cash" for r in lst):
-        warn("info", "Sales may have taxes and fees, not included in the amounts.")
+        warn("info", i18n.t("Sales may have taxes and fees, not included in the amounts."))
     if has_targets and cfg["drift_abs"] is None and cfg["drift_rel"] is None:
-        warn("info", "No drift threshold: every weight more than 0.5 points away from its target is flagged.")
+        warn("info", i18n.t("No drift threshold: every weight more than 0.5 points away from its target is flagged."))
     return {"rows": lst, "excluded": left, "warnings": warnings, "excluded_total": sum(r["value"] for r in left), "missing": missing,
             "accounts": accounts, "total": total, "contribution": contribution,
             "total_after": after_total, "sum_targets": sum_targets, "has_targets": has_targets, "needs_rebalance": any(r["off"] for r in lst),
@@ -871,7 +873,7 @@ def lookup_instrument(ticker, timeout=12):
         except Exception:
             meta = None
         if not meta:
-            raise ValueError(f"Security not found on Yahoo Finance: {ticker}") from exc
+            raise ValueError(i18n.t("Security not found on Yahoo Finance: {ticker}", ticker=ticker)) from exc
         ticker = found
     name = meta.get("longName") or meta.get("shortName") or ""
     itype = meta.get("instrumentType") or ""
@@ -889,7 +891,7 @@ def fetch_quote(ticker, timeout=12):
         meta = data["chart"]["result"][0]["meta"]
         return float(meta["regularMarketPrice"]), meta.get("currency") or "EUR"
     except Exception as exc:  # no network, unknown ticker, changed format
-        raise ValueError(f"Price not available for {ticker}: {exc}") from exc
+        raise ValueError(i18n.t("Price not available for {ticker}: {exc}", ticker=ticker, exc=exc)) from exc
 
 
 def fetch_history(ticker, timeout=15):
@@ -916,7 +918,7 @@ def fetch_history(ticker, timeout=15):
             out[month] = float(c) * factor
         return out, res["meta"].get("currency") or "EUR"
     except Exception as exc:
-        raise ValueError(f"Price history not available for {ticker}: {exc}") from exc
+        raise ValueError(i18n.t("Price history not available for {ticker}: {exc}", ticker=ticker, exc=exc)) from exc
 
 
 def refresh_history(db, pid):
@@ -1007,7 +1009,7 @@ def savings(db, pid, months=12):
         first = dt.date(int(ym[:4]), int(ym[5:]), 1)
         end = month_end(ym).isoformat()
         r = {"month": ym, "income": 0, "from_others": 0, "expense": 0, "to_others": 0, "invested": 0}
-        for t in db.execute(f"""SELECT t.kind, t.amount, t.account_id, t.to_account_id, t.excluded, c.name AS category,
+        for t in db.execute(f"""SELECT t.kind, t.amount, t.account_id, t.to_account_id, t.excluded, c.code AS category,
                                        COALESCE(c.flow, '') AS flow
                                 FROM transactions t LEFT JOIN categories c ON c.id = t.category_id
                                 WHERE t.date BETWEEN ? AND ? AND (t.account_id IN ({marks}) OR t.to_account_id IN ({marks}))""",
@@ -1028,9 +1030,9 @@ def savings(db, pid, months=12):
                     r["to_others"] += t["amount"]
                 else:
                     r["expense"] += t["amount"]
-            elif t["category"] in OTHER_INVESTMENTS:  # trades on securities that were not imported
+            elif t["category"] == "other_investments":  # trades on securities that were not imported
                 r["invested"] += t["amount"] if t["kind"] == "expense" else -t["amount"]
-            elif t["kind"] == "income" and t["account_id"] in inv_ids and t["category"] not in TECH_CATEGORIES:
+            elif t["kind"] == "income" and t["account_id"] in inv_ids and t["category"] not in SYSTEM_CODES:
                 r["invested"] -= t["amount"]  # inflow that is not income (severance pay, opening): related buys do not count
         for o in db.execute(f"""SELECT o.kind, o.amount, COALESCE(h.asset_class, '') AS cls FROM trades o
                                 LEFT JOIN holdings h ON h.id = o.holding_id

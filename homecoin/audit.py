@@ -3,7 +3,8 @@
 It lives in the encrypted database like everything else: no unencrypted log files. Only events that matter, one short
 row each; rows older than 12 months delete themselves (and at most MAX_ROWS rows are kept anyway).
 Failed sign-in attempts happen while the database is locked: they are counted in memory and logged at the next sign-in.
-Rows written by older versions keep their Italian texts; new rows use the English texts below.
+Rows written by older versions keep their Italian texts; new rows use the English texts below, which the page shows in
+the interface language (the stored text stays English, so changing language changes the whole log).
 """
 import datetime as dt
 
@@ -56,6 +57,7 @@ EVENTS = {
     "export_transactions": ("data", "Transactions exported (unencrypted file)"),
     "export_report": ("data", "Report exported (unencrypted file)"),
     "currency_set": ("change", "Reference currency changed"),
+    "auth_language": ("change", "Interface language changed"),
     "backup": ("data", "Encrypted backup downloaded"),
     "restore": ("data", "Backup restored"),
 }

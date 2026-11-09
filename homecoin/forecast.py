@@ -12,7 +12,7 @@ import datetime as dt
 from collections import Counter, defaultdict
 from statistics import median
 
-from .util import FREQUENCIES, TECH_CATEGORIES, add_months, normalize_desc, parse_date, rule_matches
+from .util import FREQUENCIES, TECH_CODES_SQL, add_months, normalize_desc, parse_date, rule_matches
 
 HISTORY_MONTHS = 6
 REGULAR_MIN = 4
@@ -23,8 +23,6 @@ INCOME_SHARE = 0.05
 TOLERANCE_DAYS = 7          # delay after which an expected income is "late"
 LINK_WINDOW_DAYS = 10       # a transaction can be linked up to 10 days before the start of the recurring item
 
-# system categories excluded from the estimates (English names and the Italian names of older databases)
-_TECH_SQL = ", ".join("'" + n.replace("'", "''") + "'" for n in sorted(TECH_CATEGORIES))
 
 # words ignored when grouping by payer: bank descriptions can be in Italian or English
 MONTH_WORDS = {"gennaio", "febbraio", "marzo", "aprile", "maggio", "giugno", "luglio", "agosto", "settembre", "ottobre",
@@ -132,7 +130,7 @@ def regular_flows(db, account_ids, today, horizon, kind="income"):
                           FROM transactions t LEFT JOIN categories c ON c.id = t.category_id
                           WHERE t.kind = ? AND NOT t.excluded AND t.recurring_id IS NULL AND t.date >= ?
                           AND t.account_id IN ({marks})
-                          AND COALESCE(c.name, '') NOT IN ({_TECH_SQL})
+                          AND COALESCE(c.code, '') NOT IN ({TECH_CODES_SQL})
                           ORDER BY t.date""", (kind, first.isoformat(), *account_ids)).fetchall()
     groups = defaultdict(list)
     for t in rows:

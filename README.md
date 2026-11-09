@@ -2,7 +2,7 @@
 
 # HomeCoin *by Starkark98*
 
-![Version](https://img.shields.io/badge/version-1.4.0-8b5cf6)
+![Version](https://img.shields.io/badge/version-2.0.0-8b5cf6)
 ![Python](https://img.shields.io/badge/Python-3.12%20%7C%203.13%20%7C%203.14-3776AB?logo=python&logoColor=white)
 ![Platform](https://img.shields.io/badge/platform-Windows-0078D6)
 ![Data](https://img.shields.io/badge/data-encrypted%2C%20on%20your%20PC-16a34a)
@@ -48,7 +48,7 @@ Starkark98
 - [Try the demo first](#try-the-demo-first)
 
 **Guide** (same order as the app menu)
-- *The basics:* [How HomeCoin is organized](#how-homecoin-is-organized) · [Typing amounts and dates](#typing-amounts-and-dates) · [Spaces](#spaces) · [Dashboard](#dashboard)
+- *The basics:* [How HomeCoin is organized](#how-homecoin-is-organized) · [Language and currency](#language-and-currency) · [Typing amounts and dates](#typing-amounts-and-dates) · [Spaces](#spaces) · [Dashboard](#dashboard)
 - *Everyday:* [Transactions](#transactions) · [Accounts](#accounts) · [Recurring payments](#recurring-payments) · [Calendar](#calendar)
 - *Planning:* [Budgets](#budgets) · [Goals](#goals) · [Emergency fund](#emergency-fund) · [Mortgage and loans](#mortgage-and-loans) · [Fair split](#fair-split)
 - *Wealth:* [Investments](#investments) (with [Rebalancing](#rebalancing)) · [Savings](#savings) · [Reports](#reports)
@@ -77,6 +77,7 @@ Starkark98
 - **Helps you plan.** Savings goals with the amount to put aside each month, an emergency fund check, a mortgage amortization schedule with early-repayment simulation, a fair way to share household costs.
 - **Follows your investments.** Value, gains, return, asset allocation and a rebalancing calculator that tells you what to buy or sell to get back to your target.
 - **Keeps your data yours.** It runs on your PC only, the data is encrypted, and nobody (not even the author) can open it without your password.
+- **Speaks your language.** English, Español, Português (Brasil), Deutsch, Français or Italiano, with the number format of your currency.
 
 Each page is shown with a screenshot in the [Guide](#guide) below. All screenshots come from the demo, with made-up data.
 
@@ -113,11 +114,11 @@ Options: `HomeCoin.cmd --port 9000` (another port), `HomeCoin.cmd --no-browser`.
 
 ## Your first start
 
-The first time, HomeCoin guides you through five short steps:
+The first time, HomeCoin guides you through a few short steps:
 
-1. **Choose a password.** At least 8 characters; very common ones are refused. A short sentence is easy to remember and hard to guess.
+1. **Choose your language and a password.** The language is proposed from your browser; change it in the box at the top if needed. The password needs at least 8 characters, and very common ones are refused. A short sentence is easy to remember and hard to guess.
 2. **Save your recovery key.** It is shown only once. Write it down or keep it in a password manager: it is the only way back in if you forget the password. Without the password and the recovery key, **nobody can open your data, not even the author**.
-3. **Pick your currency**: euro (€), US dollar ($), British pound (£), Japanese yen (¥), Swiss franc (CHF), Canadian dollar (C$), Australian dollar (A$) or Indian rupee (₹).
+3. **Pick your currency**: euro (€), US dollar ($), British pound (£), Swiss franc (CHF), Canadian dollar (C$), Australian dollar (A$), Mexican peso (MX$) or Brazilian real (R$). HomeCoin proposes the one of your country, from the browser and the language you chose.
 4. **Create your first space**: *Household* (shared costs, several people paying in) or *Personal* (your own money). See [Spaces](#spaces).
 5. **Add your main account** and, if you want, its current balance.
 
@@ -130,7 +131,7 @@ The demo opens HomeCoin with two sample spaces and 18 months of made-up data, so
 - **ZIP version:** double-click **`HomeCoin-Demo.cmd`**.
 - **Installed version:** press *Win + R* and run `"%LOCALAPPDATA%\Programs\HomeCoin\python\pythonw.exe" "%LOCALAPPDATA%\Programs\HomeCoin\demo.py"`. Close it with **⋯ → Close HomeCoin**.
 
-The sign-in screen shows the demo password. The demo includes every feature: a household with a mortgage, a car loan, bills, a fair split, budgets and goals; a personal space with salary, a credit card, a broker with ETFs, a pension fund and a rebalancing target. On the Import page, **Try it with a sample bank statement** loads a made-up statement to see how importing works.
+The sign-in screen shows the demo password. The sample data is in the language of your Windows; if you change the language in Settings, the demo uses it the next time you start it. The demo includes every feature: a household with a mortgage, a car loan, bills, a fair split, budgets and goals; a personal space with salary, a credit card, a broker with ETFs, a pension fund and a rebalancing target. On the Import page, **Try it with a sample bank statement** loads a made-up statement to see how importing works.
 
 ---
 
@@ -156,6 +157,12 @@ The guide follows the menu of the app: first the basics, then the pages of each 
 
 Not every space needs every page: in Settings → Spaces you choose which optional pages each space shows. Hiding a page never deletes its data.
 
+### Language and currency
+
+- **Language** (Settings → General): English, Español, Português (Brasil), Deutsch, Français or Italiano. It changes menus, messages, dates, exports and the names of the categories of **new** spaces. The categories you already have keep their names, so changing language never touches your data. The sign-in screen uses the chosen language too.
+- **Currency** (Settings → General): the currency your accounts are kept in, with the number format of its country (see the table below). Language and currency are independent: a Swiss user can have the interface in French and amounts in Swiss francs.
+- The translations other than English and Italian are new: if you find a wrong or clumsy word, please report it (see [Getting help](#getting-help)).
+
 ### Typing amounts and dates
 
 - **Amounts follow your currency.** Each currency is written the way its country writes it:
@@ -165,11 +172,11 @@ Not every space needs every page: in Settings → Spaces you choose which option
   | Euro (EUR) | `1.234,56 €` | comma for decimals: typing `1.500` means one thousand five hundred |
   | US dollar (USD) | `$1,234.56` | |
   | British pound (GBP) | `£1,234.56` | |
-  | Japanese yen (JPY) | `¥1,235` | no decimals: the yen has no cents (no minor unit) |
   | Swiss franc (CHF) | `CHF 1'234.56` | apostrophe for thousands |
   | Canadian dollar (CAD) | `$1,234.56` | |
   | Australian dollar (AUD) | `$1,234.56` | |
-  | Indian rupee (INR) | `₹1,23,456.78` | Indian grouping in lakh and crore |
+  | Mexican peso (MXN) | `$1,234.56` | |
+  | Brazilian real (BRL) | `R$ 1.234,56` | comma for decimals, as for the euro |
 
   Where the dot is the decimal separator, `1.5` is one and a half and `1,500` is one thousand five hundred. You can always type plain numbers like `1234.56`, and HomeCoin also understands amounts pasted with a symbol or a currency code.
 - The currency is only a **label**: HomeCoin never converts amounts. Choose the currency your accounts are kept in. You can change it in Settings → General; security prices are then downloaded again in the new currency.
@@ -277,13 +284,15 @@ Every recurring item with installments appears here with its **amortization sche
   | EUR | Euribor 1M, 3M, 6M, 12M |
   | USD | SOFR 30-day average, Term SOFR 1M, 3M, 6M, 1-year Treasury (CMT), US Prime Rate |
   | GBP | Bank of England Bank Rate, SONIA |
-  | JPY | Short-term prime rate, TIBOR 3M, TONA |
   | CHF | SARON |
   | CAD | Canadian prime rate, CORRA |
   | AUD | RBA cash rate, BBSW 3M |
-  | INR | RBI repo rate, MCLR 1Y |
+  | MXN | TIIE 28, TIIE de Fondeo |
+  | BRL | TR, IPCA, Selic, CDI |
 
   The current index value is typed by hand (HomeCoin does not download rates). A loan keeps its index even if you change currency. APR and ancillary costs (insurance, fees) are not included.
+
+  **Inflation-linked loans** (common in Brazil, with IPCA): choose a variable rate, type the yearly inflation as the index value and the loan's real rate as the spread. The schedule is then an estimate, because future inflation is unknown: update the index value from time to time.
 - **Early repayment** (prepayment): try an extra payment and choose whether to shorten the loan (same installment; with constant principal, the same share of principal each month) or lower the installment (same end date). HomeCoin shows the interest you would save.
 
 ### Fair split
@@ -348,7 +357,7 @@ Categories month by month as a table (heatmap) and a chart, with averages, from 
 Most banks let you download your transactions as **CSV or Excel** from online banking. HomeCoin reads them in four steps:
 
 1. **Upload** the file (drag it onto the page or click to choose it).
-2. **Columns:** HomeCoin recognizes date, description and amount (a single signed amount, or separate money in / money out columns, i.e. credits and debits) in Italian and English. Check them and choose the account the statement belongs to.
+2. **Columns:** HomeCoin recognizes date, description and amount (a single signed amount, or separate money in / money out columns, i.e. credits and debits) in English, Spanish, Portuguese, German, French and Italian (accents and capital letters don't matter). Check them and choose the account the statement belongs to.
    - **Date format.** Banks write dates as day/month/year (31/12/2026) or, in the US, month/day/year (12/31/2026). HomeCoin reads the order from the dates in the file (a first number over 12 can only be a day). When every date fits both, for example 03/04/2026, it assumes the order of your currency's country and tells you to check it. You can always change it in the *Date format* box.
 3. **Review:** each row gets a category from your [rules](#categories-and-rules) or from history; rows already in HomeCoin are marked *already present* and left out (tick them if you want them anyway). You can change any category before confirming.
 4. **Done.** The file is read only on your PC and is never saved: HomeCoin keeps it in memory just until you finish.
@@ -368,9 +377,9 @@ An audit log: the important things that happened in the last 12 months: sign-ins
 Five tabs:
 
 ![Settings](docs/images/12-settings.png)
-*Settings → General: theme, currency, help, support and close.*
+*Settings → General: theme, language, currency, help, support and close.*
 
-- **General:** theme (light, dark or the same as Windows), reference currency, a reminder of the shortcuts, and **About HomeCoin**: your version, Help, Support and Close HomeCoin.
+- **General:** theme (light, dark or the same as Windows), [language and reference currency](#language-and-currency), a reminder of the shortcuts, and **About HomeCoin**: your version, Help, Support and Close HomeCoin.
 - **Spaces:** create, edit, archive spaces and choose their pages.
 - **Security:** a check of your protections (with a button to fix what needs fixing), password, recovery key, auto-lock time (5 minutes to 2 hours, 15 by default), lock now.
 - **Backup & data:** download or restore a backup, export, where your data is.
@@ -473,14 +482,15 @@ HomeCoin checks for updates at most once a day, after you sign in, and sends not
 - One user per installation: HomeCoin is a personal tool, not a server. Never expose it on a network.
 - Bank statement formats vary: columns are recognized automatically, but some files may need a quick check in the preview.
 - Prices come from Yahoo Finance and may be delayed, incomplete or missing for some funds.
-- One currency per installation, chosen among eight (EUR, USD, GBP, JPY, CHF, CAD, AUD, INR): accounts in different currencies cannot be mixed. Securities quoted in other currencies are converted using the exchange rates on Yahoo Finance. Mortgage indexes are typed by hand.
-- The interface is in English.
+- One currency per installation, chosen among eight (EUR, USD, GBP, CHF, CAD, AUD, MXN, BRL): accounts in different currencies cannot be mixed. Securities quoted in other currencies are converted using the exchange rates on Yahoo Finance. Mortgage indexes are typed by hand.
+- The interface is in six languages (English, Spanish, Portuguese, German, French, Italian); this guide is in English.
 
 ## Getting help
 
 - **This guide** is what *Help* in the app opens.
 - **Something doesn't work?** Open an [issue](https://github.com/Starkark98/HomeCoin/issues) with the *Bug report* template. Reproduce it in the demo if you can, and **never attach real data** (no database, backups, statements, amounts or names).
 - **An idea or a suggestion?** Open an issue with the *Feature request* template: suggestions are very welcome.
+- **A wrong or clumsy translation?** Open an issue with the *Translation* template: say the language, where the text appears and how you would write it. Native speakers' help is especially welcome.
 - **A security problem?** Don't open a public issue: follow [SECURITY.md](SECURITY.md).
 
 ## Support the project
@@ -552,4 +562,4 @@ Any copy or modified version must keep the [LICENSE](LICENSE) file, including th
 
 ---
 
-*HomeCoin by **Starkark98** · v1.4.0 · see the [changelog](CHANGELOG.md)*
+*HomeCoin by **Starkark98** · v2.0.0 · see the [changelog](CHANGELOG.md)*

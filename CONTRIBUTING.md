@@ -14,7 +14,8 @@ Thanks for your interest in improving HomeCoin!
 1. For anything beyond a small fix, **open an issue first** to discuss the change.
 2. Keep pull requests focused: one fix or feature per pull request.
 3. Update the user guide (`README.md`, which the in-app *Help* opens) in the same pull request whenever you change what users see or do: the section of the feature, and the screenshot if the page changed. Plain words, with the correct technical term next to them.
-4. Add your change to `CHANGELOG.md`. The maintainer sets `VERSION` in `homecoin/app.py` and publishes the releases.
+4. **Every new text in six languages.** Write it in English inside `T('…')` (page, `static/js/app.js`) or `i18n.t("…")` (server, `homecoin/`), with `{name}` placeholders for values and `tn()` for singular/plural, and add its translation to each file in `static/i18n/` (es, pt-BR, de, fr, it). The English text is the key: never split a sentence into pieces. If you can't translate a language, say so in the pull request.
+5. Add your change to `CHANGELOG.md`. The maintainer sets `VERSION` in `homecoin/app.py` and publishes the releases.
 
 ## Ground rules
 
@@ -23,12 +24,13 @@ Thanks for your interest in improving HomeCoin!
 - **Data always encrypted.** Nothing of the user's data may be written outside the encrypted database (logs, temporary files, caches). Unencrypted exports stay an explicit user action, with a warning.
 - **Request security.** Writes go through the existing checks (dedicated header, local origin, session); every value entered or imported goes through `esc()` before it reaches the HTML.
 - **Separate spaces.** Every read and write stays inside the active space; transfers to other spaces are read-only on the other side.
-- **No unnecessary dependencies.** Python with Flask, waitress, SQLCipher, openpyxl and cryptography; plain JavaScript without frameworks; interface in English.
-- **Backward compatibility.** Existing databases must keep working: never rename stored codes, and keep recognizing the names of system categories created by older versions.
+- **No unnecessary dependencies.** Python with Flask, waitress, SQLCipher, openpyxl and cryptography; plain JavaScript without frameworks; interface in six languages.
+- **Backward compatibility.** Existing databases must keep working: never rename stored codes. Default and system categories are recognized by their fixed code (`categories.code`), never by their name, which can be in any language.
+- **Translations welcome.** Corrections to the translations are a great first contribution: open an issue with the *Translation* template, or a pull request that changes only `static/i18n/<language>.json`.
 
 ## Testing your change
 
-- Run the demo (`HomeCoin-Demo.cmd` in the ZIP version) and check the pages you touched, in light and dark theme, with the browser console free of errors. If you add a feature, add sample data for it to the demo (`homecoin/demo.py`).
+- Run the demo (`HomeCoin-Demo.cmd` in the ZIP version) and check the pages you touched, in light and dark theme and at least in English and in German (the longest texts), with the browser console free of errors. If you add a feature, add sample data for it to the demo (`homecoin/demo.py`).
 - For automated tests use a temporary data folder (environment variable `HOMECOIN_DATA_DIR`), never your real data folder (`%LOCALAPPDATA%\HomeCoin\data`).
 - Before every release the maintainer also runs a regression and fuzz test suite (made-up data only).
 

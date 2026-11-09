@@ -7,6 +7,7 @@ proportional to income. "Excluded" categories do not enter the calculation.
 import datetime as dt
 import json
 
+from . import i18n
 from .util import add_months
 
 RULES = ("prop", "equal", "none")
@@ -87,7 +88,7 @@ def contributions(db, account_id, people, d_from, d_to):
            LEFT JOIN portfolios sp ON sp.id = s.portfolio_id
            JOIN accounts dst ON dst.id = ?
            WHERE NOT t.excluded AND t.date BETWEEN ? AND ?
-             AND ((t.kind = 'income' AND t.account_id = dst.id AND (c.name LIKE 'Contribution%' OR c.name LIKE 'Versament%'))
+             AND ((t.kind = 'income' AND t.account_id = dst.id AND (c.code = 'contributions' OR c.name LIKE 'Contribution%' OR c.name LIKE 'Versament%'))
                OR (t.kind = 'transfer' AND t.to_account_id = dst.id AND s.portfolio_id != dst.portfolio_id))""",
         (account_id, d_from, d_to)).fetchall()
     kws = [keyword(p) for p in people]
@@ -151,10 +152,10 @@ def base_rows(db, base, settings, portfolio_id, d_from, d_to, months):
         common = {"account_id": acc_id, "account": acc["name"], "account_color": acc["color"], "category_id": None,
                   "color": acc["color"]}
         if eq > 0:
-            rows.append({**common, "category": "Contributions for equally split expenses", "icon": "½", "rule": "equal",
+            rows.append({**common, "category": i18n.t("Contributions for equally split expenses"), "icon": "½", "rule": "equal",
                          "monthly": eq, "key": f"d{acc_id}e"})
         if dep - eq > 0:
-            rows.append({**common, "category": "Rest of the contributions", "icon": "🤝", "rule": "prop",
+            rows.append({**common, "category": i18n.t("Rest of the contributions"), "icon": "🤝", "rule": "prop",
                          "monthly": dep - eq, "key": f"d{acc_id}p"})
     return rows
 

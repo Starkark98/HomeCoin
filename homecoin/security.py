@@ -20,6 +20,7 @@ from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 from . import db as dbm
+from . import i18n
 
 KEYSTORE = dbm.DATA_DIR / "keystore.json"
 COOKIE = "hc_session"
@@ -139,11 +140,11 @@ def write_keystore(ks):
 
 def check_password(pw):
     if len(pw or "") < MIN_PASSWORD:
-        raise AuthError(f"The password must be at least {MIN_PASSWORD} characters long")
+        raise AuthError(i18n.t("The password must be at least {min_password} characters long", min_password=MIN_PASSWORD))
     if (pw or "").strip() != pw:
-        raise AuthError("The password cannot start or end with a space")
+        raise AuthError(i18n.t("The password cannot start or end with a space"))
     if pw.lower() in WEAK_PASSWORDS or len(set(pw)) <= 2:
-        raise AuthError("Password too easy to guess: use a phrase or a mix of words, numbers and symbols")
+        raise AuthError(i18n.t("Password too easy to guess: use a phrase or a mix of words, numbers and symbols"))
 
 
 # ------------------------------------------------- data folder permissions (Windows)
@@ -211,7 +212,7 @@ def restrict_data_dir(path=None):
     folder; files inherit them (reset). Afterwards, check that keystore and database can still be read: otherwise
     restore the previous permissions (inherited from the parent folder)."""
     if os.name != "nt":
-        raise AuthError("Available on Windows only")
+        raise AuthError(i18n.t("Available on Windows only"))
     d = Path(path or dbm.DATA_DIR)
     try:
         me = _my_sid()
@@ -269,9 +270,25 @@ class Vault:
         ks = read_keystore() or {}
         return ks.get("auto_lock", AUTO_LOCK_DEFAULT)
 
+    def language(self):
+        """Interface language, kept in the keystore: it is needed before the data can be opened (sign-in screen)."""
+        return i18n.set_language((read_keystore() or {}).get("language") or i18n.LANG["code"])
+
+    def set_language(self, code):
+        if code not in i18n.LANGUAGES:
+            raise AuthError(i18n.t("Invalid language"))
+        with self.lock:
+            ks = read_keystore()
+            ks["language"] = code
+            write_keystore(ks)
+        return i18n.set_language(code)
+
     def status(self, token):
         ks = read_keystore()
+        if ks is not None:
+            i18n.set_language(ks.get("language") or i18n.DEFAULT_LANGUAGE)
         return {
+            "language": i18n.LANG["code"],
             "configured": ks is not None,
             "unlocked": self.valid(token, touch=False),
             "db_encrypted_without_keystore": ks is None and dbm.DB_PATH.exists() and dbm.is_encrypted(dbm.DB_PATH),
@@ -285,7 +302,7 @@ class Vault:
     def new_import_token(self, minutes=IMPORT_TOKEN_MINUTES):
         """Code for a local script (valid for `minutes`, only while HomeCoin is unlocked; one at a time)."""
         if minutes not in IMPORT_TOKEN_CHOICES:
-            raise AuthError("Invalid duration")
+            raise AuthError(i18n.t("Invalid duration"))
         with self.lock:
             token = "hc-" + secrets.token_urlsafe(24)
             self.import_token = (token, time.time() + minutes * 60)
@@ -365,7 +382,7 @@ class Vault:
     def _throttle(self):
         wait = self.blocked_until - time.time()
         if wait > 0:
-            raise AuthError(f"Too many wrong attempts: try again in {int(wait) + 1} seconds", 429,
+            raise AuthError(i18n.t("Too many wrong attempts: try again in {value} seconds", value=int(wait) + 1), 429,
                             retry_after=int(wait) + 1)
 
     def _failed(self):
@@ -374,20 +391,22 @@ class Vault:
             self.blocked_until = time.time() + min(MAX_DELAY, 5 * 2 ** min(self.failures - FREE_ATTEMPTS - 1, 10))
         self._save_throttle(self.failures, self.blocked_until)
 
-    def setup(self, password):
+    def setup(self, password, language=None):
         """First setup: create the data key and keystore, and encrypt any unencrypted data from earlier development versions."""
         with self.lock:
             if self.configured():
-                raise AuthError("The password is already set", 409)
+                raise AuthError(i18n.t("The password is already set"), 409)
             if dbm.DB_PATH.exists() and dbm.is_encrypted(dbm.DB_PATH):
-                raise AuthError("The database is encrypted but the keystore.json file is missing: restore it in the data folder", 409)
+                raise AuthError(i18n.t("The database is encrypted but the keystore.json file is missing: restore it in the data folder"), 409)
             check_password(password)
             dek, recovery = os.urandom(32), new_recovery_key()
             now = dt.datetime.now().isoformat(timespec="seconds")
             ks = {"app": "HomeCoin", "v": 1, "cipher": "sqlcipher4", "created": now, "changed": now,
                   "auto_lock": AUTO_LOCK_DEFAULT,
+                  "language": language if language in i18n.LANGUAGES else i18n.LANG["code"],
                   "password": wrap(_norm_password(password), dek),
                   "recovery": wrap(norm_recovery(recovery).encode(), dek)}
+            i18n.set_language(ks["language"])  # the first space and its categories are named in this language
             dbm.encrypt_existing(dek)  # unencrypted data from earlier versions: database and automatic backups become encrypted
             write_keystore(ks)
             return self._open(dek), recovery
@@ -396,12 +415,12 @@ class Vault:
         with self.lock:
             ks = read_keystore()
             if ks is None:
-                raise AuthError("Password not set yet", 409)
+                raise AuthError(i18n.t("Password not set yet"), 409)
             self._throttle()
             dek = unwrap(_norm_password(password), ks["password"])
             if dek is None:
                 self._failed()
-                raise AuthError("Wrong password", 401, retry_after=max(0, round(self.blocked_until - time.time())))
+                raise AuthError(i18n.t("Wrong password"), 401, retry_after=max(0, round(self.blocked_until - time.time())))
             if ks["password"].get("n", 0) < SCRYPT["n"]:  # keystore from an earlier version: stronger key
                 ks = read_keystore()
                 ks["password"] = wrap(_norm_password(password), dek)
@@ -413,13 +432,13 @@ class Vault:
         with self.lock:
             ks = read_keystore()
             if ks is None:
-                raise AuthError("Password not set yet", 409)
+                raise AuthError(i18n.t("Password not set yet"), 409)
             self._throttle()
             check_password(new_password)
             dek = unwrap(norm_recovery(code).encode(), ks["recovery"])
             if dek is None:
                 self._failed()
-                raise AuthError("Wrong recovery key", 401)
+                raise AuthError(i18n.t("Wrong recovery key"), 401)
             recovery = new_recovery_key()
             ks.update(password=wrap(_norm_password(new_password), dek),
                       recovery=wrap(norm_recovery(recovery).encode(), dek),
@@ -431,7 +450,7 @@ class Vault:
         self._throttle()
         if unwrap(_norm_password(current), ks["password"]) != self.dek:
             self._failed()
-            raise AuthError("Wrong current password", 401)
+            raise AuthError(i18n.t("Wrong current password"), 401)
 
     def change_password(self, current, new_password):
         with self.lock:
@@ -453,7 +472,7 @@ class Vault:
 
     def set_auto_lock(self, minutes):
         if minutes not in AUTO_LOCK_CHOICES:
-            raise AuthError("Invalid value")
+            raise AuthError(i18n.t("Invalid value"))
         with self.lock:
             ks = read_keystore()
             ks["auto_lock"] = minutes
@@ -471,4 +490,4 @@ class Vault:
             if kind in wraps and (dek := unwrap(s, wraps[kind])):
                 return dek
         self._failed()
-        raise AuthError("Wrong backup password or recovery key", 422)
+        raise AuthError(i18n.t("Wrong backup password or recovery key"), 422)

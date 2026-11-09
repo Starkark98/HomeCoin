@@ -25,7 +25,7 @@ def default_data_dir():
 DATA_DIR = default_data_dir()
 BACKUP_DIR = DATA_DIR / "backups"
 DB_PATH = DATA_DIR / "homecoin.db"
-SCHEMA_VERSION = 15
+SCHEMA_VERSION = 16
 KEEP_BACKUPS = 15
 
 SCHEMA = """
@@ -200,7 +200,7 @@ CREATE TABLE IF NOT EXISTS audit_log (
 CREATE INDEX IF NOT EXISTS ix_audit_ts ON audit_log(ts);
 """
 
-PORTFOLIO_TYPES = {"family": "Family", "personal": "Personal"}  # type -> default name
+PORTFOLIO_TYPES = {"family": "Family", "personal": "Personal"}  # type -> English name (i18n.space_name translates it)
 # optional tabs (the others are the common core): each space picks its own, the type only sets the defaults
 OPTIONAL_FEATURES = ("budget", "obiettivi", "emergenza", "calendario", "mutuo", "ripartizione", "investimenti", "risparmio")
 DEFAULT_FEATURES = {
@@ -211,30 +211,48 @@ DEFAULT_FEATURES = {
 # default categories of a new space, few and broad (the detail goes in the description).
 # Each category has its own hue, matching the dominant color of its icon (same scheme in every space).
 _COMMON = [  # optimized palette: minimum perceptual distance (CIEDE2000) ~18 between categories, good contrast on light and dark
-    ("Groceries", "expense", "#059669", "🥦"), ("Restaurants & bars", "expense", "#ea580c", "🍕"),
-    ("Home & furniture", "expense", "#a16207", "🛋️"), ("Utilities", "expense", "#fde047", "💡"),
-    ("Transport", "expense", "#e11d48", "🚗"), ("Travel", "expense", "#3b82f6", "✈️"),
-    ("Shopping & gifts", "expense", "#c084fc", "🛍️"), ("Health & personal care", "expense", "#0891b2", "💊"),
-    ("Bank & insurance", "expense", "#cbd5e1", "💳"), ("Other", "expense", "#e7d3b0", "📦"),
-    ("Other income", "income", "#3b82f6", "🎁"),
+    ("groceries", "expense", "#059669", "🥦"), ("restaurants", "expense", "#ea580c", "🍕"),
+    ("home", "expense", "#a16207", "🛋️"), ("utilities", "expense", "#fde047", "💡"),
+    ("transport", "expense", "#e11d48", "🚗"), ("travel", "expense", "#3b82f6", "✈️"),
+    ("shopping", "expense", "#c084fc", "🛍️"), ("health", "expense", "#0891b2", "💊"),
+    ("bank", "expense", "#cbd5e1", "💳"), ("other", "expense", "#e7d3b0", "📦"),
+    ("other_income", "income", "#3b82f6", "🎁"),
 ]
-DEFAULT_CATEGORIES = {
-    "family": [("Mortgage & loans", "expense", "#f59e0b", "🔑"), *_COMMON,
-               ("Contributions to household", "income", "#2dd4bf", "💶")],
-    "personal": [("Subscriptions", "expense", "#7c3aed", "📺"), ("Sport & leisure", "expense", "#65a30d", "🎾"),
-                 ("Books & learning", "expense", "#f472b6", "📚"), ("Taxes", "expense", "#78716c", "🏛️"),
-                 *_COMMON, ("Salary", "income", "#059669", "💼"), ("Interest", "income", "#65a30d", "💹")],
+DEFAULT_CATEGORIES = {  # (code, kind, color, icon): the name comes from i18n.CATEGORY_NAMES in the chosen language
+    "family": [("mortgage", "expense", "#f59e0b", "🔑"), *_COMMON,
+               ("contributions", "income", "#2dd4bf", "💶")],
+    "personal": [("subscriptions", "expense", "#7c3aed", "📺"), ("sport", "expense", "#65a30d", "🎾"),
+                 ("books", "expense", "#f472b6", "📚"), ("taxes", "expense", "#78716c", "🏛️"),
+                 *_COMMON, ("salary", "income", "#059669", "💼"), ("interest", "income", "#65a30d", "💹")],
 }
 
 
-def create_portfolio(conn, name, ptype, color="#ec4899", icon="🏠"):
-    """Create a space with its default categories; return its id."""
+def create_portfolio(conn, name, ptype, color="#ec4899", icon="🏠", lang=None):
+    """Create a space with its default categories (named in the interface language); return its id."""
+    from . import i18n
     pos = conn.execute("SELECT COALESCE(MAX(position), -1) + 1 FROM portfolios").fetchone()[0]
     pid = conn.execute("INSERT INTO portfolios(name, type, color, icon, position) VALUES (?,?,?,?,?)",
                        (name, ptype, color, icon, pos)).lastrowid
-    conn.executemany("INSERT INTO categories(portfolio_id, name, kind, color, icon) VALUES (?,?,?,?,?)",
-                     [(pid, *c) for c in DEFAULT_CATEGORIES[ptype]])
+    conn.executemany("INSERT INTO categories(portfolio_id, name, kind, color, icon, code) VALUES (?,?,?,?,?,?)",
+                     [(pid, i18n.category_name(code, lang), kind, color_, icon_, code)
+                      for code, kind, color_, icon_ in DEFAULT_CATEGORIES[ptype]])
     return pid
+
+
+def assign_category_codes(conn):
+    """Older databases: give the fixed code to the default and system categories, recognized by any of their names
+    (English, Italian of older versions, the other languages). One category per code and space; nothing is renamed."""
+    from . import i18n
+    taken = {(r[0], r[1]) for r in conn.execute("SELECT portfolio_id, code FROM categories WHERE code IS NOT NULL")}
+    for cid, pid, name, kind in conn.execute(
+            "SELECT id, portfolio_id, name, kind FROM categories WHERE code IS NULL ORDER BY id").fetchall():
+        code = i18n.code_of_name(name)
+        if not code or (pid, code) in taken:
+            continue
+        if code in ("contributions",) and kind not in ("income", "expense"):
+            continue
+        conn.execute("UPDATE categories SET code = ? WHERE id = ?", (code, cid))
+        taken.add((pid, code))
 
 
 PLAIN_HEADER = b"SQLite format 3\x00"
@@ -549,6 +567,9 @@ def migrate(conn):
         conn.execute("ALTER TABLE holdings ADD COLUMN isin TEXT")
     conn.execute("CREATE INDEX IF NOT EXISTS ix_acc_portfolio ON accounts(portfolio_id)")
     conn.execute("CREATE INDEX IF NOT EXISTS ix_cat_portfolio ON categories(portfolio_id)")
+    if "code" not in {r[1] for r in conn.execute("PRAGMA table_info(categories)")}:  # v16: fixed codes (languages)
+        conn.execute("ALTER TABLE categories ADD COLUMN code TEXT")
+        assign_category_codes(conn)
 
 
 def init_db():
@@ -563,9 +584,10 @@ def init_db():
         migrate(conn)
         conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
         if conn.execute("SELECT COUNT(*) FROM portfolios").fetchone()[0] == 0:  # new database
-            pid = create_portfolio(conn, PORTFOLIO_TYPES["family"], "family")
+            from . import i18n
+            pid = create_portfolio(conn, i18n.space_name("family"), "family")
             conn.execute("INSERT INTO accounts(portfolio_id, name, type, color, icon) VALUES (?,?,?,?,?)",
-                         (pid, "Main account", "corrente", "#6366f1", "🏦"))
+                         (pid, i18n.main_account_name(), "corrente", "#6366f1", "🏦"))
         conn.commit()
     finally:
         conn.close()

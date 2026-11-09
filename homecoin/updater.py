@@ -33,6 +33,7 @@ from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
 from . import db as dbm
+from . import i18n
 
 REPO = "Starkark98/HomeCoin"
 API_LATEST = f"https://api.github.com/repos/{REPO}/releases/latest"
@@ -61,7 +62,7 @@ class _Redirects(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         u = urllib.parse.urlsplit(newurl)
         if u.scheme != "https" or u.hostname not in ALLOWED_HOSTS:
-            raise UpdateError(f"Download redirected to an unexpected address ({u.hostname})")
+            raise UpdateError(i18n.t("Download redirected to an unexpected address ({hostname})", hostname=u.hostname))
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
@@ -73,7 +74,7 @@ def _get(url, limit, accept="application/octet-stream", to_file=None, not_found=
     `not_found`: the message when GitHub answers 404 (a missing release, or a file not attached to it)."""
     u = urllib.parse.urlsplit(url)
     if u.scheme != "https" or u.hostname not in ALLOWED_HOSTS:
-        raise UpdateError("Unexpected download address")
+        raise UpdateError(i18n.t("Unexpected download address"))
     from .app import VERSION
     req = urllib.request.Request(url, headers={"User-Agent": f"HomeCoin/{VERSION}", "Accept": accept})
     try:
@@ -83,7 +84,7 @@ def _get(url, limit, accept="application/octet-stream", to_file=None, not_found=
                 while chunk := r.read(1 << 16):
                     size += len(chunk)
                     if size > limit:
-                        raise UpdateError("The download is larger than expected")
+                        raise UpdateError(i18n.t("The download is larger than expected"))
                     h.update(chunk)
                     out.append(chunk) if to_file is None else out.write(chunk)
             finally:
@@ -93,10 +94,10 @@ def _get(url, limit, accept="application/octet-stream", to_file=None, not_found=
         if e.code == 404:
             raise UpdateError(not_found) from e
         if e.code in (403, 429):
-            raise UpdateError("GitHub refused the request for now (rate limit): try again later") from e
-        raise UpdateError(f"GitHub answered {e.code}") from e
+            raise UpdateError(i18n.t("GitHub refused the request for now (rate limit): try again later")) from e
+        raise UpdateError(i18n.t("GitHub answered {code}", code=e.code)) from e
     except (urllib.error.URLError, TimeoutError, OSError) as e:
-        raise UpdateError("No connection to GitHub: check the internet connection") from e
+        raise UpdateError(i18n.t("No connection to GitHub: check the internet connection")) from e
     return (b"".join(out), size, h.hexdigest()) if to_file is None else (to_file, size, h.hexdigest())
 
 
@@ -108,7 +109,7 @@ def verify_manifest(data, sig_b64, public_key=None):
         key = Ed25519PublicKey.from_public_bytes(base64.b64decode(public_key or PUBLIC_KEY))
         key.verify(base64.b64decode(sig_b64.strip(), validate=True), data)
     except (InvalidSignature, ValueError, TypeError) as e:
-        raise UpdateError("The release signature is not valid: update refused") from e
+        raise UpdateError(i18n.t("The release signature is not valid: update refused")) from e
     try:
         m = json.loads(data)
         assert m["app"] == "HomeCoin" and parse_version(m["version"])
@@ -116,7 +117,7 @@ def verify_manifest(data, sig_b64, public_key=None):
             assert re.fullmatch(r"[\w.-]{1,100}", f["name"]) and re.fullmatch(r"[0-9a-f]{64}", f["sha256"])
             assert isinstance(f["size"], int) and 0 < f["size"] <= MAX_ASSET
     except (ValueError, KeyError, TypeError, AssertionError, AttributeError) as e:
-        raise UpdateError("Invalid release manifest") from e
+        raise UpdateError(i18n.t("Invalid release manifest")) from e
     return m
 
 
@@ -127,10 +128,10 @@ def check(current):
         rel = json.loads(raw)
         tag, assets = rel["tag_name"], {a["name"]: a for a in rel.get("assets") or []}
     except (ValueError, KeyError, TypeError) as e:
-        raise UpdateError("Unexpected answer from GitHub") from e
+        raise UpdateError(i18n.t("Unexpected answer from GitHub")) from e
     latest = parse_version(tag)
     if not latest:
-        raise UpdateError(f"Unexpected release name on GitHub: {tag}")
+        raise UpdateError(i18n.t("Unexpected release name on GitHub: {tag}", tag=tag))
     ver = ".".join(map(str, latest))
     info = {"latest": ver, "available": latest > parse_version(current),
             "notes": str(rel.get("body") or "")[:4000], "url": f"{RELEASE_PAGE}/tag/v{ver}", "manifest": None,
@@ -139,12 +140,12 @@ def check(current):
         return info
     names = (f"HomeCoin-{ver}.manifest.json", f"HomeCoin-{ver}.manifest.sig")
     if not all(n in assets for n in names):
-        raise UpdateError(f"Version {ver} is published without a signature: install it by hand from GitHub")
+        raise UpdateError(i18n.t("Version {ver} is published without a signature: install it by hand from GitHub", ver=ver))
     data, _, _ = _get(_asset_url(assets[names[0]]), 64 * 1024)
     sig, _, _ = _get(_asset_url(assets[names[1]]), 1024)
     m = verify_manifest(data, sig)
     if m["version"] != ver:
-        raise UpdateError("The signed manifest is for another version: update refused")
+        raise UpdateError(i18n.t("The signed manifest is for another version: update refused"))
     info["manifest"] = m
     return info
 
@@ -152,7 +153,7 @@ def check(current):
 def _asset_url(asset):
     url = str(asset.get("browser_download_url") or "")
     if not url.startswith(DOWNLOAD_PREFIX):
-        raise UpdateError("Unexpected download address")
+        raise UpdateError(i18n.t("Unexpected download address"))
     return url
 
 
@@ -181,7 +182,7 @@ def download(manifest, kind, assets=None):
     `assets`: names of the files attached to the release (from check()), to say clearly which one is missing."""
     f = manifest["files"].get("installer" if kind == "installer" else "zip")
     if not f:
-        raise UpdateError("The release has no file for this installation")
+        raise UpdateError(i18n.t("The release has no file for this installation"))
     missing = (f"{f['name']} is not attached to the release v{manifest['version']} on GitHub: "
                "install this version by hand, or try again once the file has been added")
     if assets is not None and f["name"] not in assets:
@@ -194,7 +195,7 @@ def download(manifest, kind, assets=None):
     try:
         _, size, digest = _get(url, f["size"], to_file=part, not_found=missing)
         if size != f["size"] or digest != f["sha256"]:
-            raise UpdateError("The downloaded file does not match the signed release (SHA-256): update refused")
+            raise UpdateError(i18n.t("The downloaded file does not match the signed release (SHA-256): update refused"))
         os.replace(part, target)
     finally:
         part.unlink(missing_ok=True)
@@ -208,17 +209,17 @@ def _safe_members(zf, top="HomeCoin/"):
         n = info.filename.replace("\\", "/")
         parts = n.split("/")
         if not n.startswith(top) or n.startswith("/") or ":" in n or ".." in parts:
-            raise UpdateError(f"Unexpected path in the ZIP: {n}")
+            raise UpdateError(i18n.t("Unexpected path in the ZIP: {n}", n=n))
         rel = n[len(top):]
         if parts[1] in ("data", ".venv", "demo-data", ".git") or parts[1].startswith("data."):
-            raise UpdateError(f"Unexpected folder in the ZIP: {parts[1]}")
+            raise UpdateError(i18n.t("Unexpected folder in the ZIP: {value}", value=parts[1]))
         total += info.file_size
         if total > 100 * 1024 * 1024:
-            raise UpdateError("The ZIP is larger than expected")
+            raise UpdateError(i18n.t("The ZIP is larger than expected"))
         if rel and not info.is_dir():
             out.append((info, rel))
     if not any(rel == "run.py" for _, rel in out) or not any(rel == "homecoin/app.py" for _, rel in out):
-        raise UpdateError("The ZIP does not contain HomeCoin")
+        raise UpdateError(i18n.t("The ZIP does not contain HomeCoin"))
     return out
 
 
@@ -245,8 +246,8 @@ def apply_zip(zip_path, base=None, python=None, run=subprocess.run):
                      "--only-binary=:all:", "-r", str(new_lock)], capture_output=True, text=True, timeout=900,
                     creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
             if r.returncode:
-                raise UpdateError("The new libraries could not be installed: nothing was changed. "
-                                  + (r.stderr or r.stdout or "").strip()[-300:])
+                raise UpdateError(i18n.t("The new libraries could not be installed: nothing was changed. {details}",
+                                         details=(r.stderr or r.stdout or "").strip()[-300:]))
         new_files = {rel for _, rel in members}
         # old code files that the new version no longer has (in the code folders only) go away too
         stale = [p.relative_to(base).as_posix() for d in CODE_DIRS if (base / d).is_dir()
@@ -272,7 +273,7 @@ def apply_zip(zip_path, base=None, python=None, run=subprocess.run):
                     shutil.copy2(old, cur)
                 elif rel in new_files:
                     cur.unlink(missing_ok=True)
-            raise UpdateError(f"Update interrupted, previous files restored: {e}") from e
+            raise UpdateError(i18n.t("Update interrupted, previous files restored: {e}", e=e)) from e
         for d in CODE_DIRS:
             for c in (base / d).rglob("__pycache__") if (base / d).is_dir() else []:
                 shutil.rmtree(c, ignore_errors=True)
@@ -289,8 +290,7 @@ def launch_installer(exe):
     for _ in range(30):  # blocked by an antivirus or by policy: it ends at once and HomeCoin keeps running
         time.sleep(0.1)
         if p.poll() is not None:
-            raise UpdateError(f"Windows did not let the installer run (code {p.returncode}). "
-                              "Download it from GitHub and run it by hand.")
+            raise UpdateError(i18n.t("Windows did not let the installer run (code {returncode}). Download it from GitHub and run it by hand.", returncode=p.returncode))
     return p
 
 

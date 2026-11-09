@@ -45,12 +45,34 @@ def wipe():
     raise SystemExit(f"Cannot recreate the demo: close the other demo windows and try again ({DEMO_DIR})")
 
 
+def demo_language():
+    """Language of the sample data: --lang xx, else the one chosen in the previous demo (Settings), else Windows'."""
+    from homecoin import i18n
+    if "--lang" in sys.argv:  # removed from the arguments: run.py does not know it
+        i = sys.argv.index("--lang")
+        tag = sys.argv[i + 1] if i + 1 < len(sys.argv) else ""
+        del sys.argv[i:i + 2]
+        return i18n.best_match(tag)
+    previous = (security.read_keystore() or {}).get("language")
+    if previous in i18n.LANGUAGES:
+        return previous
+    try:
+        import ctypes
+        import locale
+        tag = locale.windows_locale.get(ctypes.windll.kernel32.GetUserDefaultUILanguage(), "")
+    except (AttributeError, OSError):
+        import locale
+        tag = (locale.getlocale()[0] or "")
+    return i18n.best_match(tag.replace("_", "-"))
+
+
 def fresh():
     """Always a clean demo: delete the demo folder and recreate it with the sample data."""
+    language = demo_language()
     wipe()
     DEMO_DIR.mkdir(parents=True)
     vault = security.Vault()
-    vault.setup(demo.PASSWORD)
+    vault.setup(demo.PASSWORD, language)
     demo.build()
     vault.lock_now()
 

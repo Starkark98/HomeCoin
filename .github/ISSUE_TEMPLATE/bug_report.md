@@ -22,6 +22,7 @@ The text shown in the app, a screenshot of the demo, or (ZIP version only) the l
 - Installed with the installer, or the ZIP version:
 - Windows version:
 - Browser:
+- Interface language:
 - Reference currency:
 - Happens in the demo too: yes / no
 

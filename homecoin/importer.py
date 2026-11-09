@@ -3,24 +3,33 @@ import csv
 import datetime as dt
 import io
 import re
+import unicodedata
 
+from . import i18n
 import openpyxl
 
 from .util import parse_amount, parse_date
 
 MAX_ROWS = 20000
 
-# keywords per column, in order of preference (Italian and English bank exports; substring match on the header)
+# keywords per column, in order of preference (substring match on the header, accents ignored). Bank exports in the six
+# languages of the interface: Italian, English, Spanish, Portuguese, German, French
 FIELD_KEYWORDS = {
     "date": ["data operazione", "data contabile", "data movimento", "transaction date", "posting date", "booking date",
-             "data", "date", "giorno", "valuta"],
+             "fecha operacion", "fecha de operacion", "fecha contable", "data do lancamento", "data da transacao",
+             "data de lancamento", "buchungstag", "buchungsdatum", "date d'operation", "date operation",
+             "date de comptabilisation", "data", "date", "fecha", "datum", "giorno", "valuta", "wertstellung"],
     "description": ["descrizione", "causale", "dettagli", "dettaglio", "description", "details", "narrative", "operazione",
-                    "beneficiario", "esercente", "merchant", "memo", "payee", "note"],
-    "amount": ["importo", "amount", "ammontare", "valore", "euro", "eur"],
+                    "beneficiario", "esercente", "merchant", "memo", "payee", "concepto", "descripcion", "detalle",
+                    "descricao", "historico", "verwendungszweck", "buchungstext", "beschreibung", "empfanger",
+                    "auftraggeber", "libelle", "detail", "note"],
+    "amount": ["importo", "amount", "importe", "monto", "betrag", "montant", "ammontare", "valor", "valore", "umsatz",
+               "euro", "eur"],
     "debit": ["uscite", "addebiti", "addebito", "dare", "debit", "prelievi", "withdrawal", "money out", "paid out",
-              "spese"],
-    "credit": ["entrate", "accrediti", "accredito", "avere", "credit", "versamenti", "deposit", "money in", "paid in"],
-    "category": ["categoria", "category"],
+              "cargo", "cargos", "saida", "saidas", "belastung", "ausgang", "soll", "spese"],
+    "credit": ["entrate", "accrediti", "accredito", "avere", "credit", "versamenti", "deposit", "money in", "paid in",
+               "abono", "abonos", "ingreso", "entrada", "gutschrift", "eingang", "haben"],
+    "category": ["categoria", "category", "kategorie", "categorie"],
 }
 HEADER_HINTS = {kw for kws in FIELD_KEYWORDS.values() for kw in kws}
 
@@ -41,7 +50,7 @@ def _decode(data):
             return data.decode(enc)
         except UnicodeDecodeError:
             continue
-    raise ValueError("File encoding not recognized")
+    raise ValueError(i18n.t("File encoding not recognized"))
 
 
 def read_table(filename, data):
@@ -50,7 +59,7 @@ def read_table(filename, data):
         try:
             wb = openpyxl.load_workbook(io.BytesIO(data), read_only=True, data_only=True)
         except Exception as exc:  # corrupted file or not xlsx
-            raise ValueError(f"Cannot read the Excel file: {exc}") from exc
+            raise ValueError(i18n.t("Cannot read the Excel file: {exc}", exc=exc)) from exc
         best = []
         for ws in wb.worksheets:
             rows = []
@@ -73,15 +82,15 @@ def read_table(filename, data):
         try:  # newline="": any line ending (\n, \r\n, old Mac \r) and line breaks inside quoted cells
             rows = [[c.strip() for c in r] for r in csv.reader(io.StringIO(text, newline=""), delimiter=delim)]
         except csv.Error as exc:
-            raise ValueError(f"Cannot read the CSV file: {exc}") from exc
+            raise ValueError(i18n.t("Cannot read the CSV file: {exc}", exc=exc)) from exc
         rows = [r for r in rows if any(c for c in r)][:MAX_ROWS]
     elif ext == "xls":
-        raise ValueError("The old .xls format is not supported: save the file as .xlsx or .csv")
+        raise ValueError(i18n.t("The old .xls format is not supported: save the file as .xlsx or .csv"))
     else:
-        raise ValueError("Unsupported format: use .csv, .xlsx or .txt")
+        raise ValueError(i18n.t("Unsupported format: use .csv, .xlsx or .txt"))
 
     if not rows:
-        raise ValueError("The file contains no data")
+        raise ValueError(i18n.t("The file contains no data"))
     width = max(len(r) for r in rows)
     rows = [list(r) + [None] * (width - len(r)) for r in rows]
     # drop completely empty trailing columns
@@ -92,7 +101,9 @@ def read_table(filename, data):
 
 
 def _norm(v):
-    return re.sub(r"\s+", " ", str(v or "").strip().lower())
+    """Header compared without case, accents and repeated spaces: "Descripción" = "descripcion"."""
+    text = unicodedata.normalize("NFKD", str(v or "").strip().lower())
+    return re.sub(r"\s+", " ", "".join(ch for ch in text if not unicodedata.combining(ch))).replace("’", "'")
 
 
 def detect_header(rows):
@@ -215,9 +226,9 @@ def parse_rows(rows, header_row, mapping, invert=False, date_order="dmy"):
                 cents = abs(cre or 0) - abs(deb or 0)
         error = None
         if d is None:
-            error = "Invalid date"
+            error = i18n.t("Invalid date")
         elif cents is None or cents == 0:
-            error = "Amount missing or zero"
+            error = i18n.t("Amount missing or zero")
         if d is None and not cents:
             continue  # header, total or balance row: skip it silently
         if cents and invert:

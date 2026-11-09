@@ -1,6 +1,6 @@
 # CLAUDE.md — HomeCoin
 
-Guidance for Claude Code when working in this repository. Household finance app that runs locally on Windows: Python/Flask server on `127.0.0.1`, encrypted SQLCipher database, vanilla JS single-page UI. Current version: see `VERSION` in `homecoin/app.py` (1.4.0 at the time of writing).
+Guidance for Claude Code when working in this repository. Household finance app that runs locally on Windows: Python/Flask server on `127.0.0.1`, encrypted SQLCipher database, vanilla JS single-page UI. Current version: see `VERSION` in `homecoin/app.py` (2.0.0 at the time of writing).
 
 ## Hard rules
 
@@ -49,7 +49,7 @@ demo.py           sets HOMECOIN_DATA_DIR=demo-data + HOMECOIN_DEMO=1, rebuilds s
 homecoin/
   app.py          create_app(port): security guard, all /api/* routes, VERSION, input helpers (as_int, as_text, tx_date…)
   db.py           data folder (default_data_dir, migrate_data_folder: one-time verified move from the program folder),
-                  SQLCipher connection, SCHEMA + SCHEMA_VERSION (14) + idempotent migrate(), default categories, backups
+                  SQLCipher connection, SCHEMA + SCHEMA_VERSION (16) + idempotent migrate(), default categories, backups
   security.py     Vault: keystore (DEK wrapped by password and recovery key, scrypt N=2^17, AES-GCM), sessions,
                   auto-lock, failed-attempt delay (persisted), import token, data-folder ACL check/restrict
   services.py     account balances, recurring processing (lock + duplicate-date guard), investment-plan buys, Categorizer
@@ -57,14 +57,16 @@ homecoin/
   split.py        fair split (equal savings rate), contributions incl. cross-space transfers
   tools.py        mortgage/amortization, emergency fund, goals, investments (positions, average cost, XIRR), Yahoo prices,
                   savings/net worth
-  importer.py     CSV/TXT/XLSX statement parsing and column detection (Italian and English header aliases)
+  importer.py     CSV/TXT/XLSX statement parsing and column detection (header aliases in the six languages, accents ignored)
   audit.py        activity log (12 months retention)
+  i18n.py         translations (2.0.0): t(), tn(), best_match(), category/space names by code, months, estimated markers
   updater.py      signed updates from GitHub releases: check (latest release, signed manifest), download (size + SHA-256),
                   apply (installer: silent /HCUPDATE=1 run that reopens HomeCoin; ZIP: in-place copy with rollback and
                   pip --require-hashes when requirements.lock changes); install_kind() = installer | zip | dev | unknown
   util.py         money/number parsing, dates, shared constants (TECH_CATEGORIES, BALANCE_ADJUSTMENT…), STOPWORDS
   demo.py         sample data (two spaces, 18 months)
-static/           index.html, js/app.js (whole SPA, hash routes), js/theme.js, css/app.css, img/logo.svg, vendor/chart.umd.min.js
+static/           index.html, js/app.js (whole SPA, hash routes), js/theme.js, css/app.css, img/logo.svg, vendor/chart.umd.min.js,
+                  i18n/{es,pt-BR,de,fr,it}.json (English text → translation)
 icon/             app icons generated from static/img/logo.svg
 docs/images/      README screenshots (from the demo)
 ```
@@ -73,11 +75,13 @@ Key concepts:
 - **Spaces** (`portfolios`, internal name; UI "space"): type `family` (Household) or `personal`. The client sends the active space in the `X-Portfolio` header (`?pf=` for export links); server helpers `pf()`, `PF_ACCOUNTS`, `own_account`, `visible_tx`. Transfers to accounts of other spaces are visible in both, are not income/expense, and count in net worth.
 - **Optional tabs** per space: `portfolios.features` (JSON). Core tabs are fixed; `OPTIONAL_FEATURES` = budget, obiettivi, emergenza, calendario, mutuo, ripartizione, investimenti, risparmio; hiding a tab never deletes data.
 - **Amounts are integer cents** everywhere in the API and DB.
-- **Reference currency** (1.1.0; eight since 1.3): one per installation, `EUR USD GBP JPY CHF CAD AUD INR`, setting `currency` (global, no `@space`), `util.CURRENCIES` (namedtuple: symbol, locale, decimal, thousands, digits, prefix, space, name) mirrored by `CURRENCIES` in app.js, `util.currency_of`, `PUT /api/settings/currency` (needs `confirm: true`). It is a **label: amounts are never converted** (still integer cents, also for the yen, which is shown with 0 decimals). Each currency uses its country's format (CHF `'` thousands as Chrome/Edge write it, INR lakh grouping, JPY via `en-JP` for the plain ¥). Market prices are converted into it (`{base}{cur}=X`, London pence handled); `price_eur` keeps its historical name but holds the price in the reference currency, and a change clears it and `price_history`. UI: `setCurrency()` sets `CUR`, `CUR_SYM`, `LOCALE`, `DEC`, `DIGITS`, `SYM_FIRST` and the formatters; **never test a currency code for formatting** (use `DEC`, `DIGITS`, `money`, `money0`, `moneyK`, `moneyInput`, `moneyPlaceholder`, `num`, `CUR_SYM`). Server texts use `util.fmt_money`/`fmt_decimal` (half away from zero, like Intl). Loan indexes: `tools.RATE_INDEX_GROUPS` keyed by currency (first = default), UI offers only the current currency's plus a loan's saved index; any index stays valid server side.
+- **Reference currency** (1.1.0; 2.0.0 list): one per installation, `EUR USD GBP CHF CAD AUD MXN BRL`, setting `currency` (global, no `@space`), `util.CURRENCIES` (namedtuple: symbol, locale, decimal, thousands, digits, prefix, space, name) mirrored by `CURRENCIES` in app.js, `util.currency_of`, `PUT /api/settings/currency` (needs `confirm: true`). It is a **label: amounts are never converted** (still integer cents). Each currency uses its country's format (CHF `'` thousands as Chrome/Edge write it, BRL `R$ 1.234,56`). A saved currency no longer offered (older test installs) is reported as `currency_unavailable` in `/api/meta` with a warning in Settings; old loan indexes stay valid through `tools.LEGACY_RATE_INDEXES`. Market prices are converted into it (`{base}{cur}=X`, London pence handled); `price_eur` keeps its historical name but holds the price in the reference currency, and a change clears it and `price_history`. UI: `setCurrency()` sets `CUR`, `CUR_SYM`, `LOCALE`, `DEC`, `DIGITS`, `SYM_FIRST` and the formatters; **never test a currency code for formatting** (use `DEC`, `DIGITS`, `money`, `money0`, `moneyK`, `moneyInput`, `moneyPlaceholder`, `num`, `CUR_SYM`). Server texts use `util.fmt_money`/`fmt_decimal` (half away from zero, like Intl). Loan indexes: `tools.RATE_INDEX_GROUPS` keyed by currency (first = default), UI offers only the current currency's plus a loan's saved index; any index stays valid server side.
 - **Number input**: one parser everywhere (`util.parse_number` server side, `normNum`/`parseMoney`/`parseSignedMoney`/`parseQty` in app.js). For money "1.500" = 1500 in euro (in dollars the dot is always the decimal separator); for quantities and prices "9.014" = 9.014. Display follows the reference currency.
 - **Rebalancing** (1.1.0): `tools.rebalance` + `GET/POST /api/investments/rebalance` (POST calculates, `save: true` stores the settings in `rebalance@<space>`). Mode `class` (asset classes + `liquidità` = broker cash, `non specificato` = accounts valued as a whole) or `security` (`h:<holding id>`, `cash`, `acc:<account id>`); values are the same as the Allocation chart; buys only (new money to the gaps) or buys and sells (exactly to target); `excluded {class: [...], security: [...]}` leaves rows out (a security excluded in `security` also leaves its class); a threshold of 0 = not used. It never records trades.
 - **Monthly balance** (`tools.savings`): saved = month surplus (income − spent − other spaces), never the change in cash; "invested" = buys − sells of non-money-market securities, shown separately; money-market ETFs (`asset_class` `monetario`) count as cash.
 - **Loans** (1.4.0): `recurring.amortization` NULL = French (constant installment), `'constant'` = constant principal (Italian / SAC). Use `tools.loan_plan(rec)` for a schedule and `tools.scheduled_amount(rec, n)` for the amount of installment n: constant-principal loans record each installment from the schedule and keep `recurring.amount` = the next installment (so every other `amount` reader stays right).
+- **Languages** (2.0.0): English, Español, Português (Brasil), Deutsch, Français, Italiano. **The English text is the key**: UI `T('…', {values})` and `tn(one, other, n)` in app.js (never `t`: local variables shadow it), server `i18n.t("…", **values)` / `i18n.tn()`; translations in `static/i18n/<code>.json`, served with the language as `GET /i18n.js` (`window.HC_I18N`). The language is stored in the keystore (`Vault.language()`, chosen in setup, `PUT /api/auth/language`); before setup cookie `hc_lang` or Accept-Language. Never build sentences from pieces; `translatePage()` handles index.html. Activity-log actions are stored in English and translated on screen; details are translated when written. Exports use the language for headers and sheets; the importer recognizes all six. Maintainer tools (outside the repo) check that every key exists in every file.
+- **Category codes** (2.0.0, schema 16): default and system categories have `categories.code` (`util.SYSTEM_CODES`, `db.assign_category_codes`); always find them by code (`app.system_code()`, `TECH_CODES_SQL`), never by name, since names follow the language at creation and the user may rename them. Legacy names stay accepted as a fallback.
 - **Import dates** (1.4.0): `importer.detect_date_order()` reads day/month vs month/day from the file; ambiguous files fall back to `util.DATE_ORDER_DEFAULT` by currency (USD = month first). `parse_date(value, order)`.
 - **Investment plans**: a recurring transfer with `holding_id` buys units automatically at an estimated price (`external_id` `pac:<rid>:<date>`, note "estimated price"); editing the trade marks it "verified price"; unverified after 30 days → reminder.
 - **Security guard**: Host check (DNS rebinding), `Sec-Fetch-Site: cross-site` rejected, writes need `X-HomeCoin: 1` + local Origin (CSRF), strict CSP, Permissions-Policy, no server signature, session cookie `hc_session_{port}` (`hc_session_demo_{port}` in demo), all `/api/*` except `/api/auth/*` return 401 while locked.
@@ -91,7 +95,7 @@ Key concepts:
 
 ## Conventions
 
-- **Language**: everything user-visible, code comments and docs in **US English** (sentence case labels). Exceptions on purpose:
+- **Language**: code comments and docs in **US English**; every user-visible text written in English (sentence case labels) and translated into the other five languages in the same change. Exceptions on purpose:
   - internal codes stay Italian because they are stored in existing databases: route keys (`#/movimenti`), feature keys, account type codes (`corrente`, `investimenti`…), asset classes (`azioni`, `monetario`, `liquidità`, `non specificato`…), categorizer sources `'regola'`/`'storico'`;
   - legacy Italian category names with a role in calculations must keep working next to the English ones (`Rettifica saldo`, `Altri investimenti (esclusi)`, `Versamenti conto casa`, `Versament%`, `prezzo stimato`): never rename user data, accept both spellings.
 - **Versioning**: one numbering, same locally and on GitHub (SemVer from 1.0.0). A release updates `VERSION` in `homecoin/app.py`, `CHANGELOG.md` (newest first), the README badge and footer, and `SECURITY.md` if the supported line changes. The schema has its own `SCHEMA_VERSION`; add migrations to `db.migrate()` idempotently.
@@ -104,7 +108,7 @@ Key concepts:
 
 - Price source stays **Yahoo Finance**; Investing.com was rejected (no API, scraping forbidden by its terms). Codes not quoted as-is (Morningstar `0P…`, ISIN) are resolved to the full Yahoo symbol (e.g. `.F`).
 - Mortgage: fixed / variable / mixed rate (index + spread); indexes per reference currency, list in `tools.RATE_INDEX_GROUPS` and `RATE_INDEXES` in app.js, default by reference currency, current value typed by hand (no download); APR, ARM caps and ancillary costs are deliberately out of scope.
-- Currencies (1.3): eight, chosen for the widest reach with few currencies; no CNY (Yahoo is blocked in mainland China and the UI is English). Number format = the currency's country, no separate format setting.
+- Languages and currencies (2.0.0): Western languages only (six), and the main currencies of those languages (eight); the currency is suggested from the chosen language. Number format = the currency's country, no separate format setting.
 - Variable recurring items record nothing on their own: they link the real transaction (keyword + plausible amount) and forecast from the median of the last 6.
 - Calendar: "cash in accounts" (operating accounts only) is distinct from the emergency fund "available reserve" (accounts + uninvested broker cash + money-market ETFs).
 - Estimated regular income/expenses only for significant amounts (≥ 50 € and ≥ 5% of the largest).
@@ -113,8 +117,8 @@ Key concepts:
 
 ## Known gaps
 
-- No automated tests in the repo: the maintainer keeps a regression + fuzz suite outside it (made-up data only); last full run on 1.4.0.
+- No automated tests in the repo: the maintainer keeps a regression + fuzz suite outside it (made-up data only); last full run on 2.0.0.
 - Automatic updates only work once the GitHub repository is public (the API returns 404 for a private one without a token) and for releases published with their signed manifest.
 - `util.STOPWORDS` contains Italian bank words only (adding English ones would change payee keys of existing data).
-- Activity-log rows written before the translation stay in Italian; old investment-plan notes may read half Italian, half English.
+- Activity-log rows written before the translation stay in Italian; old investment-plan notes may read half Italian, half English. Category names are not renamed when the language changes.
 - Windows only (launchers, data-folder ACL); the Python code is untested elsewhere.

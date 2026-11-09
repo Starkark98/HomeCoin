@@ -5,6 +5,7 @@ import re
 from collections import namedtuple
 from decimal import ROUND_HALF_UP, Decimal, DecimalException
 
+from . import i18n
 FREQUENCIES = {
     "weekly": ("d", 7),
     "monthly": ("m", 1),
@@ -19,12 +20,16 @@ MONTHLY_FACTOR = {
     "quarterly": 1 / 3, "semiannual": 1 / 6, "yearly": 1 / 12,
 }
 
-# system categories with a role in the calculations. Older databases keep the Italian names, so both are recognized.
-BALANCE_ADJUSTMENT = {"Balance adjustment", "Rettifica saldo"}
+# system categories with a role in the calculations, recognized by their fixed code (categories.code); these are all the
+# names they may have (every language, and the Italian of older databases), used to give them the code when created
+from .i18n import all_names as _all_names  # noqa: E402
+BALANCE_ADJUSTMENT = _all_names("balance_adjustment")
 # trades on securities that were not imported (excluded from reports, counted as invested in Savings)
-OTHER_INVESTMENTS = {"Other investments (excluded)", "Altri investimenti (esclusi)"}
+OTHER_INVESTMENTS = _all_names("other_investments")
 # system transactions excluded from reports: neither income nor spending (adjustments stay a separate line of the balance)
 TECH_CATEGORIES = BALANCE_ADJUSTMENT | OTHER_INVESTMENTS
+SYSTEM_CODES = ("balance_adjustment", "other_investments")
+TECH_CODES_SQL = "'balance_adjustment', 'other_investments'"
 
 # reference currency of the whole installation: a label only (amounts are never converted); market prices are converted
 # into it. Each currency uses the number format of its main country (same table as CURRENCIES in app.js):
@@ -34,18 +39,18 @@ CURRENCIES = {
     "EUR": Currency("€", "it-IT", ",", ".", 2, False, True, "Euro"),               # 1.234,56 €
     "USD": Currency("$", "en-US", ".", ",", 2, True, False, "US dollar"),          # $1,234.56
     "GBP": Currency("£", "en-GB", ".", ",", 2, True, False, "British pound"),      # £1,234.56
-    "JPY": Currency("¥", "en-JP", ".", ",", 0, True, False, "Japanese yen"),       # ¥1,235 (no minor unit)
     "CHF": Currency("CHF", "de-CH", ".", "'", 2, True, True, "Swiss franc"),       # CHF 1'234.56 (as Chrome and Edge write it)
     "CAD": Currency("$", "en-CA", ".", ",", 2, True, False, "Canadian dollar"),    # $1,234.56
     "AUD": Currency("$", "en-AU", ".", ",", 2, True, False, "Australian dollar"),  # $1,234.56
-    "INR": Currency("₹", "en-IN", ".", ",", 2, True, False, "Indian rupee"),       # ₹1,23,456.78 (Indian grouping)
+    "MXN": Currency("$", "es-MX", ".", ",", 2, True, False, "Mexican peso"),       # $1,234.56
+    "BRL": Currency("R$", "pt-BR", ",", ".", 2, True, True, "Brazilian real"),     # R$ 1.234,56
 }
 CURRENCY = {"code": "EUR"}  # current one, loaded from the settings when HomeCoin is unlocked (activity log texts)
 # date format of the Excel exports, as in the currency's country (the UI shows "02 Nov 26", the same everywhere)
-DATE_EXCEL = {"EUR": "DD/MM/YYYY", "USD": "MM/DD/YYYY", "GBP": "DD/MM/YYYY", "JPY": "YYYY/MM/DD", "CHF": "DD.MM.YYYY",
-              "CAD": "YYYY-MM-DD", "AUD": "DD/MM/YYYY", "INR": "DD/MM/YYYY"}
+DATE_EXCEL = {"EUR": "DD/MM/YYYY", "USD": "MM/DD/YYYY", "GBP": "DD/MM/YYYY", "CHF": "DD.MM.YYYY",
+              "CAD": "YYYY-MM-DD", "AUD": "DD/MM/YYYY", "MXN": "DD/MM/YYYY", "BRL": "DD/MM/YYYY"}
 # symbols and codes stripped from typed or imported amounts (longest first: "US$" before "$")
-_MONEY_MARKS = re.compile(r"US\$|C\$|A\$|CA\$|AU\$|Rs\.?|CHF|Fr\.|EUR|USD|GBP|JPY|CAD|AUD|INR|[€$£¥￥₹]")
+_MONEY_MARKS = re.compile(r"US\$|C\$|A\$|CA\$|AU\$|MX\$|R\$|CHF|Fr\.|EUR|USD|GBP|CAD|AUD|MXN|BRL|[€$£]")
 
 
 def currency_of(db):
@@ -53,12 +58,8 @@ def currency_of(db):
     return r[0] if r and r[0] in CURRENCIES else "EUR"
 
 
-def _group(int_part, sep, indian=False):
-    """Thousands groups of a string of digits: 1.234.567 or, in India, 12,34,567 (lakh and crore)."""
-    if indian and len(int_part) > 3:
-        head, tail = int_part[:-3], int_part[-3:]
-        pairs = [head[max(0, i - 2):i] for i in range(len(head), 0, -2)][::-1]
-        return sep.join(pairs + [tail])
+def _group(int_part, sep):
+    """Thousands groups of a string of digits: 1.234.567 · 1,234,567 · 1'234'567."""
     return f"{int(int_part):,}".replace(",", sep)
 
 
@@ -66,15 +67,15 @@ def fmt_number(value, code=None, digits=None):
     """A number in the format of the currency's country, without the symbol: 1.234,5 · 1,234.5 · 1'234.5."""
     c = CURRENCIES[code or CURRENCY["code"]]
     digits = c.digits if digits is None else digits
-    # half away from zero, like the browser (Intl.NumberFormat): ¥0.5 → ¥1, not the "round half to even" of Python
+    # half away from zero, like the browser (Intl.NumberFormat): 0.005 → 0.01, not the "round half to even" of Python
     d = Decimal(str(abs(value))).quantize(Decimal(1).scaleb(-digits), rounding=ROUND_HALF_UP)
     int_part, _, frac = f"{d:f}".partition(".")
-    out = _group(int_part, c.thousands, indian=c.locale == "en-IN")
+    out = _group(int_part, c.thousands)
     return ("−" if value < 0 and d else "") + out + (c.decimal + frac if frac else "")
 
 
 def fmt_money(cents, code=None):
-    """Amount for texts written by the server (activity log, warnings): 1.234,56 € · $1,234.56 · CHF 1'234.56 · ¥1,235."""
+    """Amount for texts written by the server (activity log, warnings): 1.234,56 € · $1,234.56 · CHF 1'234.56 · R$ 1.234,56."""
     code = code or CURRENCY["code"]
     c = CURRENCIES[code]
     n = fmt_number(abs(cents) / 100, code)
@@ -117,7 +118,7 @@ def parse_number(value):
     if isinstance(value, (int, float)):
         v = float(value)  # also from JSON: NaN and Infinity are not numbers here either
         if v != v or v in (float("inf"), float("-inf")):
-            raise ValueError("invalid number")
+            raise ValueError(i18n.t("invalid number"))
         return v
     s = _MONEY_MARKS.sub("", str(value).strip()).replace("’", "").replace(" ", "").replace(" ", "").replace("'", "").replace("−", "-")
     if not s:
@@ -130,7 +131,7 @@ def parse_number(value):
         s = s.replace(".", "")
     v = float(s)  # ValueError if it is not a number
     if v != v or v in (float("inf"), float("-inf")):
-        raise ValueError("invalid number")
+        raise ValueError(i18n.t("invalid number"))
     return v
 
 

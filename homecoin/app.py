@@ -15,6 +15,7 @@ from werkzeug.exceptions import HTTPException
 from . import audit
 from . import db as dbm
 from . import forecast
+from . import i18n
 from . import importer
 from . import security
 from .db import get_db
@@ -26,7 +27,7 @@ from . import updater
 from . import util
 from .util import FREQUENCIES, add_months, months_between, parse_date, parse_number, rule_matches
 
-VERSION = "1.4.0"
+VERSION = "2.0.0"
 STATIC_DIR = dbm.BASE_DIR / "static"
 KINDS = ("expense", "income", "transfer")
 ACCOUNT_TYPES = ("corrente", "risparmio", "credito", "prepagata", "contanti", "investimenti", "altro")
@@ -59,25 +60,25 @@ class ApiError(Exception):
 def body():
     data = request.get_json(silent=True)
     if not isinstance(data, dict):
-        raise ApiError("Invalid request")
+        raise ApiError(i18n.t("Invalid request"))
     return data
 
 
 def as_int(value, name, required=True, minimum=None):
     if value in (None, ""):
         if required:
-            raise ApiError(f"Required field: {name}")
+            raise ApiError(i18n.t("Required field: {name}", name=i18n.t(name)))
         return None
     if isinstance(value, bool) or (isinstance(value, float) and not value.is_integer()):
-        raise ApiError(f"Invalid value: {name}")  # true/false or decimals must not be silently truncated
+        raise ApiError(i18n.t("Invalid value: {name}", name=i18n.t(name)))  # true/false or decimals must not be silently truncated
     try:
         v = int(value)
     except (TypeError, ValueError, OverflowError):
-        raise ApiError(f"Invalid value: {name}")
+        raise ApiError(i18n.t("Invalid value: {name}", name=i18n.t(name)))
     if minimum is not None and v < minimum:
-        raise ApiError(f"Invalid value: {name}")
+        raise ApiError(i18n.t("Invalid value: {name}", name=i18n.t(name)))
     if abs(v) > MAX_INT:  # huge figures would overflow the totals (and every page with them)
-        raise ApiError(f"Value too large: {name}")
+        raise ApiError(i18n.t("Value too large: {name}", name=i18n.t(name)))
     return v
 
 
@@ -90,7 +91,7 @@ def as_dict(value, name):
     if value in (None, ""):
         return {}
     if not isinstance(value, dict):
-        raise ApiError(f"Invalid data: {name}")
+        raise ApiError(i18n.t("Invalid data: {name}", name=i18n.t(name)))
     return value
 
 
@@ -98,18 +99,18 @@ def as_list(value, name):
     if value in (None, ""):
         return []
     if not isinstance(value, list):
-        raise ApiError(f"Invalid list: {name}")
+        raise ApiError(i18n.t("Invalid list: {name}", name=i18n.t(name)))
     return value
 
 
 def as_date(value, name="date", required=True):
     if value in (None, ""):
         if required:
-            raise ApiError(f"Required field: {name}")
+            raise ApiError(i18n.t("Required field: {name}", name=i18n.t(name)))
         return None
     d = parse_date(value)
     if not d:
-        raise ApiError(f"Invalid date: {name}")
+        raise ApiError(i18n.t("Invalid date: {name}", name=i18n.t(name)))
     return d.isoformat()
 
 
@@ -126,7 +127,7 @@ def tx_date(value):
     """Date of a transaction or a trade: no typos like 2062 or 1926."""
     d = as_date(value)
     if not ("1990-01-01" <= d <= (dt.date.today() + dt.timedelta(days=366)).isoformat()):
-        raise ApiError(f"Date out of range ({d}): check the year")
+        raise ApiError(i18n.t("Date out of range ({d}): check the year", d=d))
     return d
 
 
@@ -137,9 +138,9 @@ def as_rate(value):
     try:
         v = float(str(value).replace(",", "."))
     except ValueError:
-        raise ApiError("Invalid rate")
+        raise ApiError(i18n.t("Invalid rate"))
     if not 0 <= v <= 50:
-        raise ApiError("Invalid rate")
+        raise ApiError(i18n.t("Invalid rate"))
     return v
 
 
@@ -150,29 +151,29 @@ def rate_from_body(b):
         return {"rate_type": None, "rate": None, "fixed_years": None, "rate_index": None, "spread": None, "index_value": None}
     kind = kind or "fixed"
     if kind not in ("fixed", "variable", "mixed"):
-        raise ApiError("Invalid rate type")
+        raise ApiError(i18n.t("Invalid rate type"))
     out = {"rate_type": kind, "rate": None, "fixed_years": None, "rate_index": None, "spread": None, "index_value": None}
     if kind in ("fixed", "mixed"):
         out["rate"] = as_rate(b.get("rate"))
         if out["rate"] is None:
-            raise ApiError("Enter the fixed rate")
+            raise ApiError(i18n.t("Enter the fixed rate"))
     if kind == "mixed":
         out["fixed_years"] = as_int(b.get("fixed_years"), "years at fixed rate", minimum=1)
     if kind in ("variable", "mixed"):
         idx = b.get("rate_index") or tools.DEFAULT_RATE_INDEX[util.currency_of(get_db())]
         if as_key(idx) not in tools.RATE_INDEXES:
-            raise ApiError("Invalid index")
+            raise ApiError(i18n.t("Invalid index"))
         out["rate_index"], out["spread"] = idx, as_rate(b.get("spread"))
         if out["spread"] is None:
-            raise ApiError("Enter the spread")
+            raise ApiError(i18n.t("Enter the spread"))
         iv = b.get("index_value")  # current value of the index, optional (may be negative)
         if iv not in (None, ""):
             try:
                 out["index_value"] = float(str(iv).replace(",", "."))
             except ValueError:
-                raise ApiError("Invalid index value")
+                raise ApiError(i18n.t("Invalid index value"))
             if not -5 <= out["index_value"] <= 20:
-                raise ApiError("Invalid index value")
+                raise ApiError(i18n.t("Invalid index value"))
     return out
 
 
@@ -212,7 +213,7 @@ def portfolio_of(table, id_):
 def own_account(account_id):
     """The account must exist and belong to the active space."""
     if portfolio_of("accounts", account_id) != pf():
-        raise ApiError("Account not found in this space")
+        raise ApiError(i18n.t("Account not found in this space"))
 
 
 def id_list(value, name, limit=5000):
@@ -220,7 +221,7 @@ def id_list(value, name, limit=5000):
     if value in (None, ""):
         return []
     if not isinstance(value, list):
-        raise ApiError(f"Invalid list: {name}")
+        raise ApiError(i18n.t("Invalid list: {name}", name=i18n.t(name)))
     return [as_int(i, name) for i in value[:limit]]
 
 
@@ -231,32 +232,32 @@ def not_archived(*account_ids):
             continue
         r = get_db().execute("SELECT name, archived FROM accounts WHERE id = ?", (aid,)).fetchone()
         if r and r["archived"]:
-            raise ApiError(f"The account \"{r['name']}\" is archived: reactivate it in Accounts to use it", 409)
+            raise ApiError(i18n.t("The account \"{name}\" is archived: reactivate it in Accounts to use it", name=r['name']), 409)
 
 
 def check_refs(kind, account_id, to_account_id, category_id):
     acc_pf = portfolio_of("accounts", account_id)
     if acc_pf is None:
-        raise ApiError("Account not found")
+        raise ApiError(i18n.t("Account not found"))
     if kind == "transfer":  # the destination may also be in another space
         if to_account_id is None or not row_exists("accounts", to_account_id):
-            raise ApiError("Select the destination account")
+            raise ApiError(i18n.t("Select the destination account"))
         if to_account_id == account_id:
-            raise ApiError("The source and destination accounts must be different")
+            raise ApiError(i18n.t("The source and destination accounts must be different"))
         return None, to_account_id
     if category_id is not None:
         c = get_db().execute("SELECT kind, portfolio_id FROM categories WHERE id = ?", (category_id,)).fetchone()
         if not c or c["portfolio_id"] != acc_pf:
-            raise ApiError("Category not found in this space")
+            raise ApiError(i18n.t("Category not found in this space"))
         if c["kind"] != kind:
-            raise ApiError("The category does not match the transaction type")
+            raise ApiError(i18n.t("The category does not match the transaction type"))
     return category_id, None
 
 
 def tx_from_body(b):
     kind = b.get("kind")
     if kind not in KINDS:
-        raise ApiError("Invalid transaction type")
+        raise ApiError(i18n.t("Invalid transaction type"))
     amount = as_int(b.get("amount"), "amount", minimum=1)
     account_id = as_int(b.get("account_id"), "account")
     to_account_id = as_int(b.get("to_account_id"), "destination account", required=False)
@@ -354,7 +355,7 @@ def create_app(port):
             if not request.path.startswith(("/api/auth/", "/api/update", "/api/backup", "/api/restore", "/api/export/")) and \
                     vault.valid_import_token(request.headers.get("X-HomeCoin-Token")):
                 return None
-            return jsonify(error="HomeCoin is locked: enter the password", locked=True), 401
+            return jsonify(error=i18n.t("HomeCoin is locked: enter the password"), locked=True), 401
 
     @app.after_request
     def audit_event(resp):
@@ -363,7 +364,8 @@ def create_app(port):
         if ev and resp.status_code < 400 and vault.dek is not None and not g.get("audit_skip"):
             if request.endpoint.startswith("export_"):  # which period left unencrypted
                 a = request.args
-                note(f"{a.get('from') or 'start'} → {a.get('to') or 'today'}" if a.get("from") or a.get("to") else "whole period")
+                note(f"{a.get('from') or i18n.t('start')} → {a.get('to') or i18n.t('today')}" if a.get("from") or a.get("to")
+                     else i18n.t("whole period"))
             kind, action = ev
             kind, action, detail = g.get("audit_kind") or kind, g.get("audit_action") or action, g.get("audit_detail") or ""
             if not detail and request.is_json:  # creations and edits: the name of what was touched is enough
@@ -371,7 +373,7 @@ def create_app(port):
                 detail = str(b.get("name") or b.get("ticker") or "") if isinstance(b, dict) else ""
             if request.endpoint in ("auth_login", "auth_recover", "auth_setup"):
                 if vault.failed_before:
-                    detail = f"after {vault.failed_before} failed attempts"
+                    detail = i18n.t("after {n} failed attempts", n=vault.failed_before)
                     kind = "security"
             elif not request.cookies.get(COOKIE) or not vault.valid(request.cookies.get(COOKIE), touch=False):
                 detail = (detail + " · " if detail else "") + "from script with temporary code"
@@ -425,7 +427,7 @@ def create_app(port):
 
     @app.errorhandler(dbm.Locked)
     def locked_error(_e):
-        return jsonify(error="HomeCoin is locked: enter the password", locked=True), 401
+        return jsonify(error=i18n.t("HomeCoin is locked: enter the password"), locked=True), 401
 
     # --------------------------------------------------------- access
 
@@ -447,11 +449,12 @@ def create_app(port):
     @app.get("/api/auth/status")
     def auth_status():
         demo = {"demo": True, "demo_password": __import__("homecoin.demo", fromlist=["PASSWORD"]).PASSWORD} if DEMO else {}
-        return jsonify(version=VERSION, **vault.status(request.cookies.get(COOKIE)), **demo)
+        return jsonify(version=VERSION, **vault.status(request.cookies.get(COOKIE)), **demo,
+                       languages=i18n.LANGUAGES)
 
     @app.post("/api/auth/setup")
     def auth_setup():
-        token, recovery = vault.setup(field("password"))
+        token, recovery = vault.setup(field("password"), field("language") or None)
         return with_session(token, recovery_key=recovery)
 
     @app.post("/api/auth/login")
@@ -496,7 +499,7 @@ def create_app(port):
         """Activity log (all spaces), newest first; optional filter by type."""
         kind = request.args.get("kind") or ""
         if kind and kind not in audit.KINDS:
-            raise ApiError("Invalid type")
+            raise ApiError(i18n.t("Invalid type"))
         limit = min(as_int(request.args.get("limit") or 200, "limit", minimum=1), 1000)
         offset = as_int(request.args.get("offset") or 0, "offset", minimum=0)
         db = get_db()
@@ -529,11 +532,11 @@ def create_app(port):
     def auth_protect_folder():
         """At the user's request: data folder accessible only to their Windows user (plus SYSTEM and administrators)."""
         if DEMO:
-            raise ApiError("Not needed in the demo version")
+            raise ApiError(i18n.t("Not needed in the demo version"))
         try:
             others = security.restrict_data_dir()
         except Exception as exc:  # also timeout or missing PowerShell: a clear message, never a 500 error
-            raise ApiError(f"Permissions not changed: {exc}")
+            raise ApiError(i18n.t("Permissions not changed: {exc}", exc=exc))
         return jsonify(ok=True, folder_others=others)
 
     @app.post("/api/auth/quit")
@@ -553,6 +556,13 @@ def create_app(port):
     @app.post("/api/auth/ping")
     def auth_ping():  # the user is using the page: postpone auto-lock (the guard already does it)
         return jsonify(ok=True)
+
+    @app.put("/api/auth/language")
+    def auth_language():
+        """Interface language (kept in the keystore, so the sign-in screen uses it too)."""
+        code = vault.set_language(field("language"))
+        note(i18n.LANGUAGES[code])
+        return jsonify(ok=True, language=code)
 
     @app.put("/api/auth/settings")
     def auth_settings():
@@ -614,7 +624,7 @@ def create_app(port):
     def update_settings():
         auto = body().get("auto")
         if not isinstance(auto, bool):
-            raise ApiError("Invalid value")
+            raise ApiError(i18n.t("Invalid value"))
         db = get_db()
         save_setting(db, "update_auto", "1" if auto else "0")
         db.commit()
@@ -624,19 +634,19 @@ def create_app(port):
     def update_apply():
         """Download the latest signed release, verify it, back up the database, install it and restart HomeCoin."""
         if DEMO:
-            raise ApiError("Updates are disabled in the demo version")
+            raise ApiError(i18n.t("Updates are disabled in the demo version"))
         kind = updater.install_kind()
         if kind == "dev":
-            raise ApiError("This is a development copy (git): update it with git, not from here")
+            raise ApiError(i18n.t("This is a development copy (git): update it with git, not from here"))
         if kind not in ("installer", "zip"):
-            raise ApiError("Automatic updates are not available for this installation: download the new version from GitHub")
+            raise ApiError(i18n.t("Automatic updates are not available for this installation: download the new version from GitHub"))
         if not update_busy.acquire(blocking=False):
-            raise ApiError("An update is already in progress", 409)
+            raise ApiError(i18n.t("An update is already in progress"), 409)
         try:
             try:
                 info = updater.check(VERSION)  # again, signed: never trust an earlier answer
                 if not info["available"]:
-                    raise ApiError("HomeCoin is already up to date", 409)
+                    raise ApiError(i18n.t("HomeCoin is already up to date"), 409)
                 path = updater.download(info["manifest"], kind, info.get("assets"))
                 dbm.backup_now("update")
                 if kind == "installer":
@@ -665,7 +675,7 @@ def create_app(port):
         if not DEMO:
             abort(404)
         from . import demo as demom
-        return Response(demom.sample_statement(), mimetype="text/csv",
+        return Response(demom.sample_statement(currency=util.currency_of(get_db())), mimetype="text/csv",
                         headers={"Content-Disposition": 'attachment; filename="sample-bank-statement.csv"'})
 
     @app.errorhandler(HTTPException)
@@ -680,6 +690,21 @@ def create_app(port):
     def index():
         resp = send_from_directory(STATIC_DIR, "index.html")
         resp.headers["Cache-Control"] = "no-cache"
+        return resp
+
+    @app.get("/i18n.js")
+    def i18n_script():
+        """Interface language and its translations, loaded before app.js (the language is in the keystore, readable
+        before sign-in; the translations are public texts of the program, no user data)."""
+        if vault.configured():
+            code = vault.language()
+        else:  # first start: the language picked on the welcome screen (cookie), else the browser's
+            code = request.cookies.get("hc_lang")
+            code = i18n.set_language(code if code in i18n.LANGUAGES else i18n.best_match(request.headers.get("Accept-Language")))
+        data = {"lang": code, "languages": i18n.LANGUAGES, "t": i18n.table(code)}
+        resp = Response("window.HC_I18N = " + json.dumps(data, ensure_ascii=False).replace("</", "<\\/") + ";\n",
+                        mimetype="text/javascript")
+        resp.headers["Cache-Control"] = "no-store"
         return resp
 
     @app.get("/static/<path:path>")
@@ -720,6 +745,9 @@ def create_app(port):
         return jsonify(
             version=VERSION,
             currency=load_currency(),
+            # a currency no longer offered (saved by an older version): HomeCoin uses the euro and Settings says so
+            currency_unavailable=(lambda r: r[0] if r and r[0] not in util.CURRENCIES else None)(
+                get_db().execute("SELECT value FROM settings WHERE key = 'currency'").fetchone()),
             data_dir=str(dbm.DATA_DIR),
             legacy_copies=[] if DEMO else dbm.legacy_copies(),  # old data folders left by the move, to delete
             last_backup=(db.execute("SELECT value FROM settings WHERE key = 'last_backup_download'").fetchone() or [None])[0],
@@ -743,20 +771,21 @@ def create_app(port):
         b, db = body(), get_db()
         code = as_key(b.get("currency"))
         if code not in util.CURRENCIES:
-            raise ApiError("Invalid currency")
+            raise ApiError(i18n.t("Invalid currency"))
         old = util.currency_of(db)
         if code == old:
             g.audit_skip = True
             return jsonify(ok=True, currency=code, prices_cleared=0)
         if b.get("confirm") is not True:  # the client shows the warning first: no change by mistake
-            raise ApiError("Confirm the change: amounts are not converted", 409)
+            raise ApiError(i18n.t("Confirm the change: amounts are not converted"), 409)
         cleared = db.execute("UPDATE holdings SET price_eur = NULL WHERE price_eur IS NOT NULL").rowcount
         cleared += db.execute("DELETE FROM price_history").rowcount
         db.execute("INSERT INTO settings(key, value) VALUES ('currency', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
                    (code,))
         db.commit()
         load_currency()
-        note(f"{old} → {code}, amounts not converted" + (" · market prices to update" if cleared else ""))
+        note(i18n.t("{old} → {new}, amounts not converted", old=old, new=code)
+             + (" · " + i18n.t("market prices to update") if cleared else ""))
         return jsonify(ok=True, currency=code, prices_cleared=cleared)
 
     # --------------------------------------------------------- spaces
@@ -764,8 +793,8 @@ def create_app(port):
     def portfolio_from_body(b):
         ptype = b.get("type")
         if ptype not in PORTFOLIO_TYPES:
-            raise ApiError("Invalid space type")
-        name = as_text(b.get("name"), 40) or dbm.PORTFOLIO_TYPES[ptype]
+            raise ApiError(i18n.t("Invalid space type"))
+        name = as_text(b.get("name"), 40) or i18n.space_name(ptype)
         return name, ptype, as_color(b.get("color"), "#ec4899"), as_text(b.get("icon"), 8) or "🏠"
 
     @app.get("/api/portfolios")
@@ -778,7 +807,7 @@ def create_app(port):
         if f is None:
             return list(dbm.DEFAULT_FEATURES[ptype])
         if not isinstance(f, list) or any(x not in dbm.OPTIONAL_FEATURES for x in f):
-            raise ApiError("Invalid tabs")
+            raise ApiError(i18n.t("Invalid tabs"))
         return [x for x in dbm.OPTIONAL_FEATURES if x in f]  # stable order, no duplicates
 
     @app.post("/api/portfolios")
@@ -794,7 +823,7 @@ def create_app(port):
     def portfolio_update(pid_):
         db = get_db()
         if not row_exists("portfolios", pid_):
-            raise ApiError("Space not found", 404)
+            raise ApiError(i18n.t("Space not found"), 404)
         b = body()
         name, ptype, color, icon = portfolio_from_body(b)
         old = db.execute("SELECT type, features FROM portfolios WHERE id = ?", (pid_,)).fetchone()
@@ -805,10 +834,11 @@ def create_app(port):
         archived = 1 if b.get("archived") else 0
         if archived and db.execute("SELECT COUNT(*) FROM portfolios WHERE archived = 0 AND id != ?",
                                    (pid_,)).fetchone()[0] == 0:
-            raise ApiError("At least one active space must remain")
-        changes = [f"type {dbm.PORTFOLIO_TYPES[old_type]} → {dbm.PORTFOLIO_TYPES[ptype]}" if old_type != ptype else "",
-                   ("tabs added: " + ", ".join(sorted(set(feats) - set(old_f)))) if set(feats) - set(old_f) else "",
-                   ("tabs hidden: " + ", ".join(sorted(set(old_f) - set(feats)))) if set(old_f) - set(feats) else ""]
+            raise ApiError(i18n.t("At least one active space must remain"))
+        changes = [i18n.t("type {old} → {new}", old=i18n.t(dbm.PORTFOLIO_TYPES[old_type]), new=i18n.t(dbm.PORTFOLIO_TYPES[ptype]))
+                   if old_type != ptype else "",
+                   i18n.t("tabs added: {tabs}", tabs=", ".join(sorted(set(feats) - set(old_f)))) if set(feats) - set(old_f) else "",
+                   i18n.t("tabs hidden: {tabs}", tabs=", ".join(sorted(set(old_f) - set(feats)))) if set(old_f) - set(feats) else ""]
         if any(changes):
             note(" · ".join([name, *[c for c in changes if c]]))
         db.execute("UPDATE portfolios SET name=?, type=?, color=?, icon=?, archived=?, features=? WHERE id=?",
@@ -820,9 +850,9 @@ def create_app(port):
     def portfolio_delete(pid_):
         db = get_db()
         if db.execute("SELECT COUNT(*) FROM accounts WHERE portfolio_id = ?", (pid_,)).fetchone()[0]:
-            raise ApiError("The space contains accounts: move or delete them first, or archive the space", 409)
+            raise ApiError(i18n.t("The space contains accounts: move or delete them first, or archive the space"), 409)
         if db.execute("SELECT COUNT(*) FROM portfolios WHERE id != ?", (pid_,)).fetchone()[0] == 0:
-            raise ApiError("You can't delete the only space")
+            raise ApiError(i18n.t("You can't delete the only space"))
         note((db.execute("SELECT name FROM portfolios WHERE id = ?", (pid_,)).fetchone() or [""])[0])
         db.execute("DELETE FROM categories WHERE portfolio_id = ?", (pid_,))
         db.execute("DELETE FROM people WHERE portfolio_id = ?", (pid_,))
@@ -836,7 +866,7 @@ def create_app(port):
     def account_from_body(b):
         name = as_text(b.get("name"), 60)
         if not name:
-            raise ApiError("The account name is required")
+            raise ApiError(i18n.t("The account name is required"))
         t = b.get("type") if b.get("type") in ACCOUNT_TYPES else "altro"
         return (name, t, as_color(b.get("color")), as_text(b.get("icon"), 8) or "🏦",
                 as_int(b.get("initial_balance") or 0, "opening balance"), 1 if b.get("archived") else 0)
@@ -851,7 +881,7 @@ def create_app(port):
         db = get_db()
         vals = account_from_body(body())
         if (dup := same_name("accounts", vals[0])):
-            raise ApiError(f"The account \"{dup[0]}\" already exists", 409)
+            raise ApiError(i18n.t("The account \"{value}\" already exists", value=dup[0]), 409)
         cur = db.execute(
             "INSERT INTO accounts(portfolio_id, name, type, color, icon, initial_balance, archived) VALUES (?,?,?,?,?,?,?)",
             (pf(), *vals))
@@ -864,24 +894,24 @@ def create_app(port):
         own_account(aid)
         vals = account_from_body(body())
         if (dup := same_name("accounts", vals[0], aid)):
-            raise ApiError(f"The account \"{dup[0]}\" already exists", 409)
+            raise ApiError(i18n.t("The account \"{value}\" already exists", value=dup[0]), 409)
         old_type = db.execute("SELECT type FROM accounts WHERE id = ?", (aid,)).fetchone()[0]
         if old_type == tools.INVEST and vals[1] != tools.INVEST and db.execute(
                 "SELECT 1 FROM trades WHERE account_id = ? UNION SELECT 1 FROM holdings WHERE account_id = ? LIMIT 1",
                 (aid, aid)).fetchone():
-            raise ApiError("The account has securities and trades: it stays an investment account (otherwise the securities "
-                           "would no longer be valued). To close it, sell or delete the securities, or archive it.", 409)
+            raise ApiError(i18n.t("The account has securities and trades: it stays an investment account (otherwise the securities would no longer be valued). To close it, sell or delete the securities, or archive it."), 409)
         if vals[5] and not db.execute("SELECT archived FROM accounts WHERE id = ?", (aid,)).fetchone()[0]:
             active = [r[0] for r in db.execute("SELECT name FROM recurring WHERE active = 1 AND (account_id = ? OR to_account_id = ?)",
                                                (aid, aid))]
             if active:  # they would keep recording transactions on a closed account
-                raise ApiError("Before archiving the account, pause or move the active recurring items linked to it: "
-                               + ", ".join(f"\"{n}\"" for n in active), 409)
+                raise ApiError(i18n.t("Before archiving the account, pause or move the active recurring items linked to it: {items}",
+                                      items=", ".join(f'"{n}"' for n in active)), 409)
         old = db.execute("SELECT name, type, initial_balance, archived FROM accounts WHERE id = ?", (aid,)).fetchone()
-        changes = [f"type {ACCOUNT_TYPE_LABELS.get(old['type'], old['type'])} → {ACCOUNT_TYPE_LABELS.get(vals[1], vals[1])}"
-                   if old["type"] != vals[1] else "",
-                   f"opening balance {audit.eur(old['initial_balance'])} → {audit.eur(vals[4])}" if old["initial_balance"] != vals[4] else "",
-                   ("archived" if vals[5] else "reactivated") if old["archived"] != vals[5] else ""]
+        changes = [i18n.t("type {old} → {new}", old=i18n.t(ACCOUNT_TYPE_LABELS.get(old["type"], old["type"])),
+                          new=i18n.t(ACCOUNT_TYPE_LABELS.get(vals[1], vals[1]))) if old["type"] != vals[1] else "",
+                   i18n.t("opening balance {old} → {new}", old=audit.eur(old["initial_balance"]), new=audit.eur(vals[4]))
+                   if old["initial_balance"] != vals[4] else "",
+                   (i18n.t("archived") if vals[5] else i18n.t("reactivated")) if old["archived"] != vals[5] else ""]
         note(" · ".join([vals[0], *[c for c in changes if c]]))
         db.execute("UPDATE accounts SET name=?, type=?, color=?, icon=?, initial_balance=?, archived=? WHERE id=?", (*vals, aid))
         db.commit()
@@ -897,7 +927,7 @@ def create_app(port):
             " + (SELECT COUNT(*) FROM trades WHERE account_id=?) + (SELECT COUNT(*) FROM holdings WHERE account_id=?)",
             (aid, aid, aid, aid, aid, aid)).fetchone()[0]
         if used:
-            raise ApiError("The account has linked transactions, trades, securities or recurring items: you can archive it instead of deleting it", 409)
+            raise ApiError(i18n.t("The account has linked transactions, trades, securities or recurring items: you can archive it instead of deleting it"), 409)
         note(db.execute("SELECT name FROM accounts WHERE id = ?", (aid,)).fetchone()[0])
         db.execute("DELETE FROM accounts WHERE id = ?", (aid,))
         db.commit()
@@ -908,26 +938,34 @@ def create_app(port):
     def category_from_body(b):
         name = as_text(b.get("name"), 60)
         if not name:
-            raise ApiError("The category name is required")
+            raise ApiError(i18n.t("The category name is required"))
         kind = b.get("kind")
         if kind not in ("expense", "income"):
-            raise ApiError("Invalid category type")
+            raise ApiError(i18n.t("Invalid category type"))
         flow = b.get("flow") if "flow" in b else ("other" if name in OTHER_FLOW_NAMES else "")
         return (name, kind, as_color(b.get("color"), "#94a3b8"), as_text(b.get("icon"), 8) or "📦",
                 as_int(b.get("budget") or 0, "budget", minimum=0),
                 "other" if kind == "expense" and flow == "other" else "")
+
+    def system_code(db, pid, name):
+        """A new category named like a system one (any language) gets its code, if the space does not have it yet."""
+        code = i18n.code_of_name(name)
+        if code not in util.SYSTEM_CODES:
+            return None
+        taken = db.execute("SELECT 1 FROM categories WHERE portfolio_id = ? AND code = ?", (pid, code)).fetchone()
+        return None if taken else code
 
     @app.post("/api/categories")
     def category_create():
         db = get_db()
         vals = category_from_body(body())
         if (dup := same_name("categories", vals[0], extra=f"AND kind = '{vals[1]}'")):
-            raise ApiError(f"The category \"{dup[0]}\" already exists", 409)
+            raise ApiError(i18n.t("The category \"{value}\" already exists", value=dup[0]), 409)
         try:
-            cur = db.execute("INSERT INTO categories(portfolio_id, name, kind, color, icon, budget, flow) VALUES (?,?,?,?,?,?,?)",
-                             (pf(), *vals))
+            cur = db.execute("INSERT INTO categories(portfolio_id, name, kind, color, icon, budget, flow, code) "
+                             "VALUES (?,?,?,?,?,?,?,?)", (pf(), *vals, system_code(db, pf(), vals[0])))
         except Exception:
-            raise ApiError("A category with this name already exists")
+            raise ApiError(i18n.t("A category with this name already exists"))
         db.commit()
         return jsonify(id=cur.lastrowid), 201
 
@@ -939,36 +977,35 @@ def create_app(port):
         if "flow" not in b:  # updates that don't know the field (e.g. color only): it stays as it was
             flow = db.execute("SELECT flow FROM categories WHERE id = ?", (cid,)).fetchone()
             flow = flow[0] if flow else ""
-        old = db.execute("SELECT kind, name FROM categories WHERE id=? AND portfolio_id=?", (cid, pf())).fetchone()
+        old = db.execute("SELECT kind, name, code FROM categories WHERE id=? AND portfolio_id=?", (cid, pf())).fetchone()
         if not old:
-            raise ApiError("Category not found", 404)
+            raise ApiError(i18n.t("Category not found"), 404)
         if old["kind"] != kind:
-            raise ApiError("You can't change the type of an existing category")
-        if old["name"] in tools.TECH_CATEGORIES and name != old["name"]:
-            raise ApiError(f"\"{old['name']}\" is a system category used in the savings and invested calculations: "
-                           "you can change its color and icon, not its name", 409)
+            raise ApiError(i18n.t("You can't change the type of an existing category"))
+        if old["code"] in util.SYSTEM_CODES and name != old["name"]:
+            raise ApiError(i18n.t("\"{name}\" is a system category used in the savings and invested calculations: you can change its color and icon, not its name", name=old['name']), 409)
         if (dup := same_name("categories", name, cid, extra=f"AND kind = '{kind}'")):
-            raise ApiError(f"The category \"{dup[0]}\" already exists", 409)
+            raise ApiError(i18n.t("The category \"{value}\" already exists", value=dup[0]), 409)
         try:
             db.execute("UPDATE categories SET name=?, color=?, icon=?, budget=?, flow=? WHERE id=?",
                        (name, color, icon, budget, flow, cid))
         except Exception:
-            raise ApiError("A category with this name already exists")
+            raise ApiError(i18n.t("A category with this name already exists"))
         db.commit()
         return jsonify(ok=True)
 
     @app.delete("/api/categories/<int:cid>")
     def category_delete(cid):
         db = get_db()
-        c = db.execute("SELECT name FROM categories WHERE id = ? AND portfolio_id = ?", (cid, pf())).fetchone()
+        c = db.execute("SELECT name, code FROM categories WHERE id = ? AND portfolio_id = ?", (cid, pf())).fetchone()
         if not c:  # not found or in another space: nothing to delete, and we say so
-            raise ApiError("Category not found in this space", 404)
-        if c["name"] in tools.TECH_CATEGORIES:
-            raise ApiError(f"\"{c['name']}\" is a system category used in the savings and invested calculations: it can't be deleted", 409)
+            raise ApiError(i18n.t("Category not found in this space"), 404)
+        if c["code"] in util.SYSTEM_CODES:
+            raise ApiError(i18n.t("\"{name}\" is a system category used in the savings and invested calculations: it can't be deleted", name=c['name']), 409)
         tx, rec = db.execute("SELECT (SELECT COUNT(*) FROM transactions WHERE category_id = ?), "
                              "(SELECT COUNT(*) FROM recurring WHERE category_id = ?)", (cid, cid)).fetchone()
         if (tx or rec) and request.args.get("force") != "1":  # the client asks for confirmation, showing what would be left uncategorized
-            return jsonify(error="Category in use", transactions=tx, recurring=rec), 409
+            return jsonify(error=i18n.t("Category in use"), transactions=tx, recurring=rec), 409
         note(c["name"] + (f" · {tx} transactions left uncategorized" if tx else ""))
         db.execute("DELETE FROM categories WHERE id = ? AND portfolio_id = ?", (cid, pf()))
         db.commit()
@@ -981,10 +1018,10 @@ def create_app(port):
         b = body()
         pattern = as_text(b.get("pattern"), 80).lower()
         if len(pattern) < 2:
-            raise ApiError("The keyword must be at least 2 characters long")
+            raise ApiError(i18n.t("The keyword must be at least 2 characters long"))
         cid = as_int(b.get("category_id"), "category")
         if portfolio_of("categories", cid) != pf():
-            raise ApiError("Category not found")
+            raise ApiError(i18n.t("Category not found"))
         db = get_db()
         db.execute("INSERT OR IGNORE INTO rules(pattern, category_id) VALUES (?,?)", (pattern, cid))
         db.commit()
@@ -1011,7 +1048,7 @@ def create_app(port):
                 db.execute("UPDATE transactions SET category_id=? WHERE id=?", (s["category_id"], t["id"]))
                 n += 1
         db.commit()
-        note(f"{n} transactions categorized")
+        note(i18n.t("{n} transactions categorized", n=n))
         if not n:
             g.audit_skip = True
         return jsonify(updated=n)
@@ -1042,7 +1079,7 @@ def create_app(port):
             f"SELECT 1 FROM transactions WHERE id = ? AND (account_id IN {PF_ACCOUNTS} OR to_account_id IN {PF_ACCOUNTS})",
             (tid, p, p)).fetchone()
         if not ok:
-            raise ApiError("Transaction not found", 404)
+            raise ApiError(i18n.t("Transaction not found"), 404)
 
     def own_tx(tid):
         """To edit or delete: the transaction must start from an account of the active space. A transfer coming
@@ -1051,7 +1088,7 @@ def create_app(port):
         r = get_db().execute("SELECT t.account_id, p.name FROM transactions t JOIN accounts a ON a.id = t.account_id "
                              "JOIN portfolios p ON p.id = a.portfolio_id WHERE t.id = ?", (tid,)).fetchone()
         if portfolio_of("accounts", r[0]) != pf():
-            raise ApiError(f"This transfer comes from the space \"{r[1]}\": edit or delete it from there", 409)
+            raise ApiError(i18n.t("This transfer comes from the space \"{value}\": edit or delete it from there", value=r[1]), 409)
 
     @app.post("/api/transactions")
     def tx_create():
@@ -1067,7 +1104,7 @@ def create_app(port):
                 (t["account_id"], t["kind"], t["amount"], t["date"], f"-{DUP_DAYS} days", t["date"], f"+{DUP_DAYS} days",
                  t["date"])).fetchone()
             if dup:
-                return jsonify(error="This transaction may already exist", duplicate={"date": dup["date"], "description": dup["description"]}), 409
+                return jsonify(error=i18n.t("This transaction may already exist"), duplicate={"date": dup["date"], "description": dup["description"]}), 409
         cur = db.execute(
             """INSERT INTO transactions(date, amount, kind, account_id, to_account_id, category_id,
                                         description, notes, excluded) VALUES (?,?,?,?,?,?,?,?,?)""",
@@ -1116,11 +1153,13 @@ def create_app(port):
             db.execute("UPDATE trades SET external_id = ? WHERE id = ?", (f"pac:{old['recurring_id']}:{t['date']}", o["id"]))
             warning = ("This deposit has an automatic investment plan purchase: update the trade in Investments "
                        "as well (amount, date, units)")
-        changes = [f"amount {audit.eur(old['amount'])} → {audit.eur(t['amount'])}" if old["amount"] != t["amount"] else "",
-                   f"date {old['date']} → {t['date']}" if old["date"] != t["date"] else "",
-                   "account changed" if old["account_id"] != t["account_id"] else "",
-                   "category changed" if old["category_id"] != t["category_id"] else "",
-                   ("excluded from reports" if t["excluded"] else "included in reports") if old["excluded"] != t["excluded"] else ""]
+        changes = [i18n.t("amount {old} → {new}", old=audit.eur(old["amount"]), new=audit.eur(t["amount"]))
+                   if old["amount"] != t["amount"] else "",
+                   i18n.t("date {old} → {new}", old=old["date"], new=t["date"]) if old["date"] != t["date"] else "",
+                   i18n.t("account changed") if old["account_id"] != t["account_id"] else "",
+                   i18n.t("category changed") if old["category_id"] != t["category_id"] else "",
+                   (i18n.t("excluded from reports") if t["excluded"] else i18n.t("included in reports"))
+                   if old["excluded"] != t["excluded"] else ""]
         note(" · ".join([f"{old['date']} {(old['description'] or '')[:40]}", *[c for c in changes if c]]))
         db.execute(
             """UPDATE transactions SET date=?, amount=?, kind=?, account_id=?, to_account_id=?,
@@ -1136,7 +1175,7 @@ def create_app(port):
         own_tx(tid)
         o = db.execute("SELECT date, description, amount FROM transactions WHERE id = ?", (tid,)).fetchone()
         n = drop_pac_trades(db, [tid])
-        note(f"{o['date']} {(o['description'] or '')[:40]} · {audit.eur(o['amount'])}" + (" · with its investment plan purchase" if n else ""))
+        note(f"{o['date']} {(o['description'] or '')[:40]} · {audit.eur(o['amount'])}" + (" · " + i18n.t("with its investment plan purchase") if n else ""))
         db.execute("DELETE FROM transactions WHERE id = ?", (tid,))
         db.commit()
         return jsonify(ok=True, pac_deleted=n)
@@ -1146,7 +1185,7 @@ def create_app(port):
         b = body()
         ids = id_list(b.get("ids"), "id")
         if not ids:
-            raise ApiError("No transactions selected")
+            raise ApiError(i18n.t("No transactions selected"))
         db = get_db()
         p = pf()
         asked = len(ids)
@@ -1154,11 +1193,11 @@ def create_app(port):
             f"SELECT id FROM transactions WHERE id IN ({','.join('?' * len(ids))}) "
             f"AND account_id IN {PF_ACCOUNTS}", (*ids, p))]
         if not ids:
-            raise ApiError("The selected transactions are transfers coming from another space: edit them from there")
+            raise ApiError(i18n.t("The selected transactions are transfers coming from another space: edit them from there"))
         g.skipped_incoming = asked - len(ids)
         marks = ",".join("?" * len(ids))
         action = as_key(b.get("action"))
-        note(f"{len(ids)} transactions", {"delete": "Multiple transactions deleted", "category": "Category changed on multiple transactions",
+        note(i18n.tn("{n} transaction", "{n} transactions", len(ids)), {"delete": "Multiple transactions deleted", "category": "Category changed on multiple transactions",
                                           "exclude": "Transactions excluded from reports", "include": "Transactions included in reports"}.get(action))
         if action == "delete":
             g.audit_kind = "delete"
@@ -1170,14 +1209,14 @@ def create_app(port):
             cid = as_int(b.get("category_id"), "category")
             c = db.execute("SELECT kind FROM categories WHERE id=? AND portfolio_id=?", (cid, p)).fetchone()
             if not c:
-                raise ApiError("Category not found")
+                raise ApiError(i18n.t("Category not found"))
             db.execute(f"UPDATE transactions SET category_id=? WHERE kind=? AND account_id IN {PF_ACCOUNTS} AND id IN ({marks})",
                        (cid, c["kind"], p, *ids))
         elif action in ("exclude", "include"):
             db.execute(f"UPDATE transactions SET excluded=? WHERE id IN ({marks})",
                        (1 if action == "exclude" else 0, *ids))
         else:
-            raise ApiError("Invalid action")
+            raise ApiError(i18n.t("Invalid action"))
         db.commit()
         return jsonify(ok=True, pac_deleted=pac_deleted, skipped=g.get("skipped_incoming", 0))
 
@@ -1257,13 +1296,13 @@ def create_app(port):
     def recurring_from_body(b):
         kind = b.get("kind")
         if kind not in KINDS:
-            raise ApiError("Invalid type")
+            raise ApiError(i18n.t("Invalid type"))
         freq = as_key(b.get("frequency"))
         if freq not in FREQUENCIES:
-            raise ApiError("Invalid frequency")
+            raise ApiError(i18n.t("Invalid frequency"))
         name = as_text(b.get("name"), 80)
         if not name:
-            raise ApiError("The name is required")
+            raise ApiError(i18n.t("The name is required"))
         account_id = as_int(b.get("account_id"), "account")
         category_id, to_account_id = check_refs(
             kind, account_id, as_int(b.get("to_account_id"), "destination account", required=False),
@@ -1271,28 +1310,27 @@ def create_app(port):
         start = as_date(b.get("start_date"), "first due date")
         end = as_date(b.get("end_date"), "end date", required=False)
         if end and end < start:
-            raise ApiError("The end date is before the start date")
+            raise ApiError(i18n.t("The end date is before the start date"))
         # plausible years: a typo (e.g. 0225) would generate thousands of past due dates
         if not ("1990-01-01" <= start <= f"{dt.date.today().year + 10}-12-31") or (end and end > "2100-12-31"):
-            raise ApiError("Recurring item date out of range: check the year")
+            raise ApiError(i18n.t("Recurring item date out of range: check the year"))
         if b.get("installments") and b.get("principal") and freq != "monthly":
-            raise ApiError("The amortization schedule is calculated on monthly installments: for a loan with interest use "
-                           "the monthly frequency (or remove the loan amount)")
+            raise ApiError(i18n.t("The amortization schedule is calculated on monthly installments: for a loan with interest use the monthly frequency (or remove the loan amount)"))
         holding_id = as_int(b.get("holding_id"), "investment plan security", required=False)
         if holding_id:  # investment plan: only for transfers to an investment account that holds that security
             ok = kind == "transfer" and get_db().execute(
                 "SELECT 1 FROM holdings h JOIN accounts a ON a.id = h.account_id WHERE h.id = ? AND a.id = ? AND a.type = ?",
                 (holding_id, to_account_id, tools.INVEST)).fetchone()
             if not ok:
-                raise ApiError("The investment plan security must belong to the destination investment account")
+                raise ApiError(i18n.t("The investment plan security must belong to the destination investment account"))
         expected = 1 if b.get("expected") else 0
         if expected and (kind == "transfer" or b.get("installments")):
-            raise ApiError("A variable amount applies to income and expenses, not to transfers or installments")
+            raise ApiError(i18n.t("A variable amount applies to income and expenses, not to transfers or installments"))
         method = b.get("amortization") or "french"
         if method not in tools.AMORTIZATION_METHODS:
-            raise ApiError("Invalid amortization method")
+            raise ApiError(i18n.t("Invalid amortization method"))
         if method == "constant" and (kind != "expense" or not b.get("installments") or not b.get("principal")):
-            raise ApiError("Constant principal needs an expense with the loan amount and the number of installments")
+            raise ApiError(i18n.t("Constant principal needs an expense with the loan amount and the number of installments"))
         constant = method == "constant"
         return {
             "holding_id": holding_id, "expected": expected, "amount_fixed": 1 if expected and b.get("amount_fixed") else 0,
@@ -1344,7 +1382,7 @@ def create_app(port):
     def own_recurring(rid):
         r = get_db().execute("SELECT account_id FROM recurring WHERE id = ?", (rid,)).fetchone()
         if not r or portfolio_of("accounts", r[0]) != pf():
-            raise ApiError("Recurring item not found", 404)
+            raise ApiError(i18n.t("Recurring item not found"), 404)
 
     @app.post("/api/recurring")
     def recurring_create():
@@ -1390,7 +1428,7 @@ def create_app(port):
         r = db.execute("SELECT name, amount FROM recurring WHERE id = ?", (rid,)).fetchone()
         n = db.execute("SELECT COUNT(*) FROM transactions WHERE recurring_id = ?", (rid,)).fetchone()[0]
         expected = db.execute("SELECT expected FROM recurring WHERE id = ?", (rid,)).fetchone()[0]
-        note(f"{r['name']} · {audit.eur(r['amount'])}" + (f" · with {n} transactions" if request.args.get("with_transactions") == "1" and n and not expected else ""))
+        note(f"{r['name']} · {audit.eur(r['amount'])}" + (" · " + i18n.t("with {n} transactions", n=n) if request.args.get("with_transactions") == "1" and n and not expected else ""))
         if expected:  # the transactions of a variable recurring item are the real ones (imported or entered): never deleted
             db.execute("UPDATE transactions SET recurring_id = NULL WHERE recurring_id = ?", (rid,))
         elif request.args.get("with_transactions") == "1":
@@ -1411,7 +1449,7 @@ def create_app(port):
         for tid in ids:
             row = db.execute("SELECT account_id FROM transactions WHERE id = ?", (tid,)).fetchone()
             if not row or portfolio_of("accounts", row[0]) != pf():
-                raise ApiError(f"Transaction not found in this space: {tid}")
+                raise ApiError(i18n.t("Transaction not found in this space: {tid}", tid=tid))
         start = as_date(b.get("start_date"), "first due date", required=False)
         if start:
             db.execute("UPDATE recurring SET start_date = ? WHERE id = ?", (start, rid))
@@ -1616,11 +1654,11 @@ def create_app(port):
         elif request.args.get("from") and request.args.get("to"):
             d_from, d_to = as_date(request.args["from"], "from"), as_date(request.args["to"], "to")
             if d_to < d_from:
-                raise ApiError("The period is not valid")
+                raise ApiError(i18n.t("The period is not valid"))
         else:
             year = request.args.get("year") or (years[0] if years else str(dt.date.today().year))
             if not (year.isascii() and year.isdigit() and len(year) == 4 and year >= "1900"):
-                raise ApiError("Invalid year")
+                raise ApiError(i18n.t("Invalid year"))
             d_from, d_to = f"{year}-01-01", f"{year}-12-31"
         start, end = parse_date(d_from), parse_date(d_to)
         if start < add_months(end.replace(day=1), -119):  # at most 10 years in a report (the columns are the months)
@@ -1655,7 +1693,7 @@ def create_app(port):
                             FROM transactions t JOIN accounts ta ON ta.id = t.to_account_id JOIN portfolios tp ON tp.id = ta.portfolio_id
                             WHERE t.kind = 'transfer' AND NOT t.excluded AND t.date BETWEEN ? AND ?
                             AND t.account_id IN {PF_ACCOUNTS} AND tp.id != ? GROUP BY tp.id, ym""", (d_from, d_to, p, p)):
-                    row = rows.setdefault(f"gc:{r['id']}", {"id": None, "transfer": True, "name": f"Transfers to {r['name']}",
+                    row = rows.setdefault(f"gc:{r['id']}", {"id": None, "transfer": True, "name": i18n.t("Transfers to {name}", name=r['name']),
                                                             "color": r["color"], "icon": r["icon"], "months": [0] * len(months), "total": 0})
                     row["months"][col[r["ym"]]] = r["v"]
                     row["total"] += r["v"]
@@ -1702,12 +1740,12 @@ def create_app(port):
         people = b.get("people")
         if isinstance(people, list):
             if len(people) > 10:
-                raise ApiError("At most 10 people")
+                raise ApiError(i18n.t("At most 10 people"))
             keep = []
             for pos, p in enumerate(people):
                 name = as_text(as_dict(p, "person").get("name"), 40)
                 if not name:
-                    raise ApiError("Each person must have a name")
+                    raise ApiError(i18n.t("Each person must have a name"))
                 vals = (name, as_int(p.get("income") or 0, "income", minimum=0), as_text(p.get("keyword"), 40), pos)
                 person_id = as_int(p.get("id"), "id", required=False)
                 if person_id and portfolio_of("people", person_id) == cur_pf:
@@ -1723,25 +1761,25 @@ def create_app(port):
                 continue
             if k == "split_base":
                 if v not in splitm.BASES:
-                    raise ApiError("Invalid calculation basis")
+                    raise ApiError(i18n.t("Invalid calculation basis"))
             elif k == "split_manual":
                 v = json.dumps(splitm.clean_manual(v, {a["id"] for a in db.execute(
                     "SELECT id FROM accounts WHERE portfolio_id = ?", (cur_pf,))}), ensure_ascii=False)
             elif k == "split_months":  # whole months (or 'all' = the whole history): an odd value would break the page
                 if v != "all" and str(v) not in ("1", "2", "3", "4", "5", "6", "9", "12", "18", "24", "36"):
-                    raise ApiError("Invalid averaging period")
+                    raise ApiError(i18n.t("Invalid averaging period"))
             else:
                 try:
                     f = float(v)
                 except (TypeError, ValueError):
-                    raise ApiError(f"Invalid value: {k}")
+                    raise ApiError(i18n.t("Invalid value: {k}", k=k))
                 if f != f or f in (float("inf"), float("-inf")) or f < 0 or f > 10 ** 9:
-                    raise ApiError(f"Invalid value: {k}")
+                    raise ApiError(i18n.t("Invalid value: {k}", k=k))
             db.execute("INSERT INTO settings(key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
                        (f"{k}@{cur_pf}", str(v)))
         for cid, rule in as_dict(b.get("rules"), "split rules").items():
             if as_key(rule) not in splitm.RULES:
-                raise ApiError("Invalid split rule")
+                raise ApiError(i18n.t("Invalid split rule"))
             db.execute("UPDATE categories SET split = ? WHERE id = ? AND kind = 'expense' AND portfolio_id = ?",
                        (rule, as_int(cid, "category"), cur_pf))
         db.commit()
@@ -1754,20 +1792,21 @@ def create_app(port):
         b = body()
         db = get_db()
         cur_pf = pf()
-        # contribution income category: English name ("Contribution…") or Italian legacy name ("Versament…")
-        cat = db.execute("SELECT id FROM categories WHERE kind='income' AND (name LIKE 'Contribution%' OR name LIKE 'Versament%') "
-                         "AND portfolio_id = ? ORDER BY id", (cur_pf,)).fetchone()
+        # contribution income category: by its code (any language), or a name of older versions ("Contribution…",
+        # Italian "Versament…") for categories created by hand
+        cat = db.execute("SELECT id FROM categories WHERE kind='income' AND (code = 'contributions' OR name LIKE 'Contribution%' "
+                         "OR name LIKE 'Versament%') AND portfolio_id = ? ORDER BY code IS NULL, id", (cur_pf,)).fetchone()
         updated, created, transfers = 0, 0, []
         start = add_months(dt.date.today().replace(day=1), 1).replace(day=15).isoformat()
         deposits = b.get("deposits") or []
         if not isinstance(deposits, list) or not all(isinstance(d, dict) for d in deposits):
-            raise ApiError("Invalid list of contributions")
+            raise ApiError(i18n.t("Invalid list of contributions"))
         for d in deposits:
             account_id, amount = as_int(d.get("account_id"), "account"), as_int(d.get("amount"), "amount", minimum=1)
             p = db.execute("SELECT * FROM people WHERE id = ? AND portfolio_id = ?",
                            (as_int(d.get("person_id"), "person"), cur_pf)).fetchone()
             if not p or portfolio_of("accounts", account_id) != cur_pf:
-                raise ApiError("Person or account not found")
+                raise ApiError(i18n.t("Person or account not found"))
             kw = (p["keyword"] or p["name"]).strip()
             # someone who contributes with a recurring transfer from their own space: THAT transfer is updated (otherwise
             # an extra income here would double the balance of the joint account)
@@ -1782,22 +1821,22 @@ def create_app(port):
                              (account_id, f"%{kw}%", f"%{p['name']}%")).fetchone()
             if gc:
                 db.execute("UPDATE recurring SET amount=? WHERE id=?", (amount, gc["id"]))
-                transfers.append(f"{p['name']} (transfer from the space \"{gc['pf_name']}\")")
+                transfers.append(i18n.t("{name} (transfer from the space \"{space}\")", name=p["name"], space=gc["pf_name"]))
                 updated += 1
             elif rec:
                 db.execute("UPDATE recurring SET amount=? WHERE id=?", (amount, rec["id"]))
                 updated += 1
             elif not cat:
-                raise ApiError(f"For {p['name']} there is neither a recurring contribution nor a recurring transfer from another "
-                               "space, and there is no \"Contributions…\" income category to create one")
+                raise ApiError(i18n.t("For {name} there is neither a recurring contribution nor a recurring transfer from another space, and there is no \"Contributions…\" income category to create one", name=p['name']))
             else:
                 db.execute("""INSERT INTO recurring(name, kind, amount, account_id, category_id, frequency, start_date,
                               generated, active, notes) VALUES (?, 'income', ?, ?, ?, 'monthly', ?, 0, 1, ?)""",
-                           (f"Contribution {p['name']}", amount, account_id, cat["id"], start,
+                           (i18n.t("Contribution {name}", name=p['name']), amount, account_id, cat["id"], start,
                             "Created by the fair split calculator"))
                 created += 1
         db.commit()
-        note(f"{updated} updated, {created} created" + (f" · transfers: {', '.join(transfers)}" if transfers else ""))
+        note(i18n.t("{updated} updated, {created} created", updated=updated, created=created)
+             + (" · " + i18n.t("transfers: {list}", list=", ".join(transfers)) if transfers else ""))
         return jsonify(updated=updated, created=created, transfers=transfers)
 
     # ------------------------------------------------- analysis tools
@@ -1812,7 +1851,7 @@ def create_app(port):
         p = pf()
         month = request.args.get("month") or dt.date.today().strftime("%Y-%m")
         if len(month) != 7 or not month[:4].isdigit() or not month[5:].isdigit():
-            raise ApiError("Invalid month")
+            raise ApiError(i18n.t("Invalid month"))
         raw = request.args.get("avg") or "3"
         n = max(1, tools.history_months(db, p) - 1) if raw == "all" else tools.months_arg(db, p, raw, 3, cap=120)
         d_from, d_to = tools.complete_months(n)
@@ -1834,7 +1873,7 @@ def create_app(port):
         db = get_db()
         budget = as_int(body().get("budget") or 0, "budget", minimum=0)
         if not db.execute("UPDATE categories SET budget = ? WHERE id = ? AND portfolio_id = ?", (budget, cid, pf())).rowcount:
-            raise ApiError("Category not found", 404)
+            raise ApiError(i18n.t("Category not found"), 404)
         db.commit()
         return jsonify(ok=True)
 
@@ -1848,7 +1887,7 @@ def create_app(port):
         plans = {x["id"]: x for x in tools.mortgage_plans(get_db(), pf())}
         plan = plans.get(as_int(b.get("recurring_id"), "loan"))
         if not plan:
-            raise ApiError("Loan not found")
+            raise ApiError(i18n.t("Loan not found"))
         extra = as_int(b.get("extra"), "amount", minimum=1)
         after = as_int(plan["paid"] if b.get("after_payment") in (None, "") else b.get("after_payment"), "installment", minimum=0)
         return jsonify(tools.simulate_prepayment(plan, extra, after, "installment" if b.get("mode") == "installment" else "duration"))
@@ -1861,7 +1900,7 @@ def create_app(port):
     def emergency_put():
         v = as_rate(body().get("target_months"))
         if v is None or not 1 <= v <= 36:
-            raise ApiError("Invalid number of months")
+            raise ApiError(i18n.t("Invalid number of months"))
         db = get_db()
         tools.set_setting(db, "emergency_months", pf(), v)
         db.commit()
@@ -1870,7 +1909,7 @@ def create_app(port):
     def goal_from_body(b):
         name = as_text(b.get("name"), 60)
         if not name:
-            raise ApiError("The goal name is required")
+            raise ApiError(i18n.t("The goal name is required"))
         account_id = as_int(b.get("account_id"), "account", required=False)
         if account_id is not None:  # also 0 or a nonexistent id: a clear message, not a database error
             own_account(account_id)
@@ -1895,7 +1934,7 @@ def create_app(port):
         db = get_db()
         if not db.execute("""UPDATE goals SET name=?, icon=?, color=?, target=?, target_date=?, account_id=?, saved=?
                              WHERE id=? AND portfolio_id=?""", (*goal_from_body(body()), gid, pf())).rowcount:
-            raise ApiError("Goal not found", 404)
+            raise ApiError(i18n.t("Goal not found"), 404)
         db.commit()
         return jsonify(ok=True)
 
@@ -1910,7 +1949,7 @@ def create_app(port):
     def own_invest_account(aid):
         own_account(aid)
         if get_db().execute("SELECT type FROM accounts WHERE id = ?", (aid,)).fetchone()[0] != tools.INVEST:
-            raise ApiError("The account is not an investment account")
+            raise ApiError(i18n.t("The account is not an investment account"))
 
     @app.get("/api/investments")
     def investments_get():
@@ -1935,7 +1974,7 @@ def create_app(port):
         r = db.execute("SELECT v.account_id, v.date, v.value, a.name FROM valuations v JOIN accounts a ON a.id = v.account_id "
                        "WHERE v.id = ?", (vid,)).fetchone()
         if not r:
-            raise ApiError("Valuation not found", 404)
+            raise ApiError(i18n.t("Valuation not found"), 404)
         own_account(r[0])
         note(f"{r['name']} · {r['date']} · {audit.eur(r['value'])}")
         db.execute("DELETE FROM valuations WHERE id = ?", (vid,))
@@ -1947,13 +1986,13 @@ def create_app(port):
     def holding_from_body(b):
         ticker = as_text(b.get("ticker"), 30).upper()
         if not ticker:
-            raise ApiError("Enter the ticker (e.g. VWCE.DE, SWDA.MI)")
+            raise ApiError(i18n.t("Enter the ticker (e.g. VWCE.DE, SWDA.MI)"))
         try:
             qty = parse_number(b.get("quantity") or 0) or 0.0
         except ValueError:
-            raise ApiError("Invalid quantity")
+            raise ApiError(i18n.t("Invalid quantity"))
         if qty < 0:
-            raise ApiError("Invalid quantity")
+            raise ApiError(i18n.t("Invalid quantity"))
         cls = b.get("asset_class") if b.get("asset_class") in ASSET_CLASSES else None
         name = as_text(b.get("name"), 80)
         if cls is None and DEMO:
@@ -1971,10 +2010,10 @@ def create_app(port):
         """Autofills a security (name, suggested class, price) from Yahoo: sends only the ticker."""
         personal_only()
         if DEMO:
-            raise ApiError("Online features are disabled in the demo version", 404)
+            raise ApiError(i18n.t("Online features are disabled in the demo version"), 404)
         ticker = as_text(request.args.get("ticker"), 30).upper()
         if not ticker:
-            raise ApiError("Enter the ticker")
+            raise ApiError(i18n.t("Enter the ticker"))
         try:
             return jsonify(tools.lookup_instrument(ticker))
         except ValueError as e:
@@ -1995,7 +2034,7 @@ def create_app(port):
         db = get_db()
         r = db.execute("SELECT account_id, ticker FROM holdings WHERE id = ?", (hid,)).fetchone()
         if not r:
-            raise ApiError("Security not found", 404)
+            raise ApiError(i18n.t("Security not found"), 404)
         own_account(r[0])
         vals = holding_from_body(body())
         if vals[0] != r["ticker"]:  # a different instrument: current and historical prices of the old ticker no longer apply
@@ -2014,8 +2053,7 @@ def create_app(port):
             own_account(r[0])
             n = db.execute("SELECT COUNT(*) FROM trades WHERE holding_id = ?", (hid,)).fetchone()[0]
             if n:  # deleting it would also delete the trades, changing the account's cash and results
-                raise ApiError(f"The security has {n} recorded trades: delete them first (from Trades), or leave it "
-                               "with zero quantity if you sold it all", 409)
+                raise ApiError(i18n.t("The security has {n} recorded trades: delete them first (from Trades), or leave it with zero quantity if you sold it all", n=n), 409)
             note(db.execute("SELECT ticker FROM holdings WHERE id = ?", (hid,)).fetchone()[0])
             db.execute("UPDATE recurring SET holding_id = NULL WHERE holding_id = ?", (hid,))
             db.execute("DELETE FROM holdings WHERE id = ?", (hid,))
@@ -2030,7 +2068,7 @@ def create_app(port):
         except (TypeError, ValueError):
             v = None
         if v is None or v != v or v in (float("inf"), float("-inf")):
-            raise ApiError(f"Invalid value: {name}")
+            raise ApiError(i18n.t("Invalid value: {name}", name=i18n.t(name)))
         return v
 
     @app.get("/api/investments/<int:aid>/trades")
@@ -2047,26 +2085,26 @@ def create_app(port):
         db = get_db()
         kind = as_key(b.get("kind"))
         if kind not in tools.TRADE_KINDS:
-            raise ApiError("Invalid trade type")
+            raise ApiError(i18n.t("Invalid trade type"))
         hid = as_int(b.get("holding_id"), "security", required=kind in ("buy", "sell", "split", "capital"))
         if hid is not None and not db.execute("SELECT 1 FROM holdings WHERE id = ? AND account_id = ?", (hid, aid)).fetchone():
-            raise ApiError("Security not found in this account")
+            raise ApiError(i18n.t("Security not found in this account"))
         fees = as_int(b.get("fees") or 0, "fees", minimum=0)
         qty = price = None
         if kind in ("buy", "sell"):
             qty, price = abs(as_float(b.get("quantity"), "quantity")), as_float(b.get("price"), "price")
             if qty <= 0 or price < 0:
-                raise ApiError("Quantity and price must be positive")
+                raise ApiError(i18n.t("Quantity and price must be positive"))
             total = as_int(b.get("total"), "total", required=False, minimum=1)  # actual amount on the statement
             gross = qty * price * 100
             if not gross <= MAX_INT:  # also infinity (e.g. 1e200 × 1e200): same limit as every other amount
-                raise ApiError("Value too large: quantity × price")
+                raise ApiError(i18n.t("Value too large: quantity × price"))
             gross = round(gross)
             amount = (-(total or gross + fees)) if kind == "buy" else (total or gross - fees)
             if abs(amount) > MAX_INT:
-                raise ApiError("Value too large: amount")
+                raise ApiError(i18n.t("Value too large: amount"))
             if kind == "sell" and amount < 0:
-                raise ApiError("The fees exceed the sale proceeds: check quantity, price and fees")
+                raise ApiError(i18n.t("The fees exceed the sale proceeds: check quantity, price and fees"))
             qty = qty if kind == "buy" else -qty
         elif kind == "split":
             qty, amount = as_float(b.get("quantity"), "quantity"), 0
@@ -2084,7 +2122,7 @@ def create_app(port):
     def trade_note(db, t):
         """Activity log line of a trade: type, security, date, amount."""
         tk = db.execute("SELECT ticker FROM holdings WHERE id = ?", (t["holding_id"],)).fetchone() if t["holding_id"] else None
-        note(" · ".join(x for x in (TRADE_LABELS.get(t["kind"], t["kind"]), tk[0] if tk else "", t["date"],
+        note(" · ".join(x for x in (i18n.t(TRADE_LABELS.get(t["kind"], t["kind"])), tk[0] if tk else "", t["date"],
                                     audit.eur(t["amount"]) if t["amount"] else "") if x))
 
     def check_positions(db, aid, before, why=""):
@@ -2092,9 +2130,12 @@ def create_app(port):
         bad = tools.negative_position(db, aid)
         if bad and not before:
             db.rollback()
-            raise ApiError((f"{why}: deleting it," if why else "With this change,") +
-                           f" the units of {bad[0]} would drop below zero on {bad[1]}: units not owned would be sold. "
-                           "Check the dates and quantities of buys and sells.", 409)
+            if why:  # the deposit generated an investment plan purchase
+                raise ApiError(i18n.t("The deposit generated an investment plan purchase: deleting it, the units of {security} "
+                                      "would drop below zero on {date}: units not owned would be sold. Check the dates and "
+                                      "quantities of buys and sells.", security=bad[0], date=bad[1]), 409)
+            raise ApiError(i18n.t("With this change, the units of {security} would drop below zero on {date}: units not owned "
+                                  "would be sold. Check the dates and quantities of buys and sells.", security=bad[0], date=bad[1]), 409)
 
     @app.post("/api/investments/<int:aid>/trades")
     def trade_add(aid):
@@ -2115,13 +2156,13 @@ def create_app(port):
         db = get_db()
         r = db.execute("SELECT account_id, external_id, source FROM trades WHERE id = ?", (tid,)).fetchone()
         if not r:
-            raise ApiError("Trade not found", 404)
+            raise ApiError(i18n.t("Trade not found"), 404)
         own_account(r[0])
         t = trade_from_body(body(), r[0])
         t["external_id"] = t["external_id"] or r["external_id"]  # an investment plan purchase stays linked to its deposit
         # the user corrected the automatic purchase (English wording or Italian legacy wording in the notes)
-        if r["source"] == "recurring" and ("estimated price" in t["notes"] or "prezzo stimato" in t["notes"]):
-            t["notes"] = t["notes"].split(" · ")[0] + " · verified price"
+        if r["source"] == "recurring" and any(m in t["notes"] for m in i18n.estimated_markers()):
+            t["notes"] = t["notes"].split(" · ")[0] + " · " + i18n.t("verified price")
         before = tools.negative_position(db, r[0])
         db.execute(f"UPDATE trades SET {', '.join(f'{k}=?' for k in t)} WHERE id=?", (*t.values(), tid))
         check_positions(db, r[0], before)
@@ -2161,7 +2202,7 @@ def create_app(port):
 
         def ref(table, key, what):
             if key not in table:
-                raise ApiError(f"Unknown reference ({what}): {key}")
+                raise ApiError(i18n.t("Unknown reference ({what}): {key}", what=what, key=key))
             return table[key]
         try:
             for a in b.get("accounts") or []:
@@ -2182,22 +2223,23 @@ def create_app(port):
                 if row:
                     cat[c["key"]] = row[0]
                 else:
-                    cat[c["key"]] = db.execute("INSERT INTO categories(portfolio_id, name, kind, color, icon, flow) VALUES (?,?,?,?,?,?)",
+                    cat[c["key"]] = db.execute("INSERT INTO categories(portfolio_id, name, kind, color, icon, flow, code) VALUES (?,?,?,?,?,?,?)",
                                                (p, name, kind, as_color(c.get("color")), as_text(c.get("icon"), 8) or "📦",
-                                                "other" if kind == "expense" and name in OTHER_FLOW_NAMES else "")).lastrowid
+                                                "other" if kind == "expense" and name in OTHER_FLOW_NAMES else "",
+                                                system_code(db, p, name))).lastrowid
                     created["categories"] += 1
                 cat_kind[cat[c["key"]]] = kind
             for t in b.get("transactions") or []:
                 kind = t.get("kind")
                 if kind not in KINDS:
-                    raise ApiError(f"Invalid transaction type: {kind}")
+                    raise ApiError(i18n.t("Invalid transaction type: {kind}", kind=kind))
                 src = ref(acc, t.get("account"), "account")
                 dst = ref(acc, t.get("to_account"), "destination account") if kind == "transfer" else None
                 if dst is not None and dst == src:
-                    raise ApiError(f"Transfer to the same account: {t.get('description') or t.get('date')}")
+                    raise ApiError(i18n.t("Transfer to the same account: {value}", value=t.get('description') or t.get('date')))
                 cid = ref(cat, t.get("category"), "category") if kind != "transfer" and t.get("category") else None
                 if cid is not None and cat_kind[cid] != kind:  # same rule as transactions entered by hand
-                    raise ApiError(f"The category does not match the transaction type: {t.get('description') or t.get('date')}")
+                    raise ApiError(i18n.t("The category does not match the transaction type: {value}", value=t.get('description') or t.get('date')))
                 db.execute("""INSERT INTO transactions(date, amount, kind, account_id, to_account_id, category_id,
                                                        description, notes, source, excluded) VALUES (?,?,?,?,?,?,?,?, 'import', ?)""",
                            (tx_date(t.get("date")), as_int(t.get("amount"), "amount", minimum=1), kind, src, dst, cid,
@@ -2220,7 +2262,7 @@ def create_app(port):
                     created["holdings"] += 1
             for o in b.get("trades") or []:
                 if as_key(o.get("kind")) not in tools.TRADE_KINDS:
-                    raise ApiError(f"Invalid trade type: {o.get('kind')}")
+                    raise ApiError(i18n.t("Invalid trade type: {value}", value=o.get('kind')))
                 ext = as_text(o.get("external_id"), 60)
                 if ext and db.execute("SELECT 1 FROM trades WHERE external_id = ?", (ext,)).fetchone():
                     continue  # trade already imported (same broker code): bundle run again, no duplicates
@@ -2240,7 +2282,7 @@ def create_app(port):
             for aid in set(acc.values()):
                 bad = tools.negative_position(db, aid)
                 if bad:  # same check as for trades entered by hand
-                    raise ApiError(f"In the bundle the units of {bad[0]} drop below zero on {bad[1]}: check buys and sells")
+                    raise ApiError(i18n.t("In the bundle the units of {value} drop below zero on {value2}: check buys and sells", value=bad[0], value2=bad[1]))
                 tools.sync_holdings(db, aid)
             balances = {a["name"]: a["balance"] for a in account_balances(db, p) if a["id"] in acc.values()}
             mv = tools.market_values(db, p)
@@ -2256,15 +2298,16 @@ def create_app(port):
             raise
         except Exception as exc:
             db.rollback()
-            raise ApiError(f"Import failed: {exc}")
+            raise ApiError(i18n.t("Import failed: {exc}", exc=exc))
         if dry:
             db.rollback()
         else:
             db.commit()
         if dry:
             g.audit_skip = True  # dry run: changes nothing, does not go in the activity log
-        note(", ".join(f"{v} {k}" for k, v in {"accounts": created["accounts"], "transactions": created["transactions"],
-                                                 "trades": created["trades"], "securities": created["holdings"]}.items() if v) or "no new data")
+        note(", ".join(f"{v} {i18n.t(k)}" for k, v in {"accounts": created["accounts"], "transactions": created["transactions"],
+                                                         "trades": created["trades"], "securities": created["holdings"]}.items() if v)
+             or i18n.t("no new data"))
         return jsonify(dry_run=dry, created=created, balances=balances, values=values, positions=positions)
 
     # ------------------------------------------------- rebalancing calculator
@@ -2277,27 +2320,27 @@ def create_app(port):
             cfg["accounts"] = None if ids is None else sorted(set(ids))
         if "mode" in b:
             if as_key(b["mode"]) not in ("class", "security"):
-                raise ApiError("Invalid rebalancing mode")
+                raise ApiError(i18n.t("Invalid rebalancing mode"))
             cfg["mode"] = b["mode"]
         for mode, t in as_dict(b.get("targets"), "targets").items():
             if mode not in ("class", "security"):
-                raise ApiError("Invalid targets")
+                raise ApiError(i18n.t("Invalid targets"))
             clean = {}
             for k, v in as_dict(t, "targets").items():
                 if not isinstance(k, str) or len(k) > 40:
-                    raise ApiError("Invalid targets")
+                    raise ApiError(i18n.t("Invalid targets"))
                 if isinstance(v, (bool, list, dict)):
-                    raise ApiError("Invalid target")
+                    raise ApiError(i18n.t("Invalid target"))
                 try:
                     p = float(str(v).replace(",", ".")) if v not in (None, "") else 0.0
                 except ValueError:
-                    raise ApiError("Invalid target")
+                    raise ApiError(i18n.t("Invalid target"))
                 if not 0 <= p <= 100 or p != p:
-                    raise ApiError("Each target must be between 0 and 100%")
+                    raise ApiError(i18n.t("Each target must be between 0 and 100%"))
                 if p:
                     clean[k] = round(p, 2)
             if len(clean) > 200:
-                raise ApiError("Too many targets")
+                raise ApiError(i18n.t("Too many targets"))
             cfg["targets"][mode] = clean
         for k in ("drift_abs", "drift_rel"):
             if k in b:
@@ -2307,16 +2350,16 @@ def create_app(port):
                 try:
                     v = float(str(b[k]).replace(",", "."))
                 except ValueError:
-                    raise ApiError("Invalid drift threshold")
+                    raise ApiError(i18n.t("Invalid drift threshold"))
                 if isinstance(b[k], (bool, list, dict)) or v != v or not 0 <= v <= (100 if k == "drift_abs" else 1000):
-                    raise ApiError("Invalid drift threshold")
+                    raise ApiError(i18n.t("Invalid drift threshold"))
                 cfg[k] = v or None  # 0 = not used, like an empty field
         for mode, keys in as_dict(b.get("excluded"), "excluded items").items():  # rows left out of the calculation
             if mode not in ("class", "security"):
-                raise ApiError("Invalid excluded items")
+                raise ApiError(i18n.t("Invalid excluded items"))
             keys = as_list(keys, "excluded items")
             if len(keys) > 200 or not all(isinstance(k, str) and 0 < len(k) <= 40 for k in keys):
-                raise ApiError("Invalid excluded items")
+                raise ApiError(i18n.t("Invalid excluded items"))
             cfg["excluded"][mode] = sorted(set(keys))
         if "contribution" in b:
             cfg["contribution"] = as_int(b["contribution"] or 0, "amount to invest", minimum=0)
@@ -2359,7 +2402,7 @@ def create_app(port):
         """Downloads updated prices (the only feature that contacts the internet: it sends only the tickers)."""
         personal_only()
         if DEMO:
-            raise ApiError("In the demo version prices are made up: online updates are disabled")
+            raise ApiError(i18n.t("In the demo version prices are made up: online updates are disabled"))
         return jsonify(tools.refresh_prices(get_db(), pf()))
 
     @app.get("/api/tools/savings")
@@ -2371,20 +2414,20 @@ def create_app(port):
 
     # ----------------------------------------------------------- export
 
-    MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
-    KIND_LABEL = {"expense": "Expense", "income": "Income", "transfer": "Transfer"}
 
     def export_rows():
         where, params = tx_filters(request.args)
         rows = get_db().execute(f"{TX_SELECT}{where} ORDER BY t.date, t.id", params).fetchall()
-        header = ["Date", "Type", "Description", "Category", "Account", "Destination account", "Amount", "Notes",
-                  "Excluded from reports"]
+        header = [i18n.t("Date"), i18n.t("Type"), i18n.t("Description"), i18n.t("Category"), i18n.t("Account"),
+                  i18n.t("Destination account"), i18n.t("Amount"), i18n.t("Notes"), i18n.t("Excluded from reports")]
+        kinds = {"expense": i18n.t("Expense"), "income": i18n.t("Income"), "transfer": i18n.t("Transfer")}
+        yes = i18n.t("Yes")
         data = []
         for r in rows:
             signed = -r["amount"] if r["kind"] == "expense" else r["amount"]
-            data.append([r["date"], KIND_LABEL[r["kind"]], r["description"], r["category_name"] or "",
+            data.append([r["date"], kinds[r["kind"]], r["description"], r["category_name"] or "",
                          r["account_name"], r["to_account_name"] or "", signed / 100, r["notes"],
-                         "Yes" if r["excluded"] else ""])
+                         yes if r["excluded"] else ""])
         return header, data
 
     def xlsx_response(wb, filename):
@@ -2430,7 +2473,7 @@ def create_app(port):
             import openpyxl
             wb = openpyxl.Workbook()
             ws = wb.active
-            ws.title = "Transactions"
+            ws.title = i18n.t("Transactions")[:31]
             ws.append(header)
             for r in data:
                 r = list(r)
@@ -2442,7 +2485,7 @@ def create_app(port):
             return xlsx_response(wb, f"homecoin-transactions-{stamp}.xlsx")
         buf = io.StringIO()
         # as a spreadsheet of the currency's country expects it: comma decimals with ";" between columns (euro),
-        # dot decimals with "," between columns (pound, dollars, yen, franc, rupee)
+        # dot decimals with "," between columns (pound, dollars, franc, peso)
         cur = util.CURRENCIES[util.currency_of(get_db())]
         w = csv.writer(buf, delimiter=";" if cur.decimal == "," else ",")
         w.writerow(header)
@@ -2460,21 +2503,21 @@ def create_app(port):
         import openpyxl
         from openpyxl.styles import Font
         data = report().get_json()
-        labels = [f"{MONTH_NAMES[int(m[5:]) - 1]} {m[:4]}" for m in data["months"]]
+        labels = [f"{i18n.month_name(int(m[5:]))} {m[:4]}" for m in data["months"]]
         n = len(labels)
         wb = openpyxl.Workbook()
         wb.remove(wb.active)
-        for kind, title in (("expense", "Expenses"), ("income", "Income")):
-            ws = wb.create_sheet(title)
-            ws.append(["Category", *labels, "Total"])
+        for kind, title in (("expense", i18n.t("Expenses")), ("income", i18n.t("Income"))):
+            ws = wb.create_sheet(title[:31])
+            ws.append([i18n.t("Category"), *labels, i18n.t("Total")])
             for r in data[kind]["rows"]:
                 ws.append([r["name"], *[v / 100 for v in r["months"]], r["total"] / 100])
-            ws.append(["TOTAL", *[v / 100 for v in data[kind]["months"]], data[kind]["total"] / 100])
+            ws.append([i18n.t("Total").upper(), *[v / 100 for v in data[kind]["months"]], data[kind]["total"] / 100])
             for c in ws[ws.max_row]:
                 c.font = Font(bold=True)
             style_sheet(ws, range(2, n + 3), [26] + [12] * (n + 1))
-        ws = wb.create_sheet("Summary")
-        ws.append(["Month", "Income", "Expenses", "Balance"])
+        ws = wb.create_sheet(i18n.t("Summary")[:31])
+        ws.append([i18n.t("Month"), i18n.t("Income"), i18n.t("Expenses"), i18n.t("Balance")])
         for i, label in enumerate(labels):
             inc, exp = data["income"]["months"][i] / 100, data["expense"]["months"][i] / 100
             ws.append([label, inc, exp, inc - exp])
@@ -2506,16 +2549,15 @@ def create_app(port):
         try:
             payload = json.loads(raw.decode("utf-8-sig"))
         except (ValueError, UnicodeDecodeError):
-            raise ApiError("The file is not a valid HomeCoin backup")
+            raise ApiError(i18n.t("The file is not a valid HomeCoin backup"))
         if isinstance(payload, dict) and payload.get("format") == "hcbackup-1":
             data = security.unseal(vault.dek, payload)  # same installation: same data key
             if data is None:
                 if not secret:
-                    raise ApiError("Backup created with a different key: enter the password (or the recovery "
-                                   "key) that was valid when it was created", 422) from None
+                    raise ApiError(i18n.t("Backup created with a different key: enter the password (or the recovery key) that was valid when it was created"), 422) from None
                 data = security.unseal(vault.dek_from_backup(payload.get("keys") or {}, secret), payload)
                 if data is None:
-                    raise ApiError("The backup is damaged")
+                    raise ApiError(i18n.t("The backup is damaged"))
             payload = json.loads(data.decode("utf-8"))
         return payload
 
@@ -2523,11 +2565,11 @@ def create_app(port):
     def restore():
         f = request.files.get("file")
         if not f:
-            raise ApiError("No file uploaded")
+            raise ApiError(i18n.t("No file uploaded"))
         payload = read_backup(f.read(), request.form.get("password", ""))
         if not isinstance(payload, dict) or payload.get("app") != "HomeCoin" or \
                 not all(isinstance(payload.get(t), list) for t in CORE_TABLES):
-            raise ApiError("The file is not a valid HomeCoin backup")
+            raise ApiError(i18n.t("The file is not a valid HomeCoin backup"))
         dbm.backup_now("pre-restore")
         db = get_db()
         cols = {t: [r[1] for r in db.execute(f"PRAGMA table_info({t})")] for t in TABLES}
@@ -2547,11 +2589,11 @@ def create_app(port):
                                [row[k] for k in keys])
             broken = db.execute("PRAGMA foreign_key_check").fetchall()
             if broken:  # rows pointing to nonexistent accounts, categories or securities: the backup is inconsistent
-                raise ValueError(f"{len(broken)} invalid links in the backup")
+                raise ValueError(i18n.t("{value} invalid links in the backup", value=len(broken)))
             db.commit()
         except Exception as exc:
             db.rollback()
-            raise ApiError(f"Restore failed, current data unchanged: {exc}")
+            raise ApiError(i18n.t("Restore failed, current data unchanged: {exc}", exc=exc))
         finally:
             db.execute("PRAGMA foreign_keys = ON")
         dbm.migrate(db)  # backups of older versions: assigns accounts/categories to a space
@@ -2571,7 +2613,7 @@ def create_app(port):
         purge_imports()
         f = request.files.get("file")
         if not f or not f.filename:
-            raise ApiError("No file uploaded")
+            raise ApiError(i18n.t("No file uploaded"))
         try:
             rows = importer.read_table(f.filename, f.read())
         except ValueError as exc:
@@ -2599,7 +2641,7 @@ def create_app(port):
         b = body()
         item = _imports.get(as_key(b.get("token")))
         if not item:
-            raise ApiError("Import session expired: upload the file again")
+            raise ApiError(i18n.t("Import session expired: upload the file again"))
         col = as_int(b.get("column"), "column", required=False)
         width = len(item["rows"][0])
         col = col if col is not None and 0 <= col < width else None
@@ -2612,7 +2654,7 @@ def create_app(port):
         b = body()
         item = _imports.get(as_key(b.get("token")))
         if not item:
-            raise ApiError("Import session expired: upload the file again")
+            raise ApiError(i18n.t("Import session expired: upload the file again"))
         account_id = as_int(b.get("account_id"), "account")
         own_account(account_id)
         width = len(item["rows"][0])
@@ -2621,12 +2663,12 @@ def create_app(port):
             v = as_int(chosen.get(k), "column", required=False)
             mapping[k] = v if v is not None and 0 <= v < width else None
         if mapping["date"] is None:
-            raise ApiError("Select the date column")
+            raise ApiError(i18n.t("Select the date column"))
         if mapping["amount"] is None and mapping["debit"] is None and mapping["credit"] is None:
-            raise ApiError("Select the amount column (or income/expense columns)")
+            raise ApiError(i18n.t("Select the amount column (or income/expense columns)"))
         order = b.get("date_order") or "dmy"
         if order not in ("dmy", "mdy"):
-            raise ApiError("Invalid date format")
+            raise ApiError(i18n.t("Invalid date format"))
         parsed = importer.parse_rows(item["rows"], item["header_row"], mapping, bool(b.get("invert")), order)
 
         db = get_db()
@@ -2670,10 +2712,10 @@ def create_app(port):
         own_account(account_id)
         rows = b.get("rows") or []
         if not isinstance(rows, list) or not rows or not all(isinstance(r, dict) for r in rows):
-            raise ApiError("No transactions to import")
+            raise ApiError(i18n.t("No transactions to import"))
         # an uploaded file is imported only once (e.g. double click on "Import": no duplicate rows)
         if _imports.pop(as_key(b.get("token")), None) is None:
-            raise ApiError("This file has already been imported (or the session expired): upload it again if needed", 409)
+            raise ApiError(i18n.t("This file has already been imported (or the session expired): upload it again if needed"), 409)
         db = get_db()
         cat_kind = {c["id"]: c["kind"] for c in db.execute("SELECT id, kind FROM categories WHERE portfolio_id = ?", (pf(),))}
         values = []
@@ -2694,7 +2736,7 @@ def create_app(port):
                        " source) VALUES (?,?,?,?,?,?,?)", values)
         db.commit()
         acc_name = db.execute("SELECT name FROM accounts WHERE id = ?", (account_id,)).fetchone()[0]
-        note(f"{len(values)} transactions · {acc_name}")
+        note(i18n.tn("{n} transaction", "{n} transactions", len(values)) + f" · {acc_name}")
         return jsonify(imported=len(values))
 
     return app

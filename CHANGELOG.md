@@ -2,6 +2,28 @@
 
 All notable changes to HomeCoin are listed here, newest first.
 
+## 2.0.0 — 2026-11-09
+
+**Six languages**
+- The whole interface is now available in **English, Español, Português (Brasil), Deutsch, Français and Italiano**: menus, pages, messages, warnings, dates, the activity log, exports and the demo.
+- Choose the language at the first start (it is proposed from your browser) or later in Settings → General. It is kept with the keys, so the sign-in screen uses it too.
+- New spaces get their default categories in the chosen language. Changing language never renames the categories you already have.
+- A new *Translation* issue template makes it easy to report a wrong or clumsy text.
+
+**Currencies**
+- New: **Mexican peso (MXN)** and **Brazilian real (BRL)**, with their number format and loan indexes (TIIE 28 and TIIE de Fondeo; TR, IPCA, Selic and CDI).
+- At the first start HomeCoin proposes the currency of your country, from the browser and the chosen language.
+
+**Import and export**
+- Bank statements are recognized with column headers in all six languages, accents included.
+- CSV and Excel exports use the interface language for headers and sheet names, and can be imported back in any language.
+
+**Under the hood**
+- Default and system categories now have a fixed code, so HomeCoin recognizes them in any language. Existing databases get the codes automatically, without renaming anything.
+- Fix: the fair split found the household contributions category only by its English or Italian name.
+- Investment plan notes, activity log details and the demo banner are translated too; the estimated-price reminder works whatever the language of the note.
+- Security policy updated to the supported 2.0.x line.
+
 ## 1.4.0 — 2026-11-09
 
 **US bank statements**
