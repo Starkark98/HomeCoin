@@ -2,6 +2,7 @@
 import calendar
 import datetime as dt
 import re
+import unicodedata
 from collections import namedtuple
 from decimal import ROUND_HALF_UP, Decimal, DecimalException
 
@@ -32,25 +33,51 @@ SYSTEM_CODES = ("balance_adjustment", "other_investments")
 TECH_CODES_SQL = "'balance_adjustment', 'other_investments'"
 
 # reference currency of the whole installation: a label only (amounts are never converted); market prices are converted
-# into it. Each currency uses the number format of its main country (same table as CURRENCIES in app.js):
-# code -> symbol, UI locale, decimal and thousands separators, decimals shown, symbol before the number, space after it
-Currency = namedtuple("Currency", "symbol locale decimal thousands digits prefix space name")
+# into it. Each currency uses the number format of its main country. This is the only table: the browser gets it
+# through /i18n.js. Adding a currency = one line here (+ its name in the translation files):
+#   symbol, UI locale (Intl), decimal and thousands separators, decimals shown, symbol before the number, space between,
+#   English name, short label of the picker (tells the dollars apart), rounding choices of the fair split (whole units),
+#   countries (ISO codes) whose browsers get it suggested, date format of the Excel exports, loan indexes (first =
+#   default; the schedule uses the value typed by hand), other ways the currency is written in bank files
+Currency = namedtuple("Currency", "symbol locale decimal thousands digits prefix space name short steps regions "
+                                  "date_excel indexes marks")
+_EURO_AREA = ("AT", "BE", "CY", "DE", "EE", "ES", "FI", "FR", "GR", "HR", "IE", "IT", "LT", "LU", "LV", "MT", "NL", "PT",
+              "SI", "SK", "AD", "MC", "SM", "VA", "ME", "XK")
 CURRENCIES = {
-    "EUR": Currency("€", "it-IT", ",", ".", 2, False, True, "Euro"),               # 1.234,56 €
-    "USD": Currency("$", "en-US", ".", ",", 2, True, False, "US dollar"),          # $1,234.56
-    "GBP": Currency("£", "en-GB", ".", ",", 2, True, False, "British pound"),      # £1,234.56
-    "CHF": Currency("CHF", "de-CH", ".", "'", 2, True, True, "Swiss franc"),       # CHF 1'234.56 (as Chrome and Edge write it)
-    "CAD": Currency("$", "en-CA", ".", ",", 2, True, False, "Canadian dollar"),    # $1,234.56
-    "AUD": Currency("$", "en-AU", ".", ",", 2, True, False, "Australian dollar"),  # $1,234.56
-    "MXN": Currency("$", "es-MX", ".", ",", 2, True, False, "Mexican peso"),       # $1,234.56
-    "BRL": Currency("R$", "pt-BR", ",", ".", 2, True, True, "Brazilian real"),     # R$ 1.234,56
+    "EUR": Currency("€", "it-IT", ",", ".", 2, False, True, "Euro", "€", (1, 5, 10, 50), _EURO_AREA, "DD/MM/YYYY",
+                    ("Euribor 3M", "Euribor 1M", "Euribor 6M", "Euribor 12M"), ("EUR",)),                    # 1.234,56 €
+    "USD": Currency("$", "en-US", ".", ",", 2, True, False, "US dollar", "US$", (1, 5, 10, 50), ("US", "PR"), "MM/DD/YYYY",
+                    ("SOFR 30-day average", "Term SOFR 1M", "Term SOFR 3M", "Term SOFR 6M", "US Treasury 1Y (CMT)",
+                     "US Prime Rate"), ("US$", "USD")),                                                       # $1,234.56
+    "GBP": Currency("£", "en-GB", ".", ",", 2, True, False, "British pound", "£", (1, 5, 10, 50), ("GB", "IM", "JE", "GG"),
+                    "DD/MM/YYYY", ("Bank of England Bank Rate", "SONIA"), ("GBP",)),                          # £1,234.56
+    # CHF 1'234.56, as Chrome and Edge write it
+    "CHF": Currency("CHF", "de-CH", ".", "'", 2, True, True, "Swiss franc", "CHF", (1, 5, 10, 50), ("CH", "LI"),
+                    "DD.MM.YYYY", ("SARON",), ("Fr.",)),
+    "CAD": Currency("$", "en-CA", ".", ",", 2, True, False, "Canadian dollar", "C$", (1, 5, 10, 50), ("CA",), "YYYY-MM-DD",
+                    ("Canadian prime rate", "CORRA"), ("CA$", "C$", "CAD")),                                  # $1,234.56
+    "AUD": Currency("$", "en-AU", ".", ",", 2, True, False, "Australian dollar", "A$", (1, 5, 10, 50), ("AU",),
+                    "DD/MM/YYYY", ("RBA cash rate", "BBSW 3M"), ("AU$", "A$", "AUD")),                        # $1,234.56
+    # $1,234.56; also suggested in the rest of Spanish-speaking Latin America (the closest peso HomeCoin has)
+    "MXN": Currency("$", "es-MX", ".", ",", 2, True, False, "Mexican peso", "MX$", (10, 50, 100, 500),
+                    ("MX", "AR", "BO", "CL", "CO", "CR", "CU", "DO", "EC", "GT", "HN", "NI", "PA", "PE", "PY", "SV", "UY",
+                     "VE"), "DD/MM/YYYY", ("TIIE 28", "TIIE de Fondeo"), ("MX$", "MXN")),
+    # R$ 1.234,56; IPCA: inflation, for inflation-linked loans
+    "BRL": Currency("R$", "pt-BR", ",", ".", 2, True, True, "Brazilian real", "R$", (1, 5, 10, 50), ("BR",), "DD/MM/YYYY",
+                    ("TR", "IPCA", "Selic", "CDI"), ("R$", "BRL")),
+    # 1 234,56 zł (thousands with a no-break space, always grouped); new loans move from WIBOR to POLSTR (2026-2027)
+    "PLN": Currency("zł", "pl-PL", ",", " ", 2, False, True, "Polish złoty", "zł", (1, 5, 10, 50), ("PL",),
+                    "DD.MM.YYYY", ("WIBOR 3M", "WIBOR 6M", "POLSTR 1M (compounded)"), ("PLN", "zł", "zl")),
+    # ¥1,235 without decimals (en-JP: the plain ¥ of Japanese bank files, not the full-width ￥ of ja-JP)
+    "JPY": Currency("¥", "en-JP", ".", ",", 0, True, False, "Japanese yen", "¥", (100, 500, 1000, 5000), ("JP",),
+                    "YYYY/MM/DD", ("Short-term prime rate (Japan)", "TONA", "TIBOR 3M"), ("JPY", "円", "￥")),
 }
 CURRENCY = {"code": "EUR"}  # current one, loaded from the settings when HomeCoin is unlocked (activity log texts)
 # date format of the Excel exports, as in the currency's country (the UI shows "02 Nov 26", the same everywhere)
-DATE_EXCEL = {"EUR": "DD/MM/YYYY", "USD": "MM/DD/YYYY", "GBP": "DD/MM/YYYY", "CHF": "DD.MM.YYYY",
-              "CAD": "YYYY-MM-DD", "AUD": "DD/MM/YYYY", "MXN": "DD/MM/YYYY", "BRL": "DD/MM/YYYY"}
+DATE_EXCEL = {code: c.date_excel for code, c in CURRENCIES.items()}
 # symbols and codes stripped from typed or imported amounts (longest first: "US$" before "$")
-_MONEY_MARKS = re.compile(r"US\$|C\$|A\$|CA\$|AU\$|MX\$|R\$|CHF|Fr\.|EUR|USD|GBP|CAD|AUD|MXN|BRL|[€$£]")
+_MONEY_MARKS = re.compile("|".join(re.escape(m) for m in sorted(
+    {c.symbol for c in CURRENCIES.values()} | {m for c in CURRENCIES.values() for m in c.marks}, key=len, reverse=True)))
 
 
 def currency_of(db):
@@ -90,12 +117,12 @@ def fmt_decimal(value, code=None):
 
 
 DATE_FORMATS = (
-    "%d/%m/%Y", "%d-%m-%Y", "%d.%m.%Y", "%Y-%m-%d", "%Y/%m/%d",
+    "%d/%m/%Y", "%d-%m-%Y", "%d.%m.%Y", "%Y-%m-%d", "%Y/%m/%d", "%Y.%m.%d", "%Y年%m月%d日",
     "%d/%m/%y", "%d-%m-%y", "%d.%m.%y", "%Y%m%d",
 )
 # month first, as in US bank statements (03/04/2026 = March 4): used only when the file is in that order
 DATE_FORMATS_MDY = (
-    "%m/%d/%Y", "%m-%d-%Y", "%m.%d.%Y", "%Y-%m-%d", "%Y/%m/%d",
+    "%m/%d/%Y", "%m-%d-%Y", "%m.%d.%Y", "%Y-%m-%d", "%Y/%m/%d", "%Y.%m.%d", "%Y年%m月%d日",
     "%m/%d/%y", "%m-%d-%y", "%m.%d.%y", "%Y%m%d",
 )
 # default order of the day and month when a file does not show it (all days 1-12): the currency's country
@@ -242,7 +269,8 @@ def months_between(d1, d2):
 
 def normalize_desc(text):
     """Short key of a bank description, used to recognize similar transactions."""
-    s = re.sub(r"[^a-zà-ù ]+", " ", (text or "").lower())
+    # letters of any alphabet (ł, ü, ß, カ, 日…); NFKC: the half-width ｶﾅ of Japanese bank files = full-width カナ
+    s = re.sub(r"[\W\d_]+", " ", unicodedata.normalize("NFKC", text or "").lower())
     tokens = [t for t in s.split() if len(t) >= 3 and t not in STOPWORDS]
     return " ".join(tokens[:3])
 

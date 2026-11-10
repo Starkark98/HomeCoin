@@ -1,0 +1,73 @@
+{
+"@meta": {
+"name": "English",
+"plural": "one",
+"currency": "USD",
+"months": [
+"Jan",
+"Feb",
+"Mar",
+"Apr",
+"May",
+"Jun",
+"Jul",
+"Aug",
+"Sep",
+"Oct",
+"Nov",
+"Dec"
+],
+"month_words": [
+"january",
+"february",
+"march",
+"april",
+"may",
+"june",
+"july",
+"august",
+"september",
+"october",
+"november",
+"december"
+],
+"categories": {
+"mortgage": "Mortgage & loans",
+"groceries": "Groceries",
+"restaurants": "Restaurants & bars",
+"home": "Home & furniture",
+"utilities": "Utilities",
+"transport": "Transport",
+"travel": "Travel",
+"shopping": "Shopping & gifts",
+"health": "Health & personal care",
+"bank": "Bank & insurance",
+"other": "Other",
+"other_income": "Other income",
+"contributions": "Contributions to household",
+"subscriptions": "Subscriptions",
+"sport": "Sport & leisure",
+"books": "Books & learning",
+"taxes": "Taxes",
+"salary": "Salary",
+"interest": "Interest",
+"balance_adjustment": "Balance adjustment",
+"other_investments": "Other investments (excluded)"
+},
+"spaces": {
+"family": "Family",
+"personal": "Personal"
+},
+"main_account": "Main account",
+"encodings": [
+"cp1252"
+],
+"statement": {
+"header": "Transaction date;Description;Amount;Currency",
+"card": "CARD PAYMENT",
+"decimal": ".",
+"value_date": false,
+"date": "%d/%m/%Y"
+}
+}
+}

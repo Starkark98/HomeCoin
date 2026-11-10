@@ -55,23 +55,15 @@ def _setting(conn, key, value):
                  (key, str(value)))
 
 
-# sample statement per language: header (recognized by the import), card payment prefix, decimal separator
-STATEMENT = {
-    "it": ("Data operazione;Data valuta;Descrizione;Importo;Divisa", "PAGAMENTO POS", ",", True),
-    "en": ("Transaction date;Description;Amount;Currency", "CARD PAYMENT", ".", False),
-    "es": ("Fecha operación;Concepto;Importe;Divisa", "COMPRA TARJETA", ",", False),
-    "pt-BR": ("Data do lançamento;Histórico;Valor;Moeda", "COMPRA CARTAO", ",", False),
-    "de": ("Buchungstag;Verwendungszweck;Betrag;Währung", "KARTENZAHLUNG", ",", False),
-    "fr": ("Date d'opération;Libellé;Montant;Devise", "PAIEMENT CB", ",", False),
-}
-
-
 def sample_statement(today=None, currency="EUR"):
     """A made-up bank statement of the joint account (last 5 weeks, in the format of a bank of the interface language)
     for trying Import in the demo: some rows are already in HomeCoin (recognized as duplicates), the others are new and
     partly match the rules."""
     today = today or dt.date.today()
-    head, pos, dec, value_date = STATEMENT.get(i18n.LANG["code"], STATEMENT["en"])
+    # header (recognized by the import), card payment prefix, decimal separator, value date column, date format: the
+    # "statement" of the language file
+    st = i18n.statement()
+    head, pos, dec, value_date, date_fmt = st["header"], st["card"], st["decimal"], st["value_date"], st.get("date", "%d/%m/%Y")
     rnd = random.Random(7)
     rows = []
     for i in range(14):
@@ -85,7 +77,8 @@ def sample_statement(today=None, currency="EUR"):
     out = [head]
     for d, desc, cents in sorted(rows, reverse=True):
         amt = f"{cents / 100:.2f}".replace(".", dec)
-        out.append(";".join([f"{d:%d/%m/%Y}", *([f"{d:%d/%m/%Y}"] if value_date else []), desc, amt, currency]))
+        day = d.strftime(date_fmt)
+        out.append(";".join([day, *([day] if value_date else []), desc, amt, currency]))
     return "\n".join(out) + "\n"
 
 
@@ -176,7 +169,7 @@ def build(today=None):
             cells = line.split(";")
             dmy, desc, amt = cells[0], cells[-3], cells[-2]
             cents = int(round(float(amt.replace(",", ".")) * 100))  # one decimal separator, no thousands
-            day = dt.datetime.strptime(dmy, "%d/%m/%Y").date()
+            day = dt.datetime.strptime(dmy, i18n.statement().get("date", "%d/%m/%Y")).date()  # the language's format
             _tx(conn, day, abs(cents), "expense" if cents < 0 else "income", comune, None, desc.title(), source="import")
 
         # -------------------------------------------------------------- personal
@@ -293,7 +286,7 @@ def build(today=None):
         log = [(40, "security", "Password created", ""), (40, "change", "Space created", "Marco"),
                (39, "data", "Bank statement imported", L("{n} transactions", n=62)), (38, "change", "Account created", L("Credit card")),
                (32, "change", "Recurring item created", L("Water bill")), (21, "change", "Fair split applied to recurring items", ""),
-               (6, "access", "Sign-in", L("after {n} failed attempts", n=2)),
+               (6, "access", "Sign-in", i18n.tn("after {n} failed attempt", "after {n} failed attempts", 2)),
                (5, "delete", "Transaction deleted", L("Duplicate payment")), (2, "data", "Transactions exported (unencrypted file)", L("whole period")),
                (0, "access", "Sign-in", "")]
         for back, kind, action, detail in log:

@@ -12,6 +12,7 @@ import datetime as dt
 from collections import Counter, defaultdict
 from statistics import median
 
+from . import i18n
 from .util import FREQUENCIES, TECH_CODES_SQL, add_months, normalize_desc, parse_date, rule_matches
 
 HISTORY_MONTHS = 6
@@ -24,13 +25,9 @@ TOLERANCE_DAYS = 7          # delay after which an expected income is "late"
 LINK_WINDOW_DAYS = 10       # a transaction can be linked up to 10 days before the start of the recurring item
 
 
-# words ignored when grouping by payer: bank descriptions can be in Italian or English
-MONTH_WORDS = {"gennaio", "febbraio", "marzo", "aprile", "maggio", "giugno", "luglio", "agosto", "settembre", "ottobre",
-               "novembre", "dicembre", "gen", "feb", "mar", "apr", "mag", "giu", "lug", "ago", "set", "ott", "nov", "dic",
-               "mese", "mensile", "saldo", "acconto",
-               "january", "february", "march", "april", "may", "june", "july", "august", "september", "october",
-               "november", "december", "jan", "jun", "jul", "aug", "sep", "sept", "oct", "dec",
-               "month", "monthly"}
+# words ignored when grouping by payer: month names of every interface language (static/i18n/<lang>.json) and a few
+# Italian and English words of salary and rent descriptions
+MONTH_WORDS = i18n.month_words() | {"mese", "mensile", "saldo", "acconto", "sept", "month", "monthly"}
 
 
 def payee_key(description):

@@ -10,7 +10,7 @@ import urllib.request
 
 from . import i18n
 from .services import account_balances
-from .util import (OTHER_INVESTMENTS, SYSTEM_CODES, TECH_CATEGORIES, add_months, currency_of, fmt_decimal, fmt_money, occurrence,
+from .util import (CURRENCIES, OTHER_INVESTMENTS, SYSTEM_CODES, TECH_CATEGORIES, add_months, currency_of, fmt_decimal, fmt_money, occurrence,
                    parse_date)
 
 INVEST = "investimenti"
@@ -80,18 +80,9 @@ RATE_TYPES = ("fixed", "variable", "mixed")
 # reference indexes of variable and mixed-rate loans, per reference currency (same list as RATE_INDEXES in app.js; the
 # UI offers only those of the installation's currency, the first is the default). Any of them stays valid in a saved loan,
 # e.g. after a change of currency. The schedule uses the current value entered by hand: HomeCoin does not download rates
-RATE_INDEX_GROUPS = {
-    "EUR": ("Euribor 3M", "Euribor 1M", "Euribor 6M", "Euribor 12M"),
-    "USD": ("SOFR 30-day average", "Term SOFR 1M", "Term SOFR 3M", "Term SOFR 6M", "US Treasury 1Y (CMT)", "US Prime Rate"),
-    "GBP": ("Bank of England Bank Rate", "SONIA"),
-    "CHF": ("SARON",),
-    "CAD": ("Canadian prime rate", "CORRA"),
-    "AUD": ("RBA cash rate", "BBSW 3M"),
-    "MXN": ("TIIE 28", "TIIE de Fondeo"),
-    "BRL": ("TR", "IPCA", "Selic", "CDI"),  # IPCA: inflation, for inflation-linked loans
-}
+RATE_INDEX_GROUPS = {code: c.indexes for code, c in CURRENCIES.items()}  # in util.CURRENCIES
 # indexes of currencies HomeCoin no longer offers: a loan saved with one of them keeps it (shown and accepted)
-LEGACY_RATE_INDEXES = ("Short-term prime rate (Japan)", "TIBOR 3M", "TONA", "RBI repo rate", "MCLR 1Y")
+LEGACY_RATE_INDEXES = ("RBI repo rate", "MCLR 1Y")
 RATE_INDEXES = tuple(i for g in RATE_INDEX_GROUPS.values() for i in g) + LEGACY_RATE_INDEXES
 DEFAULT_RATE_INDEX = {cur: g[0] for cur, g in RATE_INDEX_GROUPS.items()}
 
@@ -112,12 +103,12 @@ def rate_fn(rec):
 def rate_label(rec):
     kind = rec.get("rate_type") or "fixed"
     pct = lambda x: fmt_decimal(x) + "%"  # decimal separator of the currency's country
-    var = f"{rec.get('rate_index') or 'index'} + {pct(rec.get('spread') or 0)}"
+    var = f"{rec.get('rate_index') or i18n.t('index')} + {pct(rec.get('spread') or 0)}"
     if kind == "variable":
         return i18n.t("variable: {rate}", rate=var)
     if kind == "mixed":
-        return i18n.t("mixed: {fixed} fixed for {years} years, then {variable}", fixed=pct(rec.get('rate') or 0),
-                      years=rec.get('fixed_years') or 0, variable=var)
+        return i18n.tn("mixed: {fixed} fixed for {n} year, then {variable}", "mixed: {fixed} fixed for {n} years, then {variable}",
+                       rec.get('fixed_years') or 0, fixed=pct(rec.get('rate') or 0), variable=var)
     return i18n.t("fixed {rate}", rate=pct(rec.get('rate') or 0)) if rec.get("rate") is not None else i18n.t("rate not specified")
 
 
@@ -440,7 +431,7 @@ def emergency(db, pid):
         have = max(0, (e.year - f.year) * 12 + e.month - f.month + (f.day == 1))
         notes.append({"level": "warn", "text": i18n.tn("Only {n} complete month of expenses recorded: the average over {months} months is lower than your real spending.", "Only {n} complete months of expenses recorded: the average over {months} months is lower than your real spending.", have, months=months)})
     elif not exp:
-        notes.append({"level": "info", "text": i18n.t("No expenses in the last {months} complete months: the months covered cannot be calculated.", months=months)})
+        notes.append({"level": "info", "text": i18n.tn("No expenses in the last {n} complete month: the months covered cannot be calculated.", "No expenses in the last {n} complete months: the months covered cannot be calculated.", months)})
     if liquidity < 0:
         notes.append({"level": "warn", "text": i18n.t("The available reserve is negative: some accounts (e.g. a credit card) are below zero.")})
     return {"notes": notes, "liquidity": liquidity, "operational": operational, "broker_cash": liquidity - operational,
@@ -788,7 +779,7 @@ def rebalance(db, pid, cfg):
     if estimated:
         warn("info", i18n.t("Price of {value} taken from the last trade (no market price yet).", value=names_of(estimated)))
     if stale:
-        warn("info", i18n.t("Prices of {value} are more than {stale_price_days} days old: update them for an accurate calculation.", value=names_of(stale), stale_price_days=STALE_PRICE_DAYS))
+        warn("info", i18n.tn("Prices of {value} are more than {n} day old: update them for an accurate calculation.", "Prices of {value} are more than {n} days old: update them for an accurate calculation.", STALE_PRICE_DAYS, value=names_of(stale)))
     if old_valuation:
         warn("info", i18n.t("The latest valuation of {value} is more than 3 months old.", value=names_of(old_valuation)))
     ignored = round(sum(float(targets.get(k) or 0) for k in ex_rows), 2)

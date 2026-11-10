@@ -27,7 +27,7 @@ from . import updater
 from . import util
 from .util import FREQUENCIES, add_months, months_between, parse_date, parse_number, rule_matches
 
-VERSION = "2.0.0"
+VERSION = "2.1.0"
 STATIC_DIR = dbm.BASE_DIR / "static"
 KINDS = ("expense", "income", "transfer")
 ACCOUNT_TYPES = ("corrente", "risparmio", "credito", "prepagata", "contanti", "investimenti", "altro")
@@ -373,7 +373,7 @@ def create_app(port):
                 detail = str(b.get("name") or b.get("ticker") or "") if isinstance(b, dict) else ""
             if request.endpoint in ("auth_login", "auth_recover", "auth_setup"):
                 if vault.failed_before:
-                    detail = i18n.t("after {n} failed attempts", n=vault.failed_before)
+                    detail = i18n.tn("after {n} failed attempt", "after {n} failed attempts", vault.failed_before)
                     kind = "security"
             elif not request.cookies.get(COOKIE) or not vault.valid(request.cookies.get(COOKIE), touch=False):
                 detail = (detail + " · " if detail else "") + "from script with temporary code"
@@ -701,7 +701,13 @@ def create_app(port):
         else:  # first start: the language picked on the welcome screen (cookie), else the browser's
             code = request.cookies.get("hc_lang")
             code = i18n.set_language(code if code in i18n.LANGUAGES else i18n.best_match(request.headers.get("Accept-Language")))
-        data = {"lang": code, "languages": i18n.LANGUAGES, "t": i18n.table(code)}
+        m = i18n.meta(code)
+        data = {"lang": code, "languages": i18n.LANGUAGES, "t": i18n.table(code),
+                "plural": m.get("plural", "one"), "months": m["months"], "currency": m.get("currency", "EUR"),
+                "date_pattern": m.get("date_pattern", i18n.DATE_PATTERN), "month_pattern": m.get("month_pattern", i18n.MONTH_PATTERN),
+                "currencies": {k: {"symbol": c.symbol, "locale": c.locale, "name": c.name, "short": c.short,
+                                   "steps": c.steps, "regions": c.regions, "indexes": c.indexes}
+                               for k, c in util.CURRENCIES.items()}}
         resp = Response("window.HC_I18N = " + json.dumps(data, ensure_ascii=False).replace("</", "<\\/") + ";\n",
                         mimetype="text/javascript")
         resp.headers["Cache-Control"] = "no-store"
@@ -1048,7 +1054,7 @@ def create_app(port):
                 db.execute("UPDATE transactions SET category_id=? WHERE id=?", (s["category_id"], t["id"]))
                 n += 1
         db.commit()
-        note(i18n.t("{n} transactions categorized", n=n))
+        note(i18n.tn("{n} transaction categorized", "{n} transactions categorized", n))
         if not n:
             g.audit_skip = True
         return jsonify(updated=n)
@@ -1428,7 +1434,7 @@ def create_app(port):
         r = db.execute("SELECT name, amount FROM recurring WHERE id = ?", (rid,)).fetchone()
         n = db.execute("SELECT COUNT(*) FROM transactions WHERE recurring_id = ?", (rid,)).fetchone()[0]
         expected = db.execute("SELECT expected FROM recurring WHERE id = ?", (rid,)).fetchone()[0]
-        note(f"{r['name']} · {audit.eur(r['amount'])}" + (" · " + i18n.t("with {n} transactions", n=n) if request.args.get("with_transactions") == "1" and n and not expected else ""))
+        note(f"{r['name']} · {audit.eur(r['amount'])}" + (" · " + i18n.tn("with {n} transaction", "with {n} transactions", n) if request.args.get("with_transactions") == "1" and n and not expected else ""))
         if expected:  # the transactions of a variable recurring item are the real ones (imported or entered): never deleted
             db.execute("UPDATE transactions SET recurring_id = NULL WHERE recurring_id = ?", (rid,))
         elif request.args.get("with_transactions") == "1":
@@ -1550,6 +1556,9 @@ def create_app(port):
                     FROM transactions t LEFT JOIN categories c ON c.id = t.category_id
                     WHERE {where} AND t.kind = ? {f'AND {NOT_OTHER}' if kind == 'expense' else ''}
                     GROUP BY t.category_id ORDER BY total DESC""", (*params, kind))]
+            for r in by_cat[kind]:
+                if r["id"] is None:
+                    r["name"] = i18n.t("Uncategorized")
 
         by_month = [dict(r) for r in db.execute(
             f"""SELECT substr(t.date,1,7) AS month,
@@ -1683,7 +1692,7 @@ def create_app(port):
                    WHERE t.kind = ? AND t.date BETWEEN ? AND ? AND NOT t.excluded AND t.account_id IN {PF_ACCOUNTS} {FLT}
                    GROUP BY t.category_id, ym""".replace("{PF_ACCOUNTS}", PF_ACCOUNTS).replace("{FLT}", flt),
                     ("income" if kind == "income" else "expense", d_from, d_to, p)):
-                row = rows.setdefault(r["id"], {"id": r["id"], "name": r["name"], "color": r["color"],
+                row = rows.setdefault(r["id"], {"id": r["id"], "name": r["name"] if r["id"] is not None else i18n.t("Uncategorized"), "color": r["color"],
                                                 "icon": r["icon"], "months": [0] * len(months), "total": 0})
                 row["months"][col[r["ym"]]] = r["v"]
                 row["total"] += r["v"]
@@ -1770,6 +1779,8 @@ def create_app(port):
                     raise ApiError(i18n.t("Invalid averaging period"))
             else:
                 try:
+                    if isinstance(v, bool):  # float(True) = 1.0, but "True" would be saved and break the calculation
+                        raise TypeError
                     f = float(v)
                 except (TypeError, ValueError):
                     raise ApiError(i18n.t("Invalid value: {k}", k=k))
@@ -2053,7 +2064,8 @@ def create_app(port):
             own_account(r[0])
             n = db.execute("SELECT COUNT(*) FROM trades WHERE holding_id = ?", (hid,)).fetchone()[0]
             if n:  # deleting it would also delete the trades, changing the account's cash and results
-                raise ApiError(i18n.t("The security has {n} recorded trades: delete them first (from Trades), or leave it with zero quantity if you sold it all", n=n), 409)
+                raise ApiError(i18n.tn("The security has {n} recorded trade: delete it first (from Trades), or leave it with zero quantity if you sold it all",
+                                       "The security has {n} recorded trades: delete them first (from Trades), or leave it with zero quantity if you sold it all", n), 409)
             note(db.execute("SELECT ticker FROM holdings WHERE id = ?", (hid,)).fetchone()[0])
             db.execute("UPDATE recurring SET holding_id = NULL WHERE holding_id = ?", (hid,))
             db.execute("DELETE FROM holdings WHERE id = ?", (hid,))
@@ -2305,8 +2317,11 @@ def create_app(port):
             db.commit()
         if dry:
             g.audit_skip = True  # dry run: changes nothing, does not go in the activity log
-        note(", ".join(f"{v} {i18n.t(k)}" for k, v in {"accounts": created["accounts"], "transactions": created["transactions"],
-                                                         "trades": created["trades"], "securities": created["holdings"]}.items() if v)
+        counts = (i18n.tn("{n} account", "{n} accounts", created["accounts"]) if created["accounts"] else "",
+                  i18n.tn("{n} transaction", "{n} transactions", created["transactions"]) if created["transactions"] else "",
+                  i18n.tn("{n} trade", "{n} trades", created["trades"]) if created["trades"] else "",
+                  i18n.tn("{n} security", "{n} securities", created["holdings"]) if created["holdings"] else "")
+        note(", ".join(x for x in counts if x)
              or i18n.t("no new data"))
         return jsonify(dry_run=dry, created=created, balances=balances, values=values, positions=positions)
 
@@ -2503,7 +2518,7 @@ def create_app(port):
         import openpyxl
         from openpyxl.styles import Font
         data = report().get_json()
-        labels = [f"{i18n.month_name(int(m[5:]))} {m[:4]}" for m in data["months"]]
+        labels = [i18n.month_label(int(m[5:]), int(m[:4])) for m in data["months"]]
         n = len(labels)
         wb = openpyxl.Workbook()
         wb.remove(wb.active)
@@ -2589,7 +2604,7 @@ def create_app(port):
                                [row[k] for k in keys])
             broken = db.execute("PRAGMA foreign_key_check").fetchall()
             if broken:  # rows pointing to nonexistent accounts, categories or securities: the backup is inconsistent
-                raise ValueError(i18n.t("{value} invalid links in the backup", value=len(broken)))
+                raise ValueError(i18n.tn("{n} invalid link in the backup", "{n} invalid links in the backup", len(broken)))
             db.commit()
         except Exception as exc:
             db.rollback()

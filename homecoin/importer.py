@@ -30,8 +30,16 @@ FIELD_KEYWORDS = {
     "credit": ["entrate", "accrediti", "accredito", "avere", "credit", "versamenti", "deposit", "money in", "paid in",
                "abono", "abonos", "ingreso", "entrada", "gutschrift", "eingang", "haben"],
     "category": ["categoria", "category", "kategorie", "categorie"],
+    # direction of an always-positive amount, in its own column: "Af"/"Bij" (ING Netherlands), "S"/"H" (German banks)
+    "sign": ["af bij", "af/bij", "soll/haben", "soll / haben", "debet/credit", "credit/debet", "debit/credit", "dr/cr"],
 }
-HEADER_HINTS = {kw for kws in FIELD_KEYWORDS.values() for kw in kws}
+# values of the direction column: money out / money in
+SIGN_OUT = {"af", "d", "debet", "debit", "dr", "s", "soll", "-"}
+SIGN_IN = {"bij", "c", "credit", "cr", "h", "haben", "+"}
+# one-word headers that also appear inside longer ones ("data" in "data valuta"): tried after every specific keyword,
+# including those of the other languages ("import" in static/i18n/<lang>.json)
+GENERIC_KEYWORDS = {"date": ["data", "date", "fecha", "datum", "giorno", "valuta", "wertstellung"],
+                    "description": ["detail", "note"], "amount": ["euro", "eur"]}
 
 
 def _clean_cell(v):
@@ -45,7 +53,9 @@ def _clean_cell(v):
 
 
 def _decode(data):
-    for enc in ("utf-8-sig", "cp1252", "latin-1"):
+    """UTF-8, else the encodings of the countries' bank files (the interface language's first: Windows-1250 for Polish,
+    Shift-JIS for Japanese), else Windows-1252. latin-1 accepts any byte: last resort."""
+    for enc in ("utf-8-sig", *i18n.encodings(), "cp1252", "latin-1"):
         try:
             return data.decode(enc)
         except UnicodeDecodeError:
@@ -106,6 +116,22 @@ def _norm(v):
     return re.sub(r"\s+", " ", "".join(ch for ch in text if not unicodedata.combining(ch))).replace("’", "'")
 
 
+def _keywords():
+    """{field: [keyword, ...]} in order of preference: the specific ones (all languages), then the generic ones.
+    Normalized like the headers (Japanese ｶﾅ, accents…)."""
+    extra = i18n.import_keywords()
+    out = {}
+    for field, words in FIELD_KEYWORDS.items():
+        generic = GENERIC_KEYWORDS.get(field, [])
+        ordered = [w for w in words if w not in generic] + extra.get(field, []) + generic
+        out[field] = list(dict.fromkeys(_norm(w) for w in ordered if _norm(w)))
+    return out
+
+
+KEYWORDS = _keywords()
+HEADER_HINTS = {kw for kws in KEYWORDS.values() for kw in kws}
+
+
 def detect_header(rows):
     for i, row in enumerate(rows[:25]):
         cells = [_norm(c) for c in row]
@@ -118,9 +144,9 @@ def detect_header(rows):
 def guess_mapping(headers):
     cells = [_norm(h) for h in headers]
     mapping, used = {}, set()
-    for field in ("date", "debit", "credit", "amount", "description", "category"):
+    for field in ("date", "sign", "debit", "credit", "amount", "description", "category"):
         mapping[field] = None
-        for kw in FIELD_KEYWORDS[field]:
+        for kw in KEYWORDS[field]:
             idx = next((i for i, c in enumerate(cells) if i not in used and kw in c), None)
             if idx is not None:
                 mapping[field] = idx
@@ -132,6 +158,8 @@ def guess_mapping(headers):
             if mapping[f] is not None:
                 used.discard(mapping[f])
                 mapping[f] = None
+    else:
+        mapping["sign"] = None  # a direction column only makes sense with a single amount column
     return mapping
 
 
@@ -217,6 +245,11 @@ def parse_rows(rows, header_row, mapping, invert=False, date_order="dmy"):
         desc = str(cell("description") or "").strip()
         if mapping.get("amount") is not None:
             cents = parse_amount(cell("amount"))
+            direction = _norm(cell("sign")) if mapping.get("sign") is not None else ""
+            if cents and direction in SIGN_OUT:
+                cents = -abs(cents)
+            elif cents and direction in SIGN_IN:
+                cents = abs(cents)
         else:
             deb = parse_amount(cell("debit"))
             cre = parse_amount(cell("credit"))

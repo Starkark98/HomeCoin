@@ -108,6 +108,15 @@ def contributions(db, account_id, people, d_from, d_to):
     return out, unassigned
 
 
+def _num(value, default):
+    """A saved setting as a number; a damaged value (e.g. "True" written by an older version) falls back to the default."""
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return default
+    return v if v == v and abs(v) != float("inf") else default
+
+
 def expense_rows(db, portfolio_id, d_from, d_to, months):
     """Average monthly actual expenses per account and category (active accounts, transactions not excluded from reports)."""
     rows = [dict(r) for r in db.execute(
@@ -123,6 +132,8 @@ def expense_rows(db, portfolio_id, d_from, d_to, months):
     for r in rows:
         r["monthly"] = r["total"] / months
         r["key"] = f"c{r['category_id']}"
+        if r["category_id"] is None:
+            r["category"] = i18n.t("Uncategorized")
     return rows
 
 
@@ -166,10 +177,10 @@ def compute(db, people, settings, portfolio_id):
         from .tools import history_months
         months = max(1, min(120, history_months(db, portfolio_id) - 1))
     else:
-        months = max(1, min(24, int(raw)))
-    margin = max(0.0, float(settings.get("split_margin", 0))) / 100
-    step = max(0, int(float(settings.get("split_round", 10)) * 100))
-    minimum = max(0, int(float(settings.get("split_minimum", 0)) * 100))
+        months = max(1, min(24, int(_num(raw, 6))))
+    margin = max(0.0, _num(settings.get("split_margin"), 0)) / 100
+    step = max(0, int(_num(settings.get("split_round"), 10) * 100))
+    minimum = max(0, int(_num(settings.get("split_minimum"), 0) * 100))
     base = settings.get("split_base") if settings.get("split_base") in BASES else "expenses"
     d_from, d_to = period(months)
 

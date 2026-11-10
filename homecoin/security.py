@@ -382,7 +382,7 @@ class Vault:
     def _throttle(self):
         wait = self.blocked_until - time.time()
         if wait > 0:
-            raise AuthError(i18n.t("Too many wrong attempts: try again in {value} seconds", value=int(wait) + 1), 429,
+            raise AuthError(i18n.tn("Too many wrong attempts: try again in {n} second", "Too many wrong attempts: try again in {n} seconds", int(wait) + 1), 429,
                             retry_after=int(wait) + 1)
 
     def _failed(self):

@@ -2,6 +2,30 @@
 
 All notable changes to HomeCoin are listed here, newest first.
 
+## 2.1.0 — 2026-11-10
+
+**Three more languages, two more currencies**
+- The interface now also speaks **Nederlands**, **Polski** and **日本語** (Japanese): nine languages in all. The language menu lists them in alphabetical order of their own names.
+- New currencies: **Polish złoty (PLN)**, written `1 234,56 zł`, with WIBOR 3M/6M and POLSTR for loans; **Japanese yen (JPY)**, without decimals, with the short-term prime rate, TONA and TIBOR. HomeCoin proposes them at the first start in Poland and Japan.
+- Dates follow the order of the language: `10 Nov 2026`, `2026年11月10日`.
+- Polish uses its three plural forms (1 transakcja, 2 transakcje, 5 transakcji); Japanese has none.
+
+**Better wording in every language**
+- Sentences that were built from pieces (a number, then a word) are now whole sentences, so each language can use its own word order and the right plural: "1 transaction", "2 transactions" also in English, where some messages said "1 transactions".
+- Fixed English words that were never translated: "Uncategorized" in reports and fair split, the title of the New category window, "currently" in recurring items, "excluded" in fair split, the counters of a bundle import, and a few others.
+
+**Import**
+- Bank files from Poland (Windows-1250) and Japan (Shift-JIS) are read with the right characters, and their column headers are recognized; Japanese dates `2026/12/31` and `2026年12月31日` too.
+- Banks that write every amount as positive and the direction in another column (*Af/Bij* at ING Netherlands, *S/H* at many German banks) are imported with the right sign.
+- Payers and payees in any alphabet are recognized when grouping regular payments (before, letters such as ł, ß or Japanese were ignored).
+
+**Fixes**
+- The fair split could fail to open after an invalid setting was saved.
+- The demo could not start in a language whose bank statements write dates year first.
+
+**Under the hood**
+- Each language is a single file (`static/i18n/<language>.json`) with its translations and its data (plural rule, months, date order, default categories, bank-file headers and encodings). Each currency is one line of `util.CURRENCIES`, which the browser receives too. Adding a language or a currency no longer touches the code.
+
 ## 2.0.0 — 2026-11-09
 
 **Six languages**

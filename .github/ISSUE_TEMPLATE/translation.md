@@ -8,7 +8,7 @@ labels: translation
 > ⚠️ Use the demo version (see "Try the demo first" in the README) for screenshots: **never post real data**.
 
 **Language**
-English / Español / Português (Brasil) / Deutsch / Français / Italiano
+Deutsch / English / Español / Français / Italiano / Nederlands / Polski / Português (Brasil) / 日本語
 
 **Where does the text appear?**
 The page or window (e.g. Settings → General, the New transaction window).
