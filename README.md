@@ -118,7 +118,7 @@ The first time, HomeCoin guides you through a few short steps:
 
 1. **Choose your language and a password.** The language is proposed from your browser; change it in the box at the top if needed. The password needs at least 8 characters, and very common ones are refused. A short sentence is easy to remember and hard to guess.
 2. **Save your recovery key.** It is shown only once. Write it down or keep it in a password manager: it is the only way back in if you forget the password. Without the password and the recovery key, **nobody can open your data, not even the author**.
-3. **Pick your currency**: euro (€), US dollar ($), British pound (£), Swiss franc (CHF), Canadian dollar (C$), Australian dollar (A$), Mexican peso (MX$), Colombian peso (COL$), Chilean peso (CLP$), Brazilian real (R$), South African rand (R), New Zealand dollar (NZ$), Singapore dollar (S$), Hong Kong dollar (HK$), Philippine peso (₱), Indian rupee (₹), UAE dirham (AED), Malaysian ringgit (RM), Swedish krona, Norwegian krone or Danish krone (kr), Israeli shekel (₪), Czech koruna (Kč), Polish złoty (zł), Japanese yen (¥), New Taiwan dollar (NT$) or South Korean won (₩). HomeCoin proposes the one of your country, from the browser and the language you chose.
+3. **Pick your currency** among the 27 HomeCoin offers (all listed, with their format, in [Typing amounts and dates](#typing-amounts-and-dates)). HomeCoin proposes the one of your country, from the browser and the language you chose.
 4. **Create your first space**: *Household* (shared costs, several people paying in) or *Personal* (your own money). See [Spaces](#spaces).
 5. **Add your main account** and, if you want, its current balance.
 
@@ -161,7 +161,7 @@ Not every space needs every page: in Settings → Spaces you choose which option
 
 - **Language** (Settings → General): Deutsch, English, Español, Français, Italiano, Nederlands, Polski, Português (Brasil), 日本語 (Japanese), 繁體中文 (Traditional Chinese) or 한국어 (Korean). It changes menus, messages, dates (in the order of the language: `10 Nov 2026`, `2026年11月10日`), exports and the names of the categories of **new** spaces. The categories you already have keep their names, so changing language never touches your data. The sign-in screen uses the chosen language too.
 - **Currency** (Settings → General): the currency your accounts are kept in, with the number format of its country (see the table below). Language and currency are independent: a Swiss user can have the interface in French and amounts in Swiss francs.
-- The translations other than English and Italian are new: if you find a wrong or clumsy word, please report it (see [Getting help](#getting-help)).
+- The translations were checked by a second reviewer, but if you find a wrong or clumsy word, please report it (see [Getting help](#getting-help)).
 
 ### Typing amounts and dates
 
