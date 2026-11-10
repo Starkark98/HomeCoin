@@ -67,6 +67,9 @@ function tn(one, other, n, vars = {}) {
 const CURRENCIES = Object.fromEntries(Object.entries(I18N.currencies).map(([k, c]) => [k, { ...c, name: T(c.name) }]));
 // names of the currencies, for the translation files: T('Euro') T('US dollar') T('British pound') T('Swiss franc')
 // T('Canadian dollar') T('Australian dollar') T('Mexican peso') T('Brazilian real') T('Polish złoty') T('Japanese yen')
+// T('Colombian peso') T('Chilean peso') T('South African rand') T('New Zealand dollar') T('Singapore dollar')
+// T('Hong Kong dollar') T('Philippine peso') T('Indian rupee') T('UAE dirham') T('Malaysian ringgit') T('Swedish krona')
+// T('Norwegian krone') T('Danish krone') T('Israeli new shekel') T('Czech koruna') T('New Taiwan dollar') T('South Korean won')
 // DEC: decimal separator of the currency ('.' or ','), DIGITS: decimals of an amount (from Intl),
 // SYM_FIRST: symbol before the number. All the number rules of the UI follow these, never a currency code
 let CUR = 'EUR', CUR_SYM = '€', LOCALE = 'it-IT', DEC = ',', DIGITS = 2, SYM_FIRST = false, MONEY, MONEY0, _unitFmt = {};
@@ -311,7 +314,7 @@ const LOCK_VIEWS = {
     if (st?.demo) {  // demo version: sample data, you get in with one click
       $('#lock-body').innerHTML = `<form class="lock-body" style="margin:0">
         <h2>${T('Demo version 🎬')}</h2>
-        <p class="muted small">${T('All data is')} <b>${T('made up')}</b> ${T('and recreated at every start of the demo: feel free to experiment, nothing you do is kept. Your real data cannot be reached from here.')}</p>
+        <p class="muted small">${T('All data is <b>made up</b> and recreated at every start of the demo: feel free to experiment, nothing you do is kept. Your real data cannot be reached from here.')}</p>
         <div class="lock-err" id="lock-err"></div>
         <button class="btn btn-primary" id="l-go">▶ ${T('Enter the demo')}</button></form>`;
       lockSubmit($('#l-go'), async () => { await api('/auth/login', { method: 'POST', body: { password: st.demo_password } }); unlocked(); });
@@ -335,7 +338,7 @@ const LOCK_VIEWS = {
       <div class="wiz-steps"><span class="on">1 ${T('Password')}</span><span>2 ${T('Recovery key')}</span><span>3 ${T('Your setup')}</span></div>
       <h2>${T('Welcome to HomeCoin 🛡️')}</h2>
       <label class="field">🌐 ${T('Language')}${languageSelect('l-lang')}</label>
-      <p class="muted small">${T('Choose the password you will be asked for every time you open it.')} ${st.legacy_data ? `${T('Your existing data (and the automatic backups) will be')} <b>${T('encrypted')}</b> ${T('with AES-256.')}` : T('All data will be stored encrypted with AES-256.')}
+      <p class="muted small">${T('Choose the password you will be asked for every time you open it.')} ${st.legacy_data ? T('Your existing data (and the automatic backups) will be <b>encrypted</b> with AES-256.') : T('All data will be stored encrypted with AES-256.')}
         ${T('The password is not saved anywhere: keep it safe.')}</p>
       ${newPwFields(T('Password'))}
       <div class="lock-err" id="lock-err"></div>
@@ -377,7 +380,7 @@ const LOCK_VIEWS = {
     $('#lock-body').innerHTML = `<form class="lock-body" style="margin:0">
       ${first ? `<div class="wiz-steps"><span class="done">1 ${T('Password')}</span><span class="on">2 ${T('Recovery key')}</span><span>3 ${T('Your setup')}</span></div>` : ''}
       <h2>${T('Your recovery key 🗝️')}</h2>
-      <p class="muted small">${T('If you forget the password, this is')} <b>${T('the only way')}</b> ${T('to reopen your data: nobody (not even the author of HomeCoin) can recover it without this key. Write it on paper or save it in a password manager. It will not be shown again.')}</p>
+      <p class="muted small">${T('If you forget the password, this is <b>the only way</b> to reopen your data: nobody (not even the author of HomeCoin) can recover it without this key. Write it on paper or save it in a password manager. It will not be shown again.')}</p>
       <div class="recovery-code" id="l-key">${esc(key)}</div>
       <button type="button" class="btn" id="l-copy">📋 ${T('Copy')}</button>
       <label class="check-row"><input type="checkbox" id="l-ok"> ${T('I saved the recovery key in a safe place')}</label>
@@ -1286,8 +1289,8 @@ async function renderConti(v) {
       <div class="card"><div class="card-head"><h3>${T('How it works')}</h3></div>
         <div class="list">
           <div class="list-item"><div class="cat-ico" style="--c:#6366f1">🏦</div><div class="grow">${T('Every transaction belongs to an account: the balance is the opening balance plus income minus expenses.')}</div></div>
-          <div class="list-item"><div class="cat-ico" style="--c:#0ea5e9">🔄</div><div class="grow"><b>${T('Transfers')}</b> ${T('move money between accounts (e.g. current → savings, card top-up) without counting as spending.')}</div></div>
-          <div class="list-item"><div class="cat-ico" style="--c:#f59e0b">🗄️</div><div class="grow">${T('A closed account can be')} <b>${T('archived')}</b>: ${T('it stays in the history but no longer appears in the choices.')}</div></div>
+          <div class="list-item"><div class="cat-ico" style="--c:#0ea5e9">🔄</div><div class="grow">${T('<b>Transfers</b> move money between accounts (e.g. current → savings, card top-up) without counting as spending.')}</div></div>
+          <div class="list-item"><div class="cat-ico" style="--c:#f59e0b">🗄️</div><div class="grow">${T('A closed account can be <b>archived</b>: it stays in the history but no longer appears in the choices.')}</div></div>
         </div></div>
     </div>`;
   $('#acc-new').onclick = $('#acc-add').onclick = () => accountModal();
@@ -1338,14 +1341,14 @@ const ACC_BEHAVIOR = {
     T('<b>Income</b> and <b>expenses</b> count in reports, budgets and the month\'s savings'),
     T('Transfers to your other accounts move money without being expenses')] },
   credit: { icon: '💳', title: T('credit card'), points: [
-    `${T('Expenses count as')} <b>${T('spending')}</b> ${T('at the time of purchase')}`,
+    T('Expenses count as <b>spending</b> at the time of purchase'),
     T('The balance (usually negative) is the card debt; the statement charged to your account is paid with a transfer to the card'),
     T('It counts toward net worth as cash (even when negative)')] },
   invest: { icon: '📈', title: T('investment account'), points: [
     T('The <b>value</b> is the market value: cash + securities (from trades and updated prices) or values entered by hand'),
-    `${T('Incoming transfers are')} <b>${T('contributions')}</b> ${T('(capital put in), not expenses; the gain is value − invested')}`,
-    `${T('Buying and selling securities counts as')} <b>${T('invested')}</b>; <b>${T('money market')}</b> ${T('ETFs are cash')}`,
-    `${T('Money market securities and broker cash count toward the')} <b>${T('emergency fund')}</b>; ${T('the rest does not')}`] },
+    T('Incoming transfers are <b>contributions</b> (capital put in), not expenses; the gain is value − invested'),
+    T('Buying and selling securities counts as <b>invested</b>; <b>money market</b> ETFs are cash'),
+    T('Money market securities and broker cash count toward the <b>emergency fund</b>; the rest does not')] },
 };
 // type suggested from the account name (the choice can still be changed)
 const ACC_GUESS = [
@@ -1358,12 +1361,12 @@ const ACC_GUESS = [
 const guessAccountType = (name) => ACC_GUESS.find(([, re]) => re.test(name || ''))?.[0] || null;
 // type change that moves the account between cash and investments: the only one that changes the calculations (the other types are all cash)
 const ACC_SHIFT = {
-  toInvest: [`${T('The balance stops being cash: it leaves the')} <b>${T('emergency fund')}</b> ${T('and net worth uses the')} <b>${T('market value')}</b>`,
-    `${T('Incoming transfers become')} <b>${T('contributions')}</b> ${T('(invested capital) and the gain is calculated on them')}`,
-    `${T('Transactions already recorded stay the same, but the')} <b>${T('savings')}</b> ${T('and')} <b>${T('invested')}</b> ${T('amounts of past months are recalculated')}`],
-  toCash: [`${T('The account goes back to')} <b>${T('cash')}</b>: ${T('it joins the emergency fund and counts with its book balance, no longer its market value')}`,
+  toInvest: [T('The balance stops being cash: it leaves the <b>emergency fund</b> and net worth uses the <b>market value</b>'),
+    T('Incoming transfers become <b>contributions</b> (invested capital) and the gain is calculated on them'),
+    T('Transactions already recorded stay the same, but the <b>savings</b> and <b>invested</b> amounts of past months are recalculated')],
+  toCash: [T('The account goes back to <b>cash</b>: it joins the emergency fund and counts with its book balance, no longer its market value'),
     T('The <b>valuations</b> you entered are no longer used and the account disappears from Investments (return, XIRR, allocation)'),
-    `${T('Incoming transfers are no longer contributions: the')} <b>${T('savings')}</b> ${T('and')} <b>${T('invested')}</b> ${T('amounts of past months may change')}`],
+    T('Incoming transfers are no longer contributions: the <b>savings</b> and <b>invested</b> amounts of past months may change')],
 };
 const accShift = (from, to) => ((from === 'investimenti') === (to === 'investimenti') ? null : to === 'investimenti' ? 'toInvest' : 'toCash');
 
@@ -1590,7 +1593,7 @@ function recurringModal(r = null) {
       <div class="field full var-box" id="r-var-wrap">
         <label class="check"><input type="checkbox" id="r-var" ${x.expected ? 'checked' : ''}> <b>${T('Variable amount and date')}</b>
           <span class="muted small">${T('(e.g. salary, commissions, usage-based bills)')}</span></label>
-        <div id="r-var-help" class="muted small">HomeCoin <b>${T('does not record')}</b> ${T('transactions on its own: when the real one arrives (entered or imported) it links it to this recurring item if the description contains the keyword and the amount is plausible. The amount and day expected in the Calendar are the median of recent payments; the typical amount applies only until there are any, or always if you tick the option below. If it is more than a week late, you get a warning.')}
+        <div id="r-var-help" class="muted small">${T('HomeCoin <b>does not record</b> transactions on its own: when the real one arrives (entered or imported) it links it to this recurring item if the description contains the keyword and the amount is plausible. The amount and day expected in the Calendar are the median of recent payments; the typical amount applies only until there are any, or always if you tick the option below. If it is more than a week late, you get a warning.')}
           <label class="field" style="margin-top:8px">${T('Keyword in the description')} <input id="r-match" maxlength="60" value="${esc(x.match_text || '')}" placeholder="${esc(T('E.g. the employer\'s name (empty = the recurring item\'s name)'))}"></label>
           <label class="check" style="margin-top:4px"><input type="checkbox" id="r-fixed" ${x.amount_fixed ? 'checked' : ''}> <b>${T('Always expect the typical amount')}</b>
             <span class="muted small">${T('instead of the median of recent payments')}${x.expected_median ? ` (${T('currently {amount}', { amount: money(x.expected_median) })})` : ''}: ${T('useful after an increase or a change, until the median catches up')}</span></label>
@@ -1769,9 +1772,9 @@ async function renderImport(v) {
         ${AUTH.status?.demo ? `<div style="text-align:center;margin-top:12px"><button class="btn btn-sm" id="imp-sample">🧪 ${T('Try it with a sample bank statement')}</button></div>` : ''}
       </div>
       <div class="card"><div class="card-head"><h3>${T('How it works')}</h3></div><div class="list">
-        <div class="list-item"><div class="cat-ico" style="--c:#6366f1">1️⃣</div><div class="grow">${T('Export your transactions from online banking as')} <b>${T('CSV or Excel')}</b>.</div></div>
+        <div class="list-item"><div class="cat-ico" style="--c:#6366f1">1️⃣</div><div class="grow">${T('Export your transactions from online banking as <b>CSV or Excel</b>.')}</div></div>
         <div class="list-item"><div class="cat-ico" style="--c:#8b5cf6">2️⃣</div><div class="grow">HomeCoin <b>${T('recognizes the columns')}</b> ${T('(date, description, amount or money in/out).')}</div></div>
-        <div class="list-item"><div class="cat-ico" style="--c:#ec4899">3️⃣</div><div class="grow">${T('Categories are')} <b>${T('filled in automatically')}</b> ${T('from rules and history, and')} <b>${T('duplicates')}</b> ${T('are flagged.')}</div></div>
+        <div class="list-item"><div class="cat-ico" style="--c:#ec4899">3️⃣</div><div class="grow">${T('Categories are <b>filled in automatically</b> from rules and history, and <b>duplicates</b> are flagged.')}</div></div>
         <div class="list-item"><div class="cat-ico" style="--c:#10b981">🔒</div><div class="grow">${T('The file is processed only on your PC.')}</div></div>
       </div></div></div>`;
     const drop = $('#drop'), input = $('#file');
@@ -1814,7 +1817,7 @@ async function renderImport(v) {
             <span class="muted small" id="i-dord-note">${I.dateOrderSource === 'file' ? T('Recognized from the dates in the file') : T('The dates in the file fit both: check that this is right')}</span></label>
           <label class="check" style="align-self:end;padding-bottom:10px"><input type="checkbox" id="i-inv" ${I.invert ? 'checked' : ''}> ${T('Invert the sign (e.g. credit card statements)')}</label>
         </div>
-        <p class="muted small">${T('Use')} <b>${T('Amount')}</b> ${T('if the file has a single column with positive/negative values, or')} <b>${T('Money out')}</b> + <b>${T('Money in')}</b> ${T('if they are separate.')}</p>
+        <p class="muted small">${T('Use <b>Amount</b> if the file has a single column with positive/negative values, or <b>Money out</b> + <b>Money in</b> if they are separate.')}</p>
       </div>
       <div class="card" style="padding:8px"><div class="table-wrap"><table class="preview-table"><thead><tr>${u.headers.map((h, i) => `<th class="${mapped.has(i) ? 'mapped' : ''}">${esc(h)}</th>`).join('')}</tr></thead>
         <tbody>${u.preview.map((r) => `<tr>${r.map((c) => `<td>${esc(c ?? '')}</td>`).join('')}</tr>`).join('')}</tbody></table></div></div>
@@ -1847,10 +1850,10 @@ async function renderImport(v) {
     const rows = I.rows;
     const draw = () => {
       const inc = rows.filter((r) => r.include);
-      $('#i-sum').innerHTML = `<span class="chip">✅ <b>${inc.length}</b> ${T('to import')}</span>
-        <span class="chip">♻️ <b>${rows.filter((r) => r.duplicate).length}</b> ${T('duplicates')}</span>
-        <span class="chip">⚠️ <b>${rows.filter((r) => r.error).length}</b> ${T('invalid')}</span>
-        <span class="chip">❔ <b>${inc.filter((r) => !r.category_id).length}</b> ${T('uncategorized')}</span>
+      $('#i-sum').innerHTML = `<span class="chip">✅ ${tn('<b>{n}</b> to import', '<b>{n}</b> to import', inc.length)}</span>
+        <span class="chip">♻️ ${tn('<b>{n}</b> duplicate', '<b>{n}</b> duplicates', rows.filter((r) => r.duplicate).length)}</span>
+        <span class="chip">⚠️ ${tn('<b>{n}</b> invalid', '<b>{n}</b> invalid', rows.filter((r) => r.error).length)}</span>
+        <span class="chip">❔ ${tn('<b>{n}</b> uncategorized', '<b>{n}</b> uncategorized', inc.filter((r) => !r.category_id).length)}</span>
         <span class="chip">📥 <b class="pos">${money(inc.filter((r) => r.kind === 'income').reduce((s, r) => s + r.amount, 0))}</b></span>
         <span class="chip">📤 <b class="neg">${money(inc.filter((r) => r.kind === 'expense').reduce((s, r) => s + r.amount, 0))}</b></span>`;
       $('#i-go').textContent = `${T('Import')} ${inc.length} transactions`;
@@ -2138,11 +2141,16 @@ async function renderRipartizione(v) {
     name: $('[data-m=name]', row).value.trim(), account_id: +$('[data-m=account]', row).value,
     amount: parseMoney($('[data-m=amount]', row).value) || 0, rule: $('[data-m=rule]', row).value,
   })).filter((x) => x.name && x.amount > 0);
-  const save = async (extra = {}) => {
-    try { state = await api('/split', { method: 'PUT', body: { ...cfg(), ...extra } }); syncIds(); drawResult(); }
-    catch (e) { fail(e); }
+  // snapshot: the values are read when they change, so a save that runs after the page was left still has them
+  const save = async (extra = {}, snapshot = null) => {
+    try {
+      state = await api('/split', { method: 'PUT', body: { ...(snapshot || cfg()), ...extra } });
+      if (!$('#sp-months')) return;  // page left meanwhile: saved, nothing to redraw
+      syncIds(); drawResult();
+    } catch (e) { fail(e); }
   };
-  const saveSoon = debounce(() => save(), 600);
+  const saveLater = debounce((snapshot) => save({}, snapshot), 600);
+  const saveSoon = () => saveLater(cfg());
   const s = state.settings;
 
   const personRow = (p = {}) => `<div class="sp-person" data-id="${p.id ?? ''}">
@@ -2163,10 +2171,9 @@ async function renderRipartizione(v) {
   v.innerHTML = `
     <div class="sp-intro card">
       <div class="sp-intro-ico">⚖️</div>
-      <div><b>${T('How it works')}</b><p class="muted small" style="margin:4px 0 0">${T('HomeCoin calculates how much each person should pay into each account so that everyone')}
-        <b>${T('saves the same percentage of their income')}</b>. ${T('You can start from')} <b>${T('actual expenses')}</b>, ${T('from the')} <b>${T('contributions made so far')}</b>
-        ${T('(total ÷ months) or from')} <b>${T('amounts entered by hand')}</b>. ${T('Items')} <i>${T('split equally')}</i> ${T('(e.g. a joint mortgage) are divided in half,')}
-        <i>${T('proportional')}</i> ${T('ones make up the difference;')} <i>${T('excluded')}</i> ${T('ones are left out of the calculation.')}</p></div>
+      <div><b>${T('How it works')}</b><p class="muted small" style="margin:4px 0 0">${T('HomeCoin calculates how much each person should pay into each account so that everyone <b>saves the same percentage of their income</b>.')}
+        ${T('You can start from <b>actual expenses</b>, from the <b>contributions made so far</b> (total ÷ months) or from <b>amounts entered by hand</b>.')}
+        ${T('Items <i>split equally</i> (e.g. a joint mortgage) are divided in half, <i>proportional</i> ones make up the difference; <i>excluded</i> ones are left out of the calculation.')}</p></div>
     </div>
     <div class="grid-3-2">
       <div class="card"><div class="card-head"><h3>👥 ${T('People and income')}</h3><button class="btn btn-sm" id="sp-add">＋ ${T('Person')}</button></div>
@@ -2506,11 +2513,13 @@ async function renderMutuo(v) {
     });
   });
   const sim = debounce(async () => {
+    if (!$('#sim-p')) return;  // the page was left before the delayed calculation started
     const p = plans.find((x) => x.id === +$('#sim-p').value);
     if (!p) return;
     if ($('#sim-n').value === '') $('#sim-n').value = p.paid;
     try {
       const r = await api('/tools/mortgage/simulate', { method: 'POST', body: { recurring_id: p.id, extra: parseMoney($('#sim-x').value), after_payment: +$('#sim-n').value, mode: $('#sim-m').value } });
+      if (!$('#sim-out')) return;  // left while waiting for the answer
       $('#sim-out').innerHTML = calcNotes(r.notes) + (r.closed ? `<div class="sp-warn card">🎉 ${T('With this amount the loan is paid off: you save {amount} in interest.', { amount: money0(r.interest_saved) })}</div>`
         : `<div class="rec-stats" style="grid-template-columns:repeat(4,minmax(0,1fr))">
             <div class="rec-stat"><span>${T('Interest saved')}</span><b class="pos">${money0(r.interest_saved)}</b></div>
@@ -2617,10 +2626,10 @@ const ASSET_LABEL = { azioni: T('Stocks'), obbligazioni: T('Bonds'), monetario: 
 const assetLabel = (c) => ASSET_LABEL[c] || c;
 // the class changes the behavior: money market funds are cash (they do not count as invested and count toward the emergency fund)
 const CLASS_HELP = {
-  monetario: `💧 <b>${T('Money market')}</b>: ${T('it is parked cash. Buying or selling it does')} <b>${T('not')}</b> ${T('count as invested, and it counts toward the emergency fund.')}`,
-  azioni: `📈 ${T('Investment: purchases and sales count as')} <b>${T('invested')}</b>.`, obbligazioni: `📈 ${T('Investment: purchases and sales count as')} <b>${T('invested')}</b>.`,
-  'materie prime': `📈 ${T('Investment: purchases and sales count as')} <b>${T('invested')}</b>.`, immobiliare: `📈 ${T('Investment: purchases and sales count as')} <b>${T('invested')}</b>.`,
-  crypto: `📈 ${T('Investment: purchases and sales count as')} <b>${T('invested')}</b>.`, altro: `📈 ${T('Investment: purchases and sales count as')} <b>${T('invested')}</b>.`,
+  monetario: `💧 ${T('<b>Money market</b>: it is parked cash. Buying or selling it does <b>not</b> count as invested, and it counts toward the emergency fund.')}`,
+  azioni: `📈 ${T('Investment: purchases and sales count as <b>invested</b>.')}`, obbligazioni: `📈 ${T('Investment: purchases and sales count as <b>invested</b>.')}`,
+  'materie prime': `📈 ${T('Investment: purchases and sales count as <b>invested</b>.')}`, immobiliare: `📈 ${T('Investment: purchases and sales count as <b>invested</b>.')}`,
+  crypto: `📈 ${T('Investment: purchases and sales count as <b>invested</b>.')}`, altro: `📈 ${T('Investment: purchases and sales count as <b>invested</b>.')}`,
 };
 const ASSET_COLORS = { azioni: '#7b52ab', obbligazioni: '#3f86dc', monetario: '#2fbf71', 'materie prime': '#fcc419', immobiliare: '#f59f45', crypto: '#e45bc4', altro: '#8b8fa8', 'non specificato': '#c9976a', 'liquidità': '#94a3b8' };
 const pctSigned = (x) => (x == null ? '—' : `${x > 0 ? '+' : ''}${num(x * 100, 2)}%`);
@@ -2630,7 +2639,7 @@ async function renderInvestimenti(v) {
   const d = await api('/investments?months=' + S.invMonths);
   if (!d.accounts.length) {
     v.innerHTML = `<div class="card empty"><div class="big">📊</div><h3>${T('No investment accounts')}</h3>
-      <p>${T('Create an account of type')} <b>${T('Investment account')}</b> ${T('(broker, pension fund, investment plan…). Record contributions as transfers from your current account and update the value: HomeCoin calculates gain and return.')}</p>
+      <p>${T('Create an account of type <b>Investment account</b> (broker, pension fund, investment plan…). Record contributions as transfers from your current account and update the value: HomeCoin calculates gain and return.')}</p>
       <div class="actions"><button class="btn btn-primary" id="iv-new">＋ ${T('New investment account')}</button></div></div>`;
     $('#iv-new').onclick = () => accountModal(null, { type: 'investimenti', icon: '📈', name: '' });
     return;
@@ -2955,7 +2964,7 @@ function valuationModal(accountId) {
 function holdingModal(accountId, h = null) {
   const x = h || { ticker: '', name: '', quantity: '', asset_class: 'azioni' };
   const m = openModal(h ? T('Edit security') : T('Add security'), `
-    <p class="muted small" style="margin:0 0 14px">${T('Use the Yahoo Finance ticker with the exchange suffix:')} <b>.MI</b> ${T('Milan,')} <b>.DE</b> ${T('Xetra,')} <b>.AS</b> ${T('Amsterdam,')} <b>.PA</b> ${T('Paris (e.g. VWCE.DE, SWDA.MI). With "Update prices" the account value is calculated automatically.')}</p>
+    <p class="muted small" style="margin:0 0 14px">${T('Use the Yahoo Finance ticker with the exchange suffix: <b>.MI</b> Milan, <b>.DE</b> Xetra, <b>.AS</b> Amsterdam, <b>.PA</b> Paris (e.g. VWCE.DE, SWDA.MI). With "Update prices" the account value is calculated automatically.')}</p>
     <div class="form-grid">
       <label class="field">${T('Ticker')} <input id="hd-ticker" maxlength="30" value="${esc(x.ticker)}" placeholder="VWCE.DE" autofocus></label>
       <label class="field">${T('Quantity')} <input id="hd-qty" inputmode="decimal" value="${x.quantity === '' ? '' : decInput(x.quantity)}" ${x.trades ? 'disabled title="Calculated from the trades"' : ''}></label>
@@ -3221,7 +3230,7 @@ async function renderImpostazioni(v, params) {
       <div class="settings-row"><div><b>${T('Automatic backups')}</b><p class="muted small">${T('At every start an encrypted copy of the database is saved (last 15 kept)')}</p></div></div>
     </div>
     <div class="card"><div class="card-head"><h3>📤 ${T('Export')}</h3></div>
-      <div class="settings-row"><div><p class="muted small" style="margin:0">⚠️ ${T('Exported files (CSV, Excel, reports) are')} <b>${T('not encrypted')}</b>: ${T('keep them in a safe place and delete them when you no longer need them.')}</p></div></div>
+      <div class="settings-row"><div><p class="muted small" style="margin:0">⚠️ ${T('Exported files (CSV, Excel, reports) are <b>not encrypted</b>: keep them in a safe place and delete them when you no longer need them.')}</p></div></div>
       <div class="settings-row"><div><b>${T('All transactions')}</b><p class="muted small">${T('For Excel or other programs')}</p></div>
         <div style="display:flex;gap:8px"><a class="btn btn-sm" href="/api/export/transactions?format=csv&pf=${S.pid}">CSV</a><a class="btn btn-sm" href="/api/export/transactions?format=xlsx&pf=${S.pid}">${T('Excel')}</a></div></div>
       <div class="settings-row"><div><b>${T('Annual report')}</b><p class="muted small">${T('From the Reports page')}</p></div><a class="btn btn-sm" href="#/report">${T('Go →')}</a></div>
@@ -3377,11 +3386,11 @@ function updatePane() {
         <label class="switch"><input type="checkbox" id="s-upd-auto" ${u.auto ? 'checked' : ''}><span></span></label></div>
     </div>
     <div class="card"><div class="card-head"><h3>🛡️ ${T('How updates stay safe')}</h3></div><div class="list small">
-      <div>✍️ ${T('Every release is')} <b>${T('signed')}</b> ${T('by the maintainer: HomeCoin checks the signature (Ed25519) with a key built into the program and refuses anything else, even if it came from GitHub.')}</div>
-      <div>🔢 ${T('Every downloaded byte is checked against the signed')} <b>SHA-256</b> ${T('before anything is installed.')}</div>
-      <div>⏫ ${T('Only')} <b>${T('newer')}</b> ${T('published versions are offered: never test builds, never an older version.')}</div>
-      <div>💾 ${T('An encrypted')} <b>${T('backup')}</b> ${T('of the database is saved first; the data folder is never part of an update.')}</div>
-      <div>🖐️ ${T('Nothing is installed until you click')} <b>${T('Update')}</b>.</div>
+      <div>✍️ ${T('Every release is <b>signed</b> by the maintainer: HomeCoin checks the signature (Ed25519) with a key built into the program and refuses anything else, even if it came from GitHub.')}</div>
+      <div>🔢 ${T('Every downloaded byte is checked against the signed <b>SHA-256</b> before anything is installed.')}</div>
+      <div>⏫ ${T('Only <b>newer</b> published versions are offered: never test builds, never an older version.')}</div>
+      <div>💾 ${T('An encrypted <b>backup</b> of the database is saved first; the data folder is never part of an update.')}</div>
+      <div>🖐️ ${T('Nothing is installed until you click <b>Update</b>.')}</div>
     </div></div></div>`;
 }
 function bindUpdatePane(v) {

@@ -46,7 +46,9 @@ _EURO_AREA = ("AT", "BE", "CY", "DE", "EE", "ES", "FI", "FR", "GR", "HR", "IE", 
 CURRENCIES = {
     "EUR": Currency("€", "it-IT", ",", ".", 2, False, True, "Euro", "€", (1, 5, 10, 50), _EURO_AREA, "DD/MM/YYYY",
                     ("Euribor 3M", "Euribor 1M", "Euribor 6M", "Euribor 12M"), ("EUR",)),                    # 1.234,56 €
-    "USD": Currency("$", "en-US", ".", ",", 2, True, False, "US dollar", "US$", (1, 5, 10, 50), ("US", "PR"), "MM/DD/YYYY",
+    # also the official currency of Ecuador, El Salvador and Panama
+    "USD": Currency("$", "en-US", ".", ",", 2, True, False, "US dollar", "US$", (1, 5, 10, 50),
+                    ("US", "PR", "GU", "VI", "AS", "MP", "EC", "SV", "PA", "TL"), "MM/DD/YYYY",
                     ("SOFR 30-day average", "Term SOFR 1M", "Term SOFR 3M", "Term SOFR 6M", "US Treasury 1Y (CMT)",
                      "US Prime Rate"), ("US$", "USD")),                                                       # $1,234.56
     "GBP": Currency("£", "en-GB", ".", ",", 2, True, False, "British pound", "£", (1, 5, 10, 50), ("GB", "IM", "JE", "GG"),
@@ -58,13 +60,59 @@ CURRENCIES = {
                     ("Canadian prime rate", "CORRA"), ("CA$", "C$", "CAD")),                                  # $1,234.56
     "AUD": Currency("$", "en-AU", ".", ",", 2, True, False, "Australian dollar", "A$", (1, 5, 10, 50), ("AU",),
                     "DD/MM/YYYY", ("RBA cash rate", "BBSW 3M"), ("AU$", "A$", "AUD")),                        # $1,234.56
-    # $1,234.56; also suggested in the rest of Spanish-speaking Latin America (the closest peso HomeCoin has)
+    # $1,234.56; also suggested in the Spanish-speaking countries without their own currency here (the closest peso)
     "MXN": Currency("$", "es-MX", ".", ",", 2, True, False, "Mexican peso", "MX$", (10, 50, 100, 500),
-                    ("MX", "AR", "BO", "CL", "CO", "CR", "CU", "DO", "EC", "GT", "HN", "NI", "PA", "PE", "PY", "SV", "UY",
-                     "VE"), "DD/MM/YYYY", ("TIIE 28", "TIIE de Fondeo"), ("MX$", "MXN")),
+                    ("MX", "AR", "BO", "CR", "CU", "DO", "GT", "HN", "NI", "PE", "PY", "UY", "VE"), "DD/MM/YYYY",
+                    ("TIIE 28", "TIIE de Fondeo"), ("MX$", "MXN")),
+    # $ 1.235 (es-CO: no-break space after the symbol, no decimals in the browsers); UVR: inflation-linked unit of mortgages
+    "COP": Currency("$", "es-CO", ",", ".", 0, True, True, "Colombian peso", "COL$", (1000, 5000, 10000, 50000), ("CO",),
+                    "DD/MM/YYYY", ("IBR", "UVR (inflation-linked)", "DTF"), ("COL$", "COP")),
+    # $1.235 without decimals; mortgages are mostly in UF, the inflation-linked unit
+    "CLP": Currency("$", "es-CL", ",", ".", 0, True, False, "Chilean peso", "CLP$", (1000, 5000, 10000, 50000), ("CL",),
+                    "DD-MM-YYYY", ("UF (inflation-linked)", "TPM (monetary policy rate)"), ("CLP$", "CLP")),
     # R$ 1.234,56; IPCA: inflation, for inflation-linked loans
     "BRL": Currency("R$", "pt-BR", ",", ".", 2, True, True, "Brazilian real", "R$", (1, 5, 10, 50), ("BR",), "DD/MM/YYYY",
                     ("TR", "IPCA", "Selic", "CDI"), ("R$", "BRL")),
+    # R 1 234,56 (en-ZA: comma decimals, no-break space for thousands); JIBAR ends in 2026, replaced by ZARONIA
+    "ZAR": Currency("R", "en-ZA", ",", " ", 2, True, True, "South African rand", "R", (10, 50, 100, 500),
+                    ("ZA", "LS", "NA", "SZ"), "YYYY/MM/DD", ("Prime lending rate (South Africa)", "SARB repo rate", "ZARONIA"),
+                    ("ZAR",)),
+    "NZD": Currency("$", "en-NZ", ".", ",", 2, True, False, "New Zealand dollar", "NZ$", (1, 5, 10, 50), ("NZ", "CK", "NU"),
+                    "DD/MM/YYYY", ("RBNZ official cash rate (OCR)",), ("NZ$", "NZD")),                      # $1,234.56
+    # Singapore, Hong Kong, Philippines, India: English interface. SORA replaced SIBOR/SOR in Singapore loans
+    "SGD": Currency("$", "en-SG", ".", ",", 2, True, False, "Singapore dollar", "S$", (1, 5, 10, 50), ("SG",), "DD/MM/YYYY",
+                    ("SORA 3M (compounded)", "SORA 1M (compounded)"), ("S$", "SGD")),                         # $1,234.56
+    "HKD": Currency("HK$", "en-HK", ".", ",", 2, True, False, "Hong Kong dollar", "HK$", (10, 50, 100, 500), ("HK",),
+                    "DD/MM/YYYY", ("HIBOR 1M", "Hong Kong prime rate"), ("HKD",)),                          # HK$1,234.56
+    # ₱1,234.56; dates month first as in the US
+    "PHP": Currency("₱", "en-PH", ".", ",", 2, True, False, "Philippine peso", "₱", (10, 50, 100, 500), ("PH",),
+                    "MM/DD/YYYY", ("BSP policy rate",), ("PHP", "Php")),
+    # ₹12,34,567.89: Indian grouping in lakh and crore (util.LAKH)
+    "INR": Currency("₹", "en-IN", ".", ",", 2, True, False, "Indian rupee", "₹", (10, 50, 100, 500), ("IN",), "DD/MM/YYYY",
+                    ("RBI repo rate", "MCLR 1Y"), ("INR", "Rs.", "Rs")),
+    # United Arab Emirates and Malaysia: English interface; EIBOR / standardised base rate (SBR, from the OPR)
+    "AED": Currency("AED", "en-AE", ".", ",", 2, True, True, "UAE dirham", "AED", (10, 50, 100, 500), ("AE",), "DD/MM/YYYY",
+                    ("EIBOR 3M", "EIBOR 1M"), ("Dhs", "Dh")),                                              # AED 1,234.56
+    "MYR": Currency("RM", "en-MY", ".", ",", 2, True, True, "Malaysian ringgit", "RM", (1, 5, 10, 50), ("MY",),
+                    "DD/MM/YYYY", ("SBR (standardised base rate)", "OPR (overnight policy rate)"), ("MYR",)),  # RM 1,234.56
+    # Nordic crowns (English interface): 1 234,56 kr · 1.234,56 kr.
+    "SEK": Currency("kr", "sv-SE", ",", " ", 2, False, True, "Swedish krona", "SEK", (10, 50, 100, 500), ("SE",),
+                    "YYYY-MM-DD", ("STIBOR 3M", "SWESTR", "Riksbank policy rate"), ("SEK",)),
+    "NOK": Currency("kr", "nb-NO", ",", " ", 2, False, True, "Norwegian krone", "NOK", (10, 50, 100, 500), ("NO", "SJ"),
+                    "DD.MM.YYYY", ("NIBOR 3M", "NOWA", "Norges Bank policy rate"), ("NOK",)),
+    "DKK": Currency("kr.", "da-DK", ",", ".", 2, False, True, "Danish krone", "DKK", (10, 50, 100, 500), ("DK", "FO", "GL"),
+                    "DD-MM-YYYY", ("CIBOR 3M", "CITA"), ("DKK",)),
+    # Israel (English interface; en-IL avoids the right-to-left marks of he-IL) and Czech Republic
+    "ILS": Currency("₪", "en-IL", ".", ",", 2, True, False, "Israeli new shekel", "₪", (10, 50, 100, 500), ("IL",),
+                    "DD/MM/YYYY", ("Bank of Israel prime rate", "CPI-linked (inflation)"), ("ILS", "NIS")),  # ₪1,234.56
+    "CZK": Currency("Kč", "cs-CZ", ",", " ", 2, False, True, "Czech koruna", "Kč", (10, 50, 100, 500), ("CZ",),
+                    "DD.MM.YYYY", ("PRIBOR 3M", "CNB 2W repo rate"), ("CZK",)),                       # 1 234,56 Kč
+    # Taiwan: Chunghwa Post 2-year deposit rate = the base of index-linked mortgages; NT$ tells it from the US dollar
+    "TWD": Currency("$", "zh-TW", ".", ",", 2, True, False, "New Taiwan dollar", "NT$", (10, 50, 100, 500), ("TW",),
+                    "YYYY/MM/DD", ("Chunghwa Post 2-year deposit rate", "CBC discount rate"), ("NT$", "TWD")),
+    # ₩1,234,568 without decimals; COFIX = the base of most variable mortgages
+    "KRW": Currency("₩", "ko-KR", ".", ",", 0, True, False, "South Korean won", "₩", (1000, 5000, 10000, 50000), ("KR",),
+                    "YYYY-MM-DD", ("COFIX (new)", "CD 91-day rate", "Bank of Korea base rate"), ("KRW", "원")),
     # 1 234,56 zł (thousands with a no-break space, always grouped); new loans move from WIBOR to POLSTR (2026-2027)
     "PLN": Currency("zł", "pl-PL", ",", " ", 2, False, True, "Polish złoty", "zł", (1, 5, 10, 50), ("PL",),
                     "DD.MM.YYYY", ("WIBOR 3M", "WIBOR 6M", "POLSTR 1M (compounded)"), ("PLN", "zł", "zl")),
@@ -85,19 +133,30 @@ def currency_of(db):
     return r[0] if r and r[0] in CURRENCIES else "EUR"
 
 
-def _group(int_part, sep):
-    """Thousands groups of a string of digits: 1.234.567 · 1,234,567 · 1'234'567."""
-    return f"{int(int_part):,}".replace(",", sep)
+LAKH = {"INR"}  # currencies grouped in lakh and crore: 12,34,567 (as Intl en-IN does)
+
+
+def _group(int_part, sep, lakh=False):
+    """Thousands groups of a string of digits: 1.234.567 · 1,234,567 · 1'234'567 · 12,34,567 (lakh)."""
+    digits = str(int(int_part))
+    if not lakh or len(digits) <= 3:
+        return f"{int(digits):,}".replace(",", sep)
+    head, groups = digits[:-3], [digits[-3:]]
+    while len(head) > 2:
+        groups.insert(0, head[-2:])
+        head = head[:-2]
+    return sep.join([head] + groups if head else groups)
 
 
 def fmt_number(value, code=None, digits=None):
     """A number in the format of the currency's country, without the symbol: 1.234,5 · 1,234.5 · 1'234.5."""
-    c = CURRENCIES[code or CURRENCY["code"]]
+    code = code or CURRENCY["code"]
+    c = CURRENCIES[code]
     digits = c.digits if digits is None else digits
     # half away from zero, like the browser (Intl.NumberFormat): 0.005 → 0.01, not the "round half to even" of Python
     d = Decimal(str(abs(value))).quantize(Decimal(1).scaleb(-digits), rounding=ROUND_HALF_UP)
     int_part, _, frac = f"{d:f}".partition(".")
-    out = _group(int_part, c.thousands)
+    out = _group(int_part, c.thousands, code in LAKH)
     return ("−" if value < 0 and d else "") + out + (c.decimal + frac if frac else "")
 
 
@@ -126,7 +185,7 @@ DATE_FORMATS_MDY = (
     "%m/%d/%y", "%m-%d-%y", "%m.%d.%y", "%Y%m%d",
 )
 # default order of the day and month when a file does not show it (all days 1-12): the currency's country
-DATE_ORDER_DEFAULT = {"USD": "mdy"}
+DATE_ORDER_DEFAULT = {"USD": "mdy", "PHP": "mdy"}
 
 STOPWORDS = {
     "pagamento", "pagam", "pag", "pos", "carta", "del", "della", "dello", "dei", "delle", "presso",
@@ -271,7 +330,9 @@ def normalize_desc(text):
     """Short key of a bank description, used to recognize similar transactions."""
     # letters of any alphabet (ł, ü, ß, カ, 日…); NFKC: the half-width ｶﾅ of Japanese bank files = full-width カナ
     s = re.sub(r"[\W\d_]+", " ", unicodedata.normalize("NFKC", text or "").lower())
-    tokens = [t for t in s.split() if len(t) >= 3 and t not in STOPWORDS]
+    # words of 3+ letters; in Chinese, Japanese and Korean 2 characters already make a word ("월급", "薪資")
+    tokens = [t for t in s.split() if (len(t) >= 3 or (len(t) == 2 and any(ord(ch) >= 0x1100 for ch in t)))
+              and t not in STOPWORDS]
     return " ".join(tokens[:3])
 
 

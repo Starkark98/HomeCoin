@@ -27,7 +27,7 @@ from . import updater
 from . import util
 from .util import FREQUENCIES, add_months, months_between, parse_date, parse_number, rule_matches
 
-VERSION = "2.1.0"
+VERSION = "2.2.0"
 STATIC_DIR = dbm.BASE_DIR / "static"
 KINDS = ("expense", "income", "transfer")
 ACCOUNT_TYPES = ("corrente", "risparmio", "credito", "prepagata", "contanti", "investimenti", "altro")

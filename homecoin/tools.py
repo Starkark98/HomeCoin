@@ -82,7 +82,7 @@ RATE_TYPES = ("fixed", "variable", "mixed")
 # e.g. after a change of currency. The schedule uses the current value entered by hand: HomeCoin does not download rates
 RATE_INDEX_GROUPS = {code: c.indexes for code, c in CURRENCIES.items()}  # in util.CURRENCIES
 # indexes of currencies HomeCoin no longer offers: a loan saved with one of them keeps it (shown and accepted)
-LEGACY_RATE_INDEXES = ("RBI repo rate", "MCLR 1Y")
+LEGACY_RATE_INDEXES = ()
 RATE_INDEXES = tuple(i for g in RATE_INDEX_GROUPS.values() for i in g) + LEGACY_RATE_INDEXES
 DEFAULT_RATE_INDEX = {cur: g[0] for cur, g in RATE_INDEX_GROUPS.items()}
 

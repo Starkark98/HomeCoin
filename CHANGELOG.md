@@ -2,6 +2,29 @@
 
 All notable changes to HomeCoin are listed here, newest first.
 
+## 2.2.0 — 2026-11-10
+
+**Two more languages and seventeen more currencies**, each written the way its country writes it, with its loan indexes:
+- **繁體中文 (Traditional Chinese)** with the **New Taiwan dollar (TWD)** `$1,234.56`, also for Hong Kong; **한국어 (Korean)** with the **South Korean won (KRW)** `₩1,235`. Bank files from Taiwan (Big5) and Korea (EUC-KR) are read with the right characters; dates in their order (`2026年11月10日`, `2026. 11. 10.`);
+- **Colombian peso (COP)** `$ 1.235` and **Chilean peso (CLP)** `$1.235`, without decimals (IBR, UVR, DTF; UF and TPM);
+- **South African rand (ZAR)** `R 1 234,56` (prime lending rate, SARB repo rate, ZARONIA);
+- **New Zealand dollar (NZD)** `$1,234.56` (official cash rate);
+- **Singapore dollar (SGD)** `$1,234.56` (SORA), **Hong Kong dollar (HKD)** `HK$1,234.56` (HIBOR, prime rate);
+- **Philippine peso (PHP)** `₱1,234.56` (BSP policy rate; bank statements with the month first, as in the US);
+- **Indian rupee (INR)** `₹12,34,567.89`, grouped in lakh and crore (RBI repo rate, MCLR);
+- **UAE dirham (AED)** `AED 1,234.56` (EIBOR) and **Malaysian ringgit (MYR)** `RM 1,234.56` (SBR, OPR);
+- **Swedish krona (SEK)** and **Norwegian krone (NOK)** `1 234,56 kr`, **Danish krone (DKK)** `1.234,56 kr.` (STIBOR, SWESTR; NIBOR, NOWA; CIBOR, CITA);
+- **Israeli new shekel (ILS)** `₪1,234.56` and **Czech koruna (CZK)** `1 234,56 Kč`.
+For Singapore, Hong Kong, the Philippines, India, the Emirates, Malaysia, the Nordic countries, Israel and the Czech Republic the interface is in English; for Colombia and Chile in Spanish.
+
+**Fixes**
+- Ecuador, El Salvador and Panama use the US dollar: at the first start HomeCoin now proposes it instead of the Mexican peso.
+- Fair split: a change made just before leaving the page is saved too.
+- Regular payments: payees with two-character names in Chinese, Japanese or Korean (e.g. 월급, 薪資) are now grouped.
+- Better wording in every language: the last sentences built from pieces around bold words are now whole sentences, and
+  counts like "1 excluded" use the singular form where the language has one ("1 escluso", "1 sélectionnée").
+- Mortgage: no error in the background when you leave the page while the early repayment simulation is about to run.
+
 ## 2.1.0 — 2026-11-10
 
 **Three more languages, two more currencies**

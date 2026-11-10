@@ -24,7 +24,7 @@ Thanks for your interest in improving HomeCoin!
 - **Data always encrypted.** Nothing of the user's data may be written outside the encrypted database (logs, temporary files, caches). Unencrypted exports stay an explicit user action, with a warning.
 - **Request security.** Writes go through the existing checks (dedicated header, local origin, session); every value entered or imported goes through `esc()` before it reaches the HTML.
 - **Separate spaces.** Every read and write stays inside the active space; transfers to other spaces are read-only on the other side.
-- **No unnecessary dependencies.** Python with Flask, waitress, SQLCipher, openpyxl and cryptography; plain JavaScript without frameworks; interface in nine languages.
+- **No unnecessary dependencies.** Python with Flask, waitress, SQLCipher, openpyxl and cryptography; plain JavaScript without frameworks; interface in eleven languages.
 - **Backward compatibility.** Existing databases must keep working: never rename stored codes. Default and system categories are recognized by their fixed code (`categories.code`), never by their name, which can be in any language.
 - **Translations welcome.** Corrections to the translations are a great first contribution: open an issue with the *Translation* template, or a pull request that changes only `static/i18n/<language>.json`. A new language is one new file there: copy the `"@meta"` block of a similar language (its format is described at the top of `homecoin/i18n.py`) and translate every text; nothing in the code lists the languages.
 

@@ -2,7 +2,7 @@
 
 # HomeCoin *by Starkark98*
 
-![Version](https://img.shields.io/badge/version-2.1.0-8b5cf6)
+![Version](https://img.shields.io/badge/version-2.2.0-8b5cf6)
 ![Python](https://img.shields.io/badge/Python-3.12%20%7C%203.13%20%7C%203.14-3776AB?logo=python&logoColor=white)
 ![Platform](https://img.shields.io/badge/platform-Windows-0078D6)
 ![Data](https://img.shields.io/badge/data-encrypted%2C%20on%20your%20PC-16a34a)
@@ -77,7 +77,7 @@ Starkark98
 - **Helps you plan.** Savings goals with the amount to put aside each month, an emergency fund check, a mortgage amortization schedule with early-repayment simulation, a fair way to share household costs.
 - **Follows your investments.** Value, gains, return, asset allocation and a rebalancing calculator that tells you what to buy or sell to get back to your target.
 - **Keeps your data yours.** It runs on your PC only, the data is encrypted, and nobody (not even the author) can open it without your password.
-- **Speaks your language.** Deutsch, English, Español, Français, Italiano, Nederlands, Polski, Português (Brasil) or 日本語 (Japanese), with the number format of your currency.
+- **Speaks your language.** Deutsch, English, Español, Français, Italiano, Nederlands, Polski, Português (Brasil), 日本語 (Japanese), 繁體中文 (Traditional Chinese) or 한국어 (Korean), with the number format of your currency.
 
 Each page is shown with a screenshot in the [Guide](#guide) below. All screenshots come from the demo, with made-up data.
 
@@ -118,7 +118,7 @@ The first time, HomeCoin guides you through a few short steps:
 
 1. **Choose your language and a password.** The language is proposed from your browser; change it in the box at the top if needed. The password needs at least 8 characters, and very common ones are refused. A short sentence is easy to remember and hard to guess.
 2. **Save your recovery key.** It is shown only once. Write it down or keep it in a password manager: it is the only way back in if you forget the password. Without the password and the recovery key, **nobody can open your data, not even the author**.
-3. **Pick your currency**: euro (€), US dollar ($), British pound (£), Swiss franc (CHF), Canadian dollar (C$), Australian dollar (A$), Mexican peso (MX$), Brazilian real (R$), Polish złoty (zł) or Japanese yen (¥). HomeCoin proposes the one of your country, from the browser and the language you chose.
+3. **Pick your currency**: euro (€), US dollar ($), British pound (£), Swiss franc (CHF), Canadian dollar (C$), Australian dollar (A$), Mexican peso (MX$), Colombian peso (COL$), Chilean peso (CLP$), Brazilian real (R$), South African rand (R), New Zealand dollar (NZ$), Singapore dollar (S$), Hong Kong dollar (HK$), Philippine peso (₱), Indian rupee (₹), UAE dirham (AED), Malaysian ringgit (RM), Swedish krona, Norwegian krone or Danish krone (kr), Israeli shekel (₪), Czech koruna (Kč), Polish złoty (zł), Japanese yen (¥), New Taiwan dollar (NT$) or South Korean won (₩). HomeCoin proposes the one of your country, from the browser and the language you chose.
 4. **Create your first space**: *Household* (shared costs, several people paying in) or *Personal* (your own money). See [Spaces](#spaces).
 5. **Add your main account** and, if you want, its current balance.
 
@@ -159,7 +159,7 @@ Not every space needs every page: in Settings → Spaces you choose which option
 
 ### Language and currency
 
-- **Language** (Settings → General): Deutsch, English, Español, Français, Italiano, Nederlands, Polski, Português (Brasil) or 日本語 (Japanese). It changes menus, messages, dates (in the order of the language: `10 Nov 2026`, `2026年11月10日`), exports and the names of the categories of **new** spaces. The categories you already have keep their names, so changing language never touches your data. The sign-in screen uses the chosen language too.
+- **Language** (Settings → General): Deutsch, English, Español, Français, Italiano, Nederlands, Polski, Português (Brasil), 日本語 (Japanese), 繁體中文 (Traditional Chinese) or 한국어 (Korean). It changes menus, messages, dates (in the order of the language: `10 Nov 2026`, `2026年11月10日`), exports and the names of the categories of **new** spaces. The categories you already have keep their names, so changing language never touches your data. The sign-in screen uses the chosen language too.
 - **Currency** (Settings → General): the currency your accounts are kept in, with the number format of its country (see the table below). Language and currency are independent: a Swiss user can have the interface in French and amounts in Swiss francs.
 - The translations other than English and Italian are new: if you find a wrong or clumsy word, please report it (see [Getting help](#getting-help)).
 
@@ -176,9 +176,26 @@ Not every space needs every page: in Settings → Spaces you choose which option
   | Canadian dollar (CAD) | `$1,234.56` | |
   | Australian dollar (AUD) | `$1,234.56` | |
   | Mexican peso (MXN) | `$1,234.56` | |
+  | Colombian peso (COP) | `$ 1.235` | no decimals |
+  | Chilean peso (CLP) | `$1.235` | no decimals |
   | Brazilian real (BRL) | `R$ 1.234,56` | comma for decimals, as for the euro |
+  | South African rand (ZAR) | `R 1 234,56` | space for thousands, comma for decimals |
+  | New Zealand dollar (NZD) | `$1,234.56` | |
+  | Singapore dollar (SGD) | `$1,234.56` | |
+  | Hong Kong dollar (HKD) | `HK$1,234.56` | |
+  | Philippine peso (PHP) | `₱1,234.56` | |
+  | Indian rupee (INR) | `₹12,34,567.89` | Indian grouping in lakh and crore |
+  | UAE dirham (AED) | `AED 1,234.56` | |
+  | Malaysian ringgit (MYR) | `RM 1,234.56` | |
+  | Swedish krona (SEK) | `1 234,56 kr` | space for thousands, comma for decimals |
+  | Norwegian krone (NOK) | `1 234,56 kr` | space for thousands, comma for decimals |
+  | Danish krone (DKK) | `1.234,56 kr.` | comma for decimals |
+  | Israeli new shekel (ILS) | `₪1,234.56` | |
+  | Czech koruna (CZK) | `1 234,56 Kč` | space for thousands, comma for decimals |
   | Polish złoty (PLN) | `1 234,56 zł` | space for thousands, comma for decimals |
   | Japanese yen (JPY) | `¥1,235` | no decimals: amounts are shown rounded to the yen |
+  | New Taiwan dollar (TWD) | `$1,234.56` | |
+  | South Korean won (KRW) | `₩1,235` | no decimals |
 
   Where the dot is the decimal separator, `1.5` is one and a half and `1,500` is one thousand five hundred. You can always type plain numbers like `1234.56`, and HomeCoin also understands amounts pasted with a symbol or a currency code.
 - The currency is only a **label**: HomeCoin never converts amounts. Choose the currency your accounts are kept in. You can change it in Settings → General; security prices are then downloaded again in the new currency.
@@ -290,9 +307,26 @@ Every recurring item with installments appears here with its **amortization sche
   | CAD | Canadian prime rate, CORRA |
   | AUD | RBA cash rate, BBSW 3M |
   | MXN | TIIE 28, TIIE de Fondeo |
+  | COP | IBR, UVR (inflation-linked unit), DTF |
+  | CLP | UF (inflation-linked unit, used by most mortgages), TPM (monetary policy rate) |
   | BRL | TR, IPCA, Selic, CDI |
+  | ZAR | Prime lending rate, SARB repo rate, ZARONIA (replaces JIBAR from 2026) |
+  | NZD | RBNZ official cash rate (OCR) |
+  | SGD | SORA 3M and 1M (compounded) |
+  | HKD | HIBOR 1M, Hong Kong prime rate |
+  | PHP | BSP policy rate |
+  | INR | RBI repo rate, MCLR 1Y |
+  | AED | EIBOR 3M, 1M |
+  | MYR | Standardised base rate (SBR), overnight policy rate (OPR) |
+  | SEK | STIBOR 3M, SWESTR, Riksbank policy rate |
+  | NOK | NIBOR 3M, NOWA, Norges Bank policy rate |
+  | DKK | CIBOR 3M, CITA |
+  | ILS | Bank of Israel prime rate, CPI-linked (inflation) |
+  | CZK | PRIBOR 3M, CNB 2-week repo rate |
   | PLN | WIBOR 3M, WIBOR 6M, POLSTR 1M (compounded: the index that replaces WIBOR in new loans) |
   | JPY | Short-term prime rate (the base of most variable home loans), TONA, TIBOR 3M |
+  | TWD | Chunghwa Post 2-year deposit rate (the base of index-linked mortgages), CBC discount rate |
+  | KRW | COFIX (new), CD 91-day rate, Bank of Korea base rate |
 
   The current index value is typed by hand (HomeCoin does not download rates). A loan keeps its index even if you change currency. APR and ancillary costs (insurance, fees) are not included.
 
@@ -361,9 +395,9 @@ Categories month by month as a table (heatmap) and a chart, with averages, from 
 Most banks let you download your transactions as **CSV or Excel** from online banking. HomeCoin reads them in four steps:
 
 1. **Upload** the file (drag it onto the page or click to choose it).
-2. **Columns:** HomeCoin recognizes date, description and amount (a single signed amount, or separate money in / money out columns, i.e. credits and debits) in English, Spanish, Portuguese, German, French, Italian, Dutch, Polish and Japanese (accents and capital letters don't matter; files saved by Polish and Japanese banks in the older Windows encodings are read correctly). Check them and choose the account the statement belongs to.
+2. **Columns:** HomeCoin recognizes date, description and amount (a single signed amount, or separate money in / money out columns, i.e. credits and debits) in English, Spanish, Portuguese, German, French, Italian, Dutch, Polish, Japanese, Chinese and Korean (accents and capital letters don't matter; files saved by Polish, Japanese, Taiwanese and Korean banks in the older Windows encodings are read correctly). Check them and choose the account the statement belongs to.
    - **Money in or out in its own column.** Some banks (ING in the Netherlands, many German banks) write every amount as positive and say in another column whether it went out or came in (*Af/Bij*, *S/H*, *Soll/Haben*). HomeCoin recognizes that column and gives each amount its sign; you can also choose it by hand.
-   - **Date format.** Banks write dates as day/month/year (31/12/2026), in the US as month/day/year (12/31/2026) and in Japan as year/month/day (2026/12/31 or 2026年12月31日). HomeCoin reads the order from the dates in the file (a first number over 12 can only be a day). When every date fits both, for example 03/04/2026, it assumes the order of your currency's country and tells you to check it. You can always change it in the *Date format* box.
+   - **Date format.** Banks write dates as day/month/year (31/12/2026), in the US and the Philippines as month/day/year (12/31/2026) and in East Asia as year/month/day (2026/12/31, 2026年12月31日, 2026.12.31). HomeCoin reads the order from the dates in the file (a first number over 12 can only be a day). When every date fits both, for example 03/04/2026, it assumes the order of your currency's country and tells you to check it. You can always change it in the *Date format* box.
 3. **Review:** each row gets a category from your [rules](#categories-and-rules) or from history; rows already in HomeCoin are marked *already present* and left out (tick them if you want them anyway). You can change any category before confirming.
 4. **Done.** The file is read only on your PC and is never saved: HomeCoin keeps it in memory just until you finish.
 
@@ -487,8 +521,8 @@ HomeCoin checks for updates at most once a day, after you sign in, and sends not
 - One user per installation: HomeCoin is a personal tool, not a server. Never expose it on a network.
 - Bank statement formats vary: columns are recognized automatically, but some files may need a quick check in the preview.
 - Prices come from Yahoo Finance and may be delayed, incomplete or missing for some funds.
-- One currency per installation, chosen among ten (EUR, USD, GBP, CHF, CAD, AUD, MXN, BRL, PLN, JPY): accounts in different currencies cannot be mixed. Securities quoted in other currencies are converted using the exchange rates on Yahoo Finance. Mortgage indexes are typed by hand.
-- The interface is in nine languages (English, Spanish, Portuguese, German, French, Italian, Dutch, Polish, Japanese); this guide is in English.
+- One currency per installation, chosen among twenty-seven (EUR, USD, GBP, CHF, CAD, AUD, NZD, ZAR, SGD, HKD, PHP, INR, AED, MYR, SEK, NOK, DKK, ILS, CZK, MXN, COP, CLP, BRL, PLN, JPY, TWD, KRW): accounts in different currencies cannot be mixed. Securities quoted in other currencies are converted using the exchange rates on Yahoo Finance. Mortgage indexes are typed by hand. In Excel exports, rupee amounts use Excel's usual grouping (1,234,567) instead of lakh and crore.
+- The interface is in eleven languages (English, Spanish, Portuguese, German, French, Italian, Dutch, Polish, Japanese, Traditional Chinese, Korean); this guide is in English.
 
 ## Getting help
 
@@ -567,4 +601,4 @@ Any copy or modified version must keep the [LICENSE](LICENSE) file, including th
 
 ---
 
-*HomeCoin by **Starkark98** · v2.1.0 · see the [changelog](CHANGELOG.md)*
+*HomeCoin by **Starkark98** · v2.2.0 · see the [changelog](CHANGELOG.md)*

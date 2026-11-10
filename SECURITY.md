@@ -6,7 +6,7 @@ Only the **latest release** of HomeCoin receives fixes. Please update before rep
 
 | Version | Supported |
 |---|---|
-| 2.1.x (latest) | Yes |
+| 2.2.x (latest) | Yes |
 | Older versions | No: update from Settings → Updates or install the latest release |
 
 ## Reporting a vulnerability
