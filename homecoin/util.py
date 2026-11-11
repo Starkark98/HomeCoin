@@ -321,6 +321,82 @@ def occurrence(start, frequency, n):
     return add_months(start, step * n)
 
 
+def _hungarian(a):
+    """Minimum-cost assignment of every row of matrix a (rows <= columns) to a distinct column: {row: column}."""
+    n, m = len(a), len(a[0])
+    inf = float("inf")
+    u, v, p, way = [0] * (n + 1), [0] * (m + 1), [0] * (m + 1), [0] * (m + 1)
+    for i in range(1, n + 1):
+        p[0], j0 = i, 0
+        minv, used = [inf] * (m + 1), [False] * (m + 1)
+        while True:
+            used[j0] = True
+            i0, delta, j1 = p[j0], inf, 0
+            for j in range(1, m + 1):
+                if not used[j]:
+                    cur = a[i0 - 1][j - 1] - u[i0] - v[j]
+                    if cur < minv[j]:
+                        minv[j], way[j] = cur, j0
+                    if minv[j] < delta:
+                        delta, j1 = minv[j], j
+            for j in range(m + 1):
+                if used[j]:
+                    u[p[j]] += delta
+                    v[j] -= delta
+                else:
+                    minv[j] -= delta
+            j0 = j1
+            if p[j0] == 0:
+                break
+        while True:
+            j1 = way[j0]
+            p[j0] = p[j1]
+            j0 = j1
+            if j0 == 0:
+                break
+    return {p[j] - 1: j - 1 for j in range(1, m + 1) if p[j]}
+
+
+def best_pairs(left, right, cost):
+    """Pair items of two lists one to one, each at most once: as many pairs as possible, then the lowest total cost.
+    cost(l, r) is a number, or None when the two cannot be the same thing. Unlike taking the closest first, repeated
+    similar items (the same amount every week) never leave one unpaired that had a partner.
+    Returns [(left index, right index)]."""
+    edges = {}
+    for i, l in enumerate(left):
+        for j, r in enumerate(right):
+            c = cost(l, r)
+            if c is not None:
+                edges[(i, j)] = c
+    # independent groups (connected components) are solved separately: small matrices
+    parent = {}
+
+    def find(x):
+        while parent.setdefault(x, x) != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+    for i, j in edges:
+        parent[find(("l", i))] = find(("r", j))
+    groups = {}
+    for i, j in edges:
+        g = groups.setdefault(find(("l", i)), (set(), set()))
+        g[0].add(i)
+        g[1].add(j)
+    out = []
+    for ls, rs in groups.values():
+        ls, rs = sorted(ls), sorted(rs)
+        big = 1 + len(ls) * (1 + max(edges[e] for e in edges if e[0] in ls))  # a missing pair costs more than all
+        flip = len(ls) > len(rs)
+        rows, cols = (rs, ls) if flip else (ls, rs)
+        mat = [[edges.get((c, r) if flip else (r, c), big) for c in cols] for r in rows]
+        for ri, ci in _hungarian(mat).items():
+            i, j = (cols[ci], rows[ri]) if flip else (rows[ri], cols[ci])
+            if (i, j) in edges:
+                out.append((i, j))
+    return sorted(out)
+
+
 def months_between(d1, d2):
     """Number of calendar months touched by the interval [d1, d2]."""
     return max(1, (d2.year - d1.year) * 12 + d2.month - d1.month + 1)

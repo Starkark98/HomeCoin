@@ -608,7 +608,7 @@ const accountOptions = (sel, { all = false, includeArchived = false } = {}) =>
 // destination of a transfer: accounts of every space, grouped (the active one first)
 const transferOptions = (sel) => [S.portfolio, ...S.portfolios.filter((p) => p.id !== S.pid && !p.archived)].map((p) => {
   const accs = S.allAccounts.filter((a) => a.portfolio_id === p.id && (!a.archived || a.id === +sel));
-  return accs.length ? `<optgroup label="${esc(p.id === S.pid ? T('{name} (this space)', { name: p.name }) : p.name)}">${accs.map((a) =>
+  return accs.length ? `<optgroup data-space="${p.id}" label="${esc(p.id === S.pid ? T('{name} (this space)', { name: p.name }) : p.name)}">${accs.map((a) =>
     `<option value="${a.id}" ${+sel === a.id ? 'selected' : ''}>${esc(a.icon)} ${esc(a.name)}</option>`).join('')}</optgroup>` : '';
 }).join('');
 const categoryOptions = (kind, sel, empty = T('Uncategorized')) =>
@@ -646,6 +646,34 @@ function confirmDialog(message, { ok = T('Confirm'), danger = true, title = T('A
     $('[data-yes]', m).onclick = () => { closeModal(); resolve(true); };
   });
 }
+
+// a filter that takes several values: a button with the summary ("All accounts", the name, "3 selected") and a panel
+// of ticks (grouped). value and onChange use a comma-separated string ('' = no filter).
+function multiPick(el, { all, items, value = '', onChange }) {
+  let sel = new Set(String(value || '').split(',').filter(Boolean));
+  const label = () => {
+    if (!sel.size) return all;
+    if (sel.size === 1) return items.find((i) => String(i.value) === [...sel][0])?.label || all;
+    return tn('{n} selected', '{n} selected', sel.size);
+  };
+  let group = null;
+  el.innerHTML = `<button type="button" class="mp-btn ${sel.size ? 'on' : ''}"><span class="mp-label"></span><span class="mp-caret">▾</span></button>
+    <div class="mp-panel hidden"><div class="mp-list">${items.map((i) => {
+      const head = i.group && i.group !== group ? `<div class="mp-head">${esc(i.group)}</div>` : '';
+      group = i.group || group;
+      return `${head}<label class="mp-item"><input type="checkbox" value="${esc(i.value)}" ${sel.has(String(i.value)) ? 'checked' : ''}> <span>${esc(i.label)}</span></label>`;
+    }).join('')}</div>
+    <div class="mp-foot"><button type="button" class="btn btn-sm btn-ghost" data-clear>${esc(all)}</button></div></div>`;
+  const btn = $('.mp-btn', el), panel = $('.mp-panel', el);
+  const draw = () => { $('.mp-label', el).textContent = label(); btn.classList.toggle('on', sel.size > 0); btn.title = sel.size ? items.filter((i) => sel.has(String(i.value))).map((i) => i.label).join(', ') : all; };
+  const emit = debounce(() => onChange([...sel].join(',')), 350);  // several ticks in a row: one search
+  btn.onclick = (e) => { e.stopPropagation(); $$('.mp-panel').forEach((p) => p !== panel && p.classList.add('hidden')); panel.classList.toggle('hidden'); };
+  panel.onclick = (e) => e.stopPropagation();
+  $$('input', panel).forEach((c) => (c.onchange = () => { c.checked ? sel.add(c.value) : sel.delete(c.value); draw(); emit(); }));
+  $('[data-clear]', panel).onclick = () => { sel = new Set(); $$('input', panel).forEach((c) => (c.checked = false)); draw(); panel.classList.add('hidden'); onChange(''); };
+  draw();
+}
+document.addEventListener('click', () => $$('.mp-panel').forEach((p) => p.classList.add('hidden')));
 
 function css(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
 function chartTheme() {
@@ -850,8 +878,8 @@ async function renderDashboard(v) {
           : `<div class="k-sub">${tn('{n} source', '{n} sources', st.by_category.income.length)}</div>`}</div>
       <div class="kpi g-rose"><div class="k-label">📤 ${T('Money out')}</div><div class="k-value">${money(outTot)}</div>
         ${toOthers ? `<div class="k-split">
-          <a href="#/movimenti?${qs({ kind: 'expense', from, to, ...(d.account_id ? { account_id: d.account_id } : {}) })}" title="${esc(T('Actual expenses: spending categories, budgets and chart by category'))}"><span>🛒 ${T('Expenses')}</span><b>${money(st.expense)}</b></a>
-          <a ${st.other_categories ? 'href="#/report" data-reptab="other"' : `href="#/movimenti?${qs({ kind: 'transfer', from, to })}"`} title="${esc(T('Contributions and transfers to other spaces (e.g. the household account): they leave from here but are not expenses'))}"><span>↗ ${T('Other spaces')}</span><b>${money(toOthers)}</b></a></div>`
+          <a href="#/movimenti?${qs({ kind: 'expense', from, to, ...(d.account_id ? { account_id: d.account_id } : {}) })}" title="${esc(T('Actual expenses: spending categories, budgets and chart by category'))}"><span>🛒 ${T('Spending')}</span><b>${money(st.expense)}</b></a>
+          <a ${st.other_categories ? 'href="#/report" data-reptab="other"' : `href="#/movimenti?${qs({ kind: 'transfer', from, to })}"`} title="${esc(T('Contributions and transfers to other spaces (e.g. the household account): they leave from here but are not expenses'))}"><span>↗ ${T('To other spaces')}</span><b>${money(toOthers)}</b></a></div>`
           : `<div class="k-sub">${T('avg {amount} / month', { amount: money0(outTot / st.months) })}</div>`}</div>
       <div class="kpi g-amber"><div class="k-label">🐷 ${T('Savings')}</div><div class="k-value">${money(saved)}</div>
         <div class="k-sub">${inflow ? `${T('savings rate')} ${pct(saved / inflow)}` : T('no income in the period')}</div></div>
@@ -965,27 +993,25 @@ async function renderMovimenti(v, params) {
   const f = t.f;
   v.innerHTML = `
     <div class="card" style="margin-bottom:16px;padding:16px">
-      <div class="toolbar" style="margin:0">
-        <input id="f-q" type="search" placeholder="${esc(T('🔍 Search description or notes…'))}" value="${esc(f.q)}" style="flex:2;min-width:200px">
+      <div class="tx-filters">
+        <input id="f-q" class="f-wide" type="search" placeholder="${esc(T('🔍 Search description or notes…'))}" value="${esc(f.q)}">
         <select id="f-period"><option value="">${T('Period…')}</option>${TX_PERIODS.map(([k, l]) => `<option value="${k}" ${periodRange(k).join() === `${f.from},${f.to}` ? 'selected' : ''}>${l}</option>`).join('')}</select>
         <input id="f-from" type="date" value="${esc(f.from)}" title="${esc(T('From'))}">
         <input id="f-to" type="date" value="${esc(f.to)}" title="${esc(T('To'))}">
-        <select id="f-account">${accountOptions(f.account_id, { all: true, includeArchived: true })}</select>
-        <select id="f-kind"><option value="">${T('All types')}</option>${Object.entries(KIND_LABEL).map(([k, l]) => `<option value="${k}" ${f.kind === k ? 'selected' : ''}>${l}</option>`).join('')}</select>
-        <select id="f-cat"><option value="">${T('All categories')}</option><option value="none" ${f.category_id === 'none' ? 'selected' : ''}>❔ ${T('To categorize')}</option>
-          <optgroup label="${esc(T('Expenses'))}">${catsOf('expense').map((c) => `<option value="${c.id}" ${+f.category_id === c.id ? 'selected' : ''}>${esc(c.icon)} ${esc(c.name)}</option>`).join('')}</optgroup>
-          <optgroup label="${esc(T('Income'))}">${catsOf('income').map((c) => `<option value="${c.id}" ${+f.category_id === c.id ? 'selected' : ''}>${esc(c.icon)} ${esc(c.name)}</option>`).join('')}</optgroup></select>
+        <div class="mp" id="f-account"></div>
+        <div class="mp" id="f-kind"></div>
+        <div class="mp" id="f-cat"></div>
         <select id="f-excl"><option value="">👁 ${T('Included and excluded')}</option><option value="0" ${f.excluded === '0' ? 'selected' : ''}>👁 ${T('Only included in reports')}</option><option value="1" ${f.excluded === '1' ? 'selected' : ''}>🙈 ${T('Only excluded from reports')}</option></select>
-        <button class="btn btn-ghost" id="f-reset" title="${esc(T('Reset filters'))}">↺ ${T('Reset')}</button>
       </div>
     </div>
     <div class="toolbar" style="margin-bottom:12px">
       <div class="summary-chips" id="tx-summary" style="margin:0"></div><span class="spacer"></span>
+      <button class="btn btn-sm btn-ghost" id="f-reset" title="${esc(T('Reset filters'))}">↺ ${T('Reset')}</button>
       <a class="btn btn-sm" id="exp-csv">⬇ CSV</a><a class="btn btn-sm" id="exp-xlsx">⬇ ${T('Excel')}</a>
     </div>
     <div id="bulk"></div>
     <div class="card" style="padding:6px 8px">
-      <div class="table-wrap"><table>
+      <div class="table-wrap"><table class="tx-table">
         <thead><tr><th style="width:30px"><input type="checkbox" id="sel-all"></th><th>${T('Date')}</th><th>${T('Description')}</th><th>${T('Category')}</th><th>${T('Account')}</th><th class="right">${T('Amount')}</th><th></th></tr></thead>
         <tbody id="tx-body"></tbody></table></div>
       <div id="tx-more" style="text-align:center;padding:12px"></div>
@@ -995,9 +1021,16 @@ async function renderMovimenti(v, params) {
   $('#f-q').oninput = debounce((e) => set('q', e.target.value.trim()));
   $('#f-from').onchange = (e) => set('from', e.target.value);
   $('#f-to').onchange = (e) => set('to', e.target.value);
-  $('#f-account').onchange = (e) => set('account_id', e.target.value);
-  $('#f-kind').onchange = (e) => set('kind', e.target.value);
-  $('#f-cat').onchange = (e) => set('category_id', e.target.value);
+  // account, type and category: several values each (any of them), combined with the other filters
+  multiPick($('#f-account'), { all: T('All accounts'), value: f.account_id, onChange: (v) => set('account_id', v),
+    items: S.accounts.filter((a) => !a.archived || String(f.account_id).split(',').includes(String(a.id)))
+      .map((a) => ({ value: a.id, label: `${a.icon} ${a.name}` })) });
+  multiPick($('#f-kind'), { all: T('All types'), value: f.kind, onChange: (v) => set('kind', v),
+    items: Object.entries(KIND_LABEL).map(([k, l]) => ({ value: k, label: l })) });
+  multiPick($('#f-cat'), { all: T('All categories'), value: f.category_id, onChange: (v) => set('category_id', v),
+    items: [{ value: 'none', label: `❔ ${T('To categorize')}` },
+      ...catsOf('expense').map((c) => ({ value: c.id, label: `${c.icon} ${c.name}`, group: T('Expenses') })),
+      ...catsOf('income').map((c) => ({ value: c.id, label: `${c.icon} ${c.name}`, group: T('Income') }))] });
   $('#f-excl').onchange = (e) => set('excluded', e.target.value);
   $('#f-period').onchange = (e) => {
     const [a, b] = periodRange(e.target.value);
@@ -1206,6 +1239,12 @@ function txModal(tx = null, defaults = {}) {
     onPick: () => suggest(true),
   });
   desc.addEventListener('input', debounce(() => suggest(false), 350));  // description typed by hand: category only
+  // notes: the ones used recently with the same or a similar description, shown when the field gets focus (min 0)
+  autocomplete($('#tx-notes', m), {
+    min: 0,
+    load: async (q) => (desc.value.trim().length < 3 ? []
+      : (await api('/notes?' + qs({ description: desc.value, kind, q }))).map((d) => ({ value: d.notes, meta: acMeta(d) }))),
+  });
   const pick = (sel, id) => {  // true only if the suggestion really changes the choice
     if (!id || +$(sel, m).value === id || !$(`${sel} option[value="${id}"]`, m)) return false;
     $(sel, m).value = id; markSuggested($(sel, m)); return true;
@@ -1268,16 +1307,26 @@ async function renderConti(v) {
       <div class="acc-top"><span class="acc-icon">${esc(a.icon)}</span><span class="acc-type" title="${esc(ACC_BEHAVIOR[accGroup(a.type)].title)}">${ACC_BEHAVIOR[accGroup(a.type)].icon} ${esc(ACC_TYPES[a.type] || a.type)}</span></div>
       <div class="acc-name">${esc(a.name)}</div>
       <div class="acc-bal">${money(worth(a))}</div>
-      <div class="small" style="opacity:.8">${a.market_value != null ? T('market value · cash {amount}', { amount: money(a.balance) }) : tn('{n} transaction · opening balance {amount}', '{n} transactions · opening balance {amount}', a.tx_count, { amount: money(a.initial_balance) })}</div>
+      <div class="acc-sub">${a.market_value != null ? T('market value · cash {amount}', { amount: money(a.balance) }) : tn('{n} transaction · opening balance {amount}', '{n} transactions · opening balance {amount}', a.tx_count, { amount: money(a.initial_balance) })}</div>
       <div class="acc-actions">
-        <button data-acc-tx="${a.id}">📄 ${T('Transactions')}</button>
         ${a.archived ? '' : `<button data-acc-transfer="${a.id}">🔄 ${T('Transfer')}</button>`}
         <button data-acc-edit="${a.id}">✏️ ${T('Edit')}</button>
+        <span class="acc-menu"><button class="acc-more" data-acc-menu title="${esc(T('More'))}">⋯</button>
+          <span class="acc-pop hidden"><button data-acc-tx="${a.id}">📄 ${T('Transactions')}</button><button data-acc-doubles="${a.id}">🔍 ${T('Check for money recorded twice')}</button>
+            <button data-acc-history="${a.id}">🕘 ${T('Compare with an automatic backup')}</button></span></span>
       </div></div>`;
   const archived = S.accounts.filter((a) => a.archived);
+  // summary: cash for everyday use, investments, card debts, net worth
+  const by = (g) => activeAccounts().filter((a) => accGroup(a.type) === g).reduce((s, a) => s + worth(a), 0);
+  const cash = by('cash'), invest = by('invest'), credit = by('credit');
   v.innerHTML = `
+    <div class="kpis">
+      <div class="kpi g-sky"><div class="k-label">💧 ${T('Available money')}</div><div class="k-value">${money(cash)}</div><div class="k-sub">${T('current and savings accounts, cash, prepaid cards')}</div></div>
+      <div class="kpi g-emerald"><div class="k-label">📈 ${T('Investments')}</div><div class="k-value">${money(invest)}</div><div class="k-sub">${T('market value')}</div></div>
+      ${activeAccounts().some((a) => accGroup(a.type) === 'credit') ? `<div class="kpi g-rose"><div class="k-label">💳 ${T('Credit cards')}</div><div class="k-value">${money(credit)}</div><div class="k-sub">${T('balance of the cards (negative = to pay)')}</div></div>` : ''}
+      <div class="kpi g-indigo"><div class="k-label">💎 ${T('Total net worth')}</div><div class="k-value">${money(total)}</div><div class="k-sub">${tn('{n} active account', '{n} active accounts', activeAccounts().length)}</div></div>
+    </div>
     <div class="toolbar">
-      <span class="chip">💎 ${T('Total net worth')} <b>${money(total)}</b></span>
       <span class="spacer"></span>
       <button class="btn" id="acc-transfer">🔄 ${T('Transfer')}</button>
       <button class="btn btn-primary" id="acc-new">＋ ${T('New account')}</button>
@@ -1298,6 +1347,15 @@ async function renderConti(v) {
   $$('[data-acc-edit]').forEach((b) => (b.onclick = () => accountModal(S.accounts.find((a) => a.id === +b.dataset.accEdit))));
   $$('[data-acc-transfer]').forEach((b) => (b.onclick = () => txModal(null, { kind: 'transfer', account_id: +b.dataset.accTransfer })));
   $$('[data-acc-tx]').forEach((b) => (b.onclick = () => { location.hash = '#/movimenti?account_id=' + b.dataset.accTx; }));
+  $$('[data-acc-menu]').forEach((b) => (b.onclick = (e) => {
+    e.stopPropagation();
+    const pop = b.nextElementSibling, open = pop.classList.contains('hidden');
+    $$('.acc-pop').forEach((p) => p.classList.add('hidden'));
+    pop.classList.toggle('hidden', !open);
+  }));
+  document.addEventListener('click', () => $$('.acc-pop').forEach((p) => p.classList.add('hidden')), { once: true });
+  $$('[data-acc-doubles]').forEach((b) => (b.onclick = async (e) => { e.stopPropagation(); await doublesModal(+b.dataset.accDoubles); refresh(); }));
+  $$('[data-acc-history]').forEach((b) => (b.onclick = async (e) => { e.stopPropagation(); await compareBackupModal(+b.dataset.accHistory); refresh(); }));
   const accs = activeAccounts().filter((a) => worth(a) > 0);
   chart($('#c-acc'), {
     type: 'bar',
@@ -1425,10 +1483,17 @@ function accountModal(a = null, preset = {}) {
 // ================================================================ recurring
 async function renderRicorrenti(v) {
   const [list, up] = await Promise.all([api('/recurring'), api('/upcoming?days=60')]);
+  // the three kinds of recurring items, as a monthly equivalent: expenses, income, transfers (out of this space's
+  // accounts; those coming in from other spaces shown apart). Margin = what is left each month after all of them.
   const act = list.filter((r) => r.active);
-  const fixedOut = act.filter((r) => r.kind === 'expense').reduce((s, r) => s + r.monthly_equivalent, 0);
-  const fixedIn = act.filter((r) => r.kind === 'income').reduce((s, r) => s + r.monthly_equivalent, 0);
-  const debt = act.reduce((s, r) => s + (r.remaining_amount || 0), 0);
+  const sum = (f) => act.filter(f).reduce((s, r) => s + r.monthly_equivalent, 0);
+  const fixedOut = sum((r) => r.kind === 'expense');
+  const fixedIn = sum((r) => r.kind === 'income');
+  const trOut = sum((r) => r.kind === 'transfer' && !r.incoming);
+  const trIn = sum((r) => r.kind === 'transfer' && r.incoming);
+  // a transfer to an account of this same space moves money inside it: it does not change the margin
+  const trOutOther = sum((r) => r.kind === 'transfer' && !r.incoming && S.allAccounts.find((a) => a.id === r.to_account_id)?.portfolio_id !== S.pid);
+  const margin = fixedIn + trIn - fixedOut - trOutOther;
   const isPac = (r) => r.kind === 'transfer' && r.holding_id;
   const groups = [
     [T('📈 Investment plans'), list.filter(isPac), T('Each contribution automatically buys units of the chosen security at the day\'s estimated price: then verify the actual price in Investments.')],
@@ -1439,13 +1504,13 @@ async function renderRicorrenti(v) {
   ].filter(([, l]) => l.length);
 
   v.innerHTML = `
-    <div class="kpis" style="grid-template-columns:repeat(3,minmax(0,1fr))">
+    <div class="kpis">
       <div class="kpi g-rose"><div class="k-label">📤 ${T('Fixed monthly expenses')}</div><div class="k-value">${money(fixedOut)}</div><div class="k-sub">${T('monthly equivalent')}</div></div>
-      <div class="kpi g-emerald"><div class="k-label">📥 ${T('Fixed monthly income')}</div><div class="k-value">${money(fixedIn)}</div><div class="k-sub">${T('margin')} ${money(fixedIn - fixedOut)}</div></div>
-      <div class="kpi g-sky"><div class="k-label">🏦 ${T('Remaining debt')}</div><div class="k-value">${money(debt)}</div><div class="k-sub">${T('installments still to pay')}</div></div>
+      <div class="kpi g-emerald"><div class="k-label">📥 ${T('Fixed monthly income')}</div><div class="k-value">${money(fixedIn)}</div><div class="k-sub">${T('margin')} ${money(margin)}</div></div>
+      <div class="kpi g-sky"><div class="k-label">🔄 ${T('Fixed monthly transfers')}</div><div class="k-value">${money(trOut)}</div><div class="k-sub">${T('coming in from other spaces {amount}', { amount: money(trIn) })}</div></div>
     </div>
-    <div class="toolbar"><span class="muted small">${T('Payments that fall due are recorded automatically as transactions.')}</span><span class="spacer"></span>
-      <button class="btn" id="r-run">⚡ ${T('Process due payments')}</button><button class="btn btn-primary" id="r-new">＋ ${T('New recurring item')}</button></div>
+    <div class="toolbar"><span class="muted small" style="flex:1 1 260px">${T('Payments that fall due are recorded automatically as transactions.')}</span>
+      <span class="btn-row"><button class="btn" id="r-run">⚡ ${T('Process due payments')}</button><button class="btn btn-primary" id="r-new">＋ ${T('New recurring item')}</button></span></div>
     <div class="grid-3-2">
       <div>${groups.length ? groups.map(([title, l, help]) => `<div class="section-title" style="margin-top:4px">${title}</div>${help ? `<p class="muted small" style="margin:-4px 0 10px">${help}</p>` : ''}<div class="rec-grid">${l.map(recCard).join('')}</div>`).join('')
         : `<div class="card empty"><div class="big">🔁</div><h3>${T('No recurring items')}</h3><p>${T('Set up your mortgage, loans, rent, subscriptions and salary: they will be recorded automatically every time they fall due.')}</p>
@@ -1460,8 +1525,10 @@ async function renderRicorrenti(v) {
     const b = e.target.closest('[data-r]');
     if (!b) return;
     const r = list.find((x) => x.id === +b.dataset.id);
-    if (b.dataset.r === 'edit') recurringModal(r);
     if (b.dataset.r === 'tx') location.hash = '#/movimenti?recurring_id=' + r.id;
+    if (r.incoming) return;  // changed only in the space that created it
+    if (b.dataset.r === 'edit') recurringModal(r);
+    if (b.dataset.r === 'reconcile') { await reconcileModal(r.id); refresh(); }
     if (b.dataset.r === 'toggle') {
       try { await api(`/recurring/${r.id}`, { method: 'PUT', body: { ...r, active: !r.active } }); toast(r.active ? T('Recurring item paused') : T('Recurring item resumed'), 'info'); refresh(); } catch (err) { fail(err); }
     }
@@ -1509,7 +1576,9 @@ async function renderCalendario(v) {
   const split = (a, b, la, lb) => (b ? `<div class="k-split"><span class="k-li"><span>✔ ${la}</span><b>${money0(a)}</b></span><span class="k-li"><span>≈ ${lb}</span><b>${money0(b)}</b></span></div>` : '');
   v.innerHTML = `
     <div class="toolbar"><select id="cal-months">${[['1', T('This month')], ['3', T('Next 3 months')], ['6', T('Next 6 months')], ['12', T('Next 12 months')]].map(([k, l]) => `<option value="${k}" ${k === S.calMonths ? 'selected' : ''}>${l}</option>`).join('')}</select>
-      <span class="muted small">${T('Due dates of active recurring items (including transfers coming in from other spaces). Cash = only the day-to-day accounts (current, savings, cards, cash), where the payments go through; the Emergency fund also counts broker cash and money market ETFs.')}</span></div>
+      <details class="help" style="flex:1 1 300px"><summary>ℹ️ ${T('How it works')}</summary>
+        <p>${T('Due dates of active recurring items (including transfers coming in from other spaces). Cash = only the day-to-day accounts (current, savings, cards, cash), where the payments go through; the Emergency fund also counts broker cash and money market ETFs.')}</p>
+        ${plusEst || minusEst ? `<p>≈ ${T('<b>Estimated</b>, with the same method for income and expenses: variable recurring items (median of recent payments) and regular transactions without a recurring item, recognized from history (same payer or payee in at least {min} of the last {months} months, ignoring month and year in the description; median monthly amount and day). Occasional expenses are not forecast; among estimated income only significant amounts are included (at least {amount} and 5% of the largest, so small account interest is left out). To track an item better, create a "variable amount" recurring item in Recurring.', { min: d.regular_min, months: d.history_months, amount: money0(5000) })}</p>` : ''}</details></div>
     <div class="kpis">
       <div class="kpi g-indigo"><div class="k-label">💧 ${T('Cash in accounts today')}</div><div class="k-value">${money0(d.start_liquidity)}</div>
         <div class="k-sub" title="${esc(T('The emergency fund adds the uninvested broker cash and money market ETFs'))}">${T('day-to-day accounts, no broker')} · ${tn('{n} due', '{n} due', items.length)}</div></div>
@@ -1521,7 +1590,6 @@ async function renderCalendario(v) {
         ${plusEst || minusEst ? `<div class="k-split"><span class="k-li"><span>✔ ${T('Confirmed only')}</span><b>${money0(sure)}</b></span><span class="k-li"><span>≈ ${T('Total with estimates')}</span><b>${money0(bal)}</b></span></div>`
           : `<div class="k-sub">${T('confirmed due dates only')}</div>`}</div>
     </div>
-    ${plusEst || minusEst ? `<p class="muted small" style="margin:-6px 0 14px">≈ ${T('<b>Estimated</b>, with the same method for income and expenses: variable recurring items (median of recent payments) and regular transactions without a recurring item, recognized from history (same payer or payee in at least {min} of the last {months} months, ignoring month and year in the description; median monthly amount and day). Occasional expenses are not forecast; among estimated income only significant amounts are included (at least {amount} and 5% of the largest, so small account interest is left out). To track an item better, create a "variable amount" recurring item in Recurring.', { min: d.regular_min, months: d.history_months, amount: money0(5000) })}</p>` : ''}
     ${months.map((m) => {
       const key = isoLocal(m).slice(0, 7), its = items.filter((x) => x.date.startsWith(key));
       return `<div class="card" style="margin-bottom:18px"><div class="card-head"><h3>${esc(fmtMonth(key))}</h3><span class="muted">${tn('{n} due', '{n} due', its.length)}</span></div>
@@ -1552,16 +1620,26 @@ function recCard(r) {
   return `<div class="card rec-card ${r.active ? '' : 'paused'}">
     <div class="rec-head"><div class="cat-ico" style="--c:${esc(color)}">${esc(ico)}</div>
       <div class="grow" style="min-width:0"><div class="title ellipsis" title="${esc(r.name)}">${esc(r.name)}</div>
-      <div class="muted small ellipsis">${FREQ[r.frequency]} · ${esc(r.account_name)}${r.kind === 'transfer' ? ' → ' + esc(r.to_account_name) : ''}</div></div></div>
+      <div class="muted small">${FREQ[r.frequency]} · ${esc(r.account_name)}${r.kind === 'transfer' ? ' → ' + esc(r.to_account_name) : ''}</div></div></div>
     ${pac ? `<div class="small" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center"><span class="tag ai" title="${esc(T('Each contribution automatically buys units of the linked security'))}">📈 ${T('Plan')}</span>
       <span>${T('buys')} <b>${esc(r.holding_ticker || '')}</b> <span class="muted">${esc(r.holding_name || '')}</span></span>
       ${r.pac_unverified ? `<a class="tag warn" href="#/investimenti" title="${esc(T('Purchases with an estimated price for more than 30 days'))}">⚠️ ${tn('{n} price to verify', '{n} prices to verify', r.pac_unverified)}</a>` : ''}</div>` : ''}
     <div class="rec-line"><span class="rec-amount amount ${r.kind}">${r.expected ? '≈ ' + money(r.expected_amount) : money(r.amount)}</span><span class="rec-next">${status}</span></div>
     <div class="rec-progress">${progress}</div>
     <div class="rec-stats">${stats}</div>
-    <div class="rec-actions"><button class="btn btn-sm btn-ghost" data-r="tx" data-id="${r.id}">📄 ${T('Transactions')}</button>
+    ${r.incoming
+    ? `<div class="rec-actions"><span class="tag" title="${esc(T('It can be changed only in the space that created it'))}">↘ ${T('From {space} · read only', { space: esc(r.from_space) })}</span>
+        <button class="btn btn-sm btn-ghost" data-r="tx" data-id="${r.id}">📄 ${T('Transactions')}</button></div></div>`
+    : `<div class="rec-actions"><button class="btn btn-sm btn-ghost" data-r="tx" data-id="${r.id}">📄 ${T('Transactions')}</button>
+      ${toOtherSpace(r) ? `<button class="btn btn-sm btn-ghost" data-r="reconcile" data-id="${r.id}" title="${esc(T('Find the same money recorded in other ways in both spaces'))}">🔗 ${T('Reconcile')}</button>` : ''}
       <button class="btn btn-sm btn-ghost" data-r="toggle" data-id="${r.id}">${r.active ? T('⏸ Pause') : T('▶ Resume')}</button>
-      <button class="btn btn-sm" data-r="edit" data-id="${r.id}">✏️ ${T('Edit')}</button></div></div>`;
+      <button class="btn btn-sm" data-r="edit" data-id="${r.id}">✏️ ${T('Edit')}</button></div></div>`}`;
+}
+
+// a plain recurring transfer of this space to an account of another space (one flow of money seen in both)
+function toOtherSpace(r) {
+  const to = S.allAccounts.find((a) => a.id === r.to_account_id);
+  return r.kind === 'transfer' && !r.incoming && !r.holding_id && !r.installments && to && to.portfolio_id !== S.pid;
 }
 
 // cat: candidate category names, first match wins (English defaults, then the legacy Italian names of existing databases)
@@ -1588,6 +1666,9 @@ function recurringModal(r = null) {
       <label class="field">${T('Frequency')} <select id="r-freq">${Object.entries(FREQ).map(([k, l]) => `<option value="${k}" ${x.frequency === k ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
       <label class="field">${T('First due date')} <input id="r-start" type="date" value="${esc(x.start_date)}"></label>
       <label class="field"><span id="r-acc-label">${T('Account')}</span><select id="r-account">${accountOptions(x.account_id)}</select></label>
+      <div class="field full" id="r-where-wrap">${T('Where does the money go?')}
+        <div class="seg" id="r-where"><button type="button" data-where="here">${T('To an account of this space')}</button><button type="button" data-where="other">${T('To another space')}</button></div>
+        <span class="muted small hidden" id="r-where-help">${T('It is one recurring item, shown in that space too (read-only there). When you save, HomeCoin looks for the same money already recorded in both spaces and proposes what to merge.')}</span></div>
       <label class="field" id="r-to-wrap">${T('To account')} <select id="r-to">${transferOptions(x.to_account_id || activeAccounts()[1]?.id)}</select></label>
       <label class="field" id="r-cat-wrap">${T('Category')} <select id="r-cat"></select></label>
       <div class="field full var-box" id="r-var-wrap">
@@ -1639,9 +1720,23 @@ function recurringModal(r = null) {
       hs.map((h) => `<option value="${h.id}" ${h.id === x.holding_id ? 'selected' : ''}>${esc(h.ticker)} · ${esc(h.name)}${h.asset_class === 'monetario' ? ' (money market)' : ''}</option>`).join('');
   };
   $('#r-to', m).addEventListener('change', drawPac);
+  // a transfer: within this space, or to another space (one recurring item seen in both, reconciled when saved)
+  const otherSpace = (id) => { const a = S.allAccounts.find((y) => y.id === +id); return !!a && a.portfolio_id !== S.pid; };
+  let where = otherSpace(x.to_account_id) ? 'other' : 'here';
+  const drawWhere = () => {
+    $$('#r-where button', m).forEach((b) => b.classList.toggle('on', b.dataset.where === where));
+    $('#r-where-help', m).classList.toggle('hidden', where !== 'other');
+    const keep = $('#r-to', m).value;
+    $('#r-to', m).innerHTML = transferOptions(keep);
+    $$('#r-to optgroup', m).forEach((g) => { if ((+g.dataset.space === S.pid) === (where === 'other')) g.remove(); });
+    if (!$('#r-to', m).value || otherSpace($('#r-to', m).value) !== (where === 'other')) $('#r-to', m).selectedIndex = 0;
+    drawPac();
+  };
+  $$('#r-where button', m).forEach((b) => (b.onclick = () => { where = b.dataset.where; drawWhere(); }));
   const draw = (cat) => {
     $$('#r-kind button', m).forEach((b) => b.classList.toggle('on', b.dataset.kind === kind));
     drawPac();
+    $('#r-where-wrap', m).classList.toggle('hidden', kind !== 'transfer' || S.portfolios.filter((p) => !p.archived).length < 2);
     $('#r-to-wrap', m).classList.toggle('hidden', kind !== 'transfer');
     $('#r-cat-wrap', m).classList.toggle('hidden', kind === 'transfer');
     $('#r-acc-label', m).textContent = kind === 'transfer' ? T('From account') : T('Account');
@@ -1665,6 +1760,7 @@ function recurringModal(r = null) {
   $('#r-inst', m).addEventListener('input', syncVar);
   $$('#r-kind button', m).forEach((b) => (b.onclick = () => { kind = b.dataset.kind; draw(); }));
   draw(x.category_id);
+  drawWhere();
   $$('[data-p]', m).forEach((b) => (b.onclick = () => {
     const p = PRESETS[+b.dataset.p];
     kind = p.kind;
@@ -1689,6 +1785,7 @@ function recurringModal(r = null) {
           draw(s.category_id || '');
           if (s.category_id) markSuggested($('#r-cat', m));
           if (s.account_id && $(`#r-account option[value="${s.account_id}"]`, m)) { $('#r-account', m).value = s.account_id; markSuggested($('#r-account', m)); }
+          if (s.to_account_id && otherSpace(s.to_account_id) !== (where === 'other')) { where = otherSpace(s.to_account_id) ? 'other' : 'here'; drawWhere(); }
           if (s.to_account_id && $(`#r-to option[value="${s.to_account_id}"]`, m)) { $('#r-to', m).value = s.to_account_id; markSuggested($('#r-to', m)); drawPac(); }
           if (s.amount && !$('#r-amount', m).value) { $('#r-amount', m).value = moneyInput(s.amount); markSuggested($('#r-amount', m)); }
           const n = $('#r-sugg-note', m);
@@ -1739,7 +1836,11 @@ function recurringModal(r = null) {
     try {
       const res = await api(r ? `/recurring/${r.id}` : '/recurring', { method: r ? 'PUT' : 'POST', body });
       toast(res.created ? `${T('Recurring item saved')} · ${tn('{n} transaction recorded', '{n} transactions recorded', res.created)}` : T('Recurring item saved'));
-      closeModal(); refresh();
+      closeModal();
+      // a recurring transfer to another space: propose the same money already recorded in other ways (if any)
+      const saved = { ...body, id: r ? r.id : res.id };
+      if (toOtherSpace(saved)) await reconcileModal(saved.id, { quiet: true });
+      refresh();
     } catch (e) { fail(e); }
   };
   if (r) $('#r-del', m).onclick = async () => {
@@ -1956,7 +2057,7 @@ async function renderReport(v) {
       <div class="kpi g-emerald"><div class="k-label">📥 ${T('Income ·')} ${esc(label)}</div><div class="k-value">${money(inflow)}</div>
         ${tin ? `<div class="k-split"><a href="#/report" data-t="income"><span>💼 ${T('Income')}</span><b>${money(inc)}</b></a><a href="#/movimenti?${qs({ kind: 'transfer', from: data.from, to: data.to })}"><span>↙ ${T('From other spaces')}</span><b>${money(tin)}</b></a></div>` : ''}</div>
       <div class="kpi g-rose"><div class="k-label">📤 ${T('Money out ·')} ${esc(label)}</div><div class="k-value">${money(exp + other)}</div>
-        ${other ? `<div class="k-split"><a href="#/report" data-t="expense"><span>🛒 ${T('Expenses')}</span><b>${money(exp)}</b></a><a href="#/report" data-t="other"><span>↗ ${T('Other spaces')}</span><b>${money(other)}</b></a></div>` : ''}</div>
+        ${other ? `<div class="k-split"><a href="#/report" data-t="expense"><span>🛒 ${T('Spending')}</span><b>${money(exp)}</b></a><a href="#/report" data-t="other"><span>↗ ${T('To other spaces')}</span><b>${money(other)}</b></a></div>` : ''}</div>
       <div class="kpi g-amber"><div class="k-label">🐷 ${T('Savings')}</div><div class="k-value">${money(saved)}</div><div class="k-sub">${inflow ? pct(saved / inflow) + T(' of income') : ''}</div></div>
       <div class="kpi g-indigo"><div class="k-label">📊 ${T('Average monthly spending')}</div><div class="k-value">${money(exp / monthsWithData)}</div><div class="k-sub">${tn('over {n} month with expenses', 'over {n} months with expenses', monthsWithData)}</div></div>
     </div>
@@ -2382,10 +2483,13 @@ function categoryModal(c = null, kind = 'expense') {
       ${x.kind === 'expense' ? `<label class="check full"><input type="checkbox" id="c-flow" ${x.flow === 'other' ? 'checked' : ''}>
         ${T('Contribution to other spaces (e.g. the household account): not an expense, in reports it counts under "Other spaces"')}</label>` : ''}
     </div>
+    ${c && x.kind === 'expense' && !['balance_adjustment', 'other_investments'].includes(c.code) ? `<p class="muted small" style="margin:12px 0 0">🔄 ${T('Money you move to another space recorded here as expenses? Turn them into transfers, so they appear in both spaces.')}
+      <button type="button" class="btn btn-sm" id="c-convert">${T('Turn into transfers…')}</button></p>` : ''}
     <div class="modal-foot">${c ? `<button class="btn btn-ghost left neg" id="c-del">🗑 ${T('Delete')}</button>` : ''}
       <button class="btn" data-cancel>${T('Cancel')}</button><button class="btn btn-primary" id="c-save">${T('Save')}</button></div>`);
   const getColor = bindSwatches($('#c-color', m)), getIcon = bindEmoji($('#c-icon', m));
   $('[data-cancel]', m).onclick = closeModal;
+  if ($('#c-convert', m)) $('#c-convert', m).onclick = () => { closeModal(); convertToTransfersModal(c); };
   $('#c-save', m).onclick = async () => {
     const budget = $('#c-budget', m) ? parseMoney($('#c-budget', m).value) : 0;
     const body = { name: $('#c-name', m).value, kind: x.kind, color: getColor(), icon: getIcon(), budget: budget || 0,
@@ -2408,6 +2512,324 @@ function categoryModal(c = null, kind = 'expense') {
       toast(T('Category deleted')); refresh();
     } catch (e) { fail(e); }
   };
+}
+
+// expenses of a category that are really money moved to another space → transfers to an account of that space:
+// preview first (each expense and what it becomes, the pairings the user can undo, the effect on both spaces),
+// then the conversion
+function convertToTransfersModal(c) {
+  // the money reaches one other space, possibly several of its accounts: the space first, then its accounts
+  const spaces = S.portfolios.filter((p) => p.id !== S.pid && !p.archived)
+    .map((p) => ({ ...p, accs: S.allAccounts.filter((a) => a.portfolio_id === p.id && !a.archived) })).filter((p) => p.accs.length);
+  if (!spaces.length) { toast(T('There is no active account in another space'), 'err'); return; }
+  const m = openModal(T('Turn "{name}" into transfers', { name: c.name }), `
+    <p class="muted small" style="margin-top:0">${T('Each expense of this category becomes a transfer to the account where its money arrived, found among the accounts you tick: it stays out of your spending and appears in that space as money received. Amounts, dates and descriptions do not change.')}</p>
+    <div class="form-grid">
+      <label class="field">${T('Destination space')} <select id="cv-space">${spaces.map((p) => `<option value="${p.id}">${esc(p.icon || '')} ${esc(p.name)}</option>`).join('')}</select></label>
+      <label class="field">${T('Expenses with no matching record go to')} <select id="cv-def"></select></label>
+      <div class="field full">${T('Accounts the money reaches')} <div id="cv-accs" style="display:flex;flex-wrap:wrap;gap:4px 14px"></div></div>
+      <label class="check full"><input type="checkbox" id="cv-merge" checked> ${T('Recognize the money already recorded: similar amount and close date, each record paired once with the best overall pairing. An income in the destination account is replaced by the transfer; an expense already recorded as a transfer to that account is a duplicate and is deleted. Nothing is counted twice.')}</label>
+      <label class="check full"><input type="checkbox" id="cv-split" checked> ${T('Split an expense into two transfers when two incomes in two different accounts together make its amount')}</label>
+      <label class="field">${T('Date difference allowed (days)')} <input id="cv-days" type="number" min="0" max="31" step="1" value="5"></label>
+      <label class="field">${T('Amount difference allowed (%)')} <input id="cv-tol" type="number" min="0" max="100" step="1" value="2"></label>
+      <p class="muted small full" style="margin:0">${T('When the amounts differ, the transfer keeps the amount of the expense, the money that left your account.')}</p>
+    </div>
+    <div id="cv-out" class="card" style="margin-top:12px"></div>
+    <div class="modal-foot"><button class="btn" data-cancel>${T('Cancel')}</button>
+      <button class="btn btn-primary" id="cv-go" disabled>${T('Convert')}</button></div>`, { wide: true });
+  $('[data-cancel]', m).onclick = closeModal;
+  let unmatch, chosen, assign, recAcc, confirm;  // the user's choices, reset when the space changes
+  const reset = () => { unmatch = new Set(); chosen = new Set(); assign = {}; recAcc = {}; confirm = new Set(); };
+  const space = () => spaces.find((p) => p.id === +$('#cv-space', m).value);
+  const ticked = () => $$('[data-acc]:checked', m).map((el) => +el.dataset.acc);
+  const accName = (id) => S.allAccounts.find((a) => a.id === id)?.name || '';
+  const drawAccounts = () => {  // all the accounts of the space ticked: the records say where the money arrived
+    $('#cv-accs', m).innerHTML = space().accs.map((a) => `<label class="check"><input type="checkbox" data-acc="${a.id}" checked> ${esc(a.icon)} ${esc(a.name)}</label>`).join('');
+    $$('[data-acc]', m).forEach((el) => (el.onchange = () => { drawDefault(); preview(); }));
+    drawDefault();
+  };
+  let defVal = null;  // the user's choice for unmatched expenses (null = not chosen yet: the first ticked account)
+  const drawDefault = () => {
+    $('#cv-def', m).innerHTML = ticked().map((id) => `<option value="${id}">${esc(accName(id))}</option>`).join('')
+      + `<option value="">${T('Leave them as expenses')}</option>`;
+    if (defVal !== null && [...$('#cv-def', m).options].some((o) => o.value === defVal)) $('#cv-def', m).value = defVal;
+    else $('#cv-def', m).selectedIndex = 0;
+  };
+  const num = (sel, max) => Math.min(max, Math.max(0, Number($(sel, m).value) || 0));
+  const opts = () => ({ to_account_ids: ticked(), default_account_id: $('#cv-def', m).value ? +$('#cv-def', m).value : null,
+    merge: $('#cv-merge', m).checked, split: $('#cv-split', m).checked, days: Math.round(num('#cv-days', 31)), tolerance: num('#cv-tol', 100),
+    unmatch: [...unmatch], confirm: [...confirm], assign, recurring_ids: [...chosen], recurring_accounts: recAcc });
+  const range = (r) => (r.first ? ` · ${fmtDate(r.first)} → ${fmtDate(r.last)}` : '');
+  async function preview() {
+    $('#cv-go', m).disabled = true;
+    if (!ticked().length) { $('#cv-out', m).innerHTML = `<div class="small neg">${T('Tick at least one account')}</div>`; return; }
+    try {
+      const r = await api(`/categories/${c.id}/to-transfers`, { method: 'POST', body: { ...opts(), dry_run: true } });
+      const names = (list) => list.map(esc).join(', ');
+      const lines = [
+        `<b>${tn('{n} expense', '{n} expenses', r.transactions)}</b> · ${money(r.total)}${range(r)}`,
+        r.merged ? `🔗 ${tn('{n} matching income in the destination account will be replaced', '{n} matching incomes in the destination account will be replaced', r.merged)}` : '',
+        r.split ? `✂️ ${tn('{n} expense matches two incomes in two accounts: it is split into two transfers', '{n} expenses match two incomes in two accounts: each is split into two transfers', r.split)}` : '',
+        r.duplicates ? `♊ ${tn('{n} expense is already recorded as a transfer to that account: it is a duplicate and will be deleted', '{n} expenses are already recorded as transfers to that account: they are duplicates and will be deleted', r.duplicates)}` : '',
+        r.kept ? `⏸ ${tn('{n} expense stays an expense', '{n} expenses stay expenses', r.kept)}` : '',
+        r.elsewhere ? `<span class="neg">⚠ ${tn('{n} expense has a similar income (amount and date) in another account of {space}: check that the destination account is the right one', '{n} expenses have a similar income (amount and date) in another account of {space}: check that the destination account is the right one', r.elsewhere, { space: esc(r.to_space) })}</span>` : '',
+      ].filter(Boolean);
+      // each expense: what it becomes and its account (the account of the record found, or the default); the account
+      // can be changed per row (this undoes the pairing), a pairing can be unticked ("not the same money")
+      const diff = (i) => (i.match_amount && i.match_amount !== i.amount ? ` · ${T('different amount: {amount}', { amount: money(i.match_amount) })}` : '');
+      const parts = (i) => i.parts.map((x) => `${money(x.amount)} → ${esc(accName(x.account_id))}`).join(', ');
+      const what = (i) => ({
+        merge: `🔗 ${T('Replaces the income of {date}', { date: fmtDate(i.match_date) })}${diff(i)}`,
+        duplicate: `♊ ${T('Already a transfer on {date}: deleted', { date: fmtDate(i.match_date) })}${diff(i)}`,
+        split: `✂️ ${T('Split into two transfers, replacing the two incomes: {parts}', { parts: parts(i) })}`,
+        keep: `⏸ ${T('Stays an expense')}`,
+      }[i.action] || `🔄 ${T('Becomes a transfer')}`);
+      // a pairing with a different amount (beyond 2%) is only a suggestion: applied when the user ticks it
+      const sug = (i) => {
+        const s = i.suggestion, v = { date: fmtDate(s.date), amount: money(s.amount) };
+        return `<div class="small neg"><input type="checkbox" data-confirm="${i.id}"> ${s.action === 'duplicate'
+          ? T('Possible duplicate with a different amount: the transfer of {date} ({amount}). Tick it if it is the same money.', v)
+          : s.action === 'split' ? T('Possible split with a different total ({amount}). Tick it if it is the same money.', v)
+            : T('Possible match with a different amount: the income of {date} ({amount}). Tick it if it is the same money.', v)}</div>`;
+      };
+      const tick = (i) => (i.confirmed ? `<input type="checkbox" data-confirm="${i.id}" checked title="${esc(T('Untick if they are not the same money'))}"> `
+        : ['merge', 'duplicate', 'split'].includes(i.action) || i.unmatched
+          ? `<input type="checkbox" data-pair="${i.id}" ${i.unmatched ? '' : 'checked'} title="${esc(T('Untick if they are not the same money'))}"> ` : '');
+      const accSel = (i) => `<label title="${esc(T('To account'))}">→ <select data-assign="${i.id}">${i.action === 'split' ? `<option value="split" selected>✂️ ${T('Split')}</option>` : ''}
+        ${r.accounts.map((a) => `<option value="${a.id}" ${i.action !== 'split' && i.to_account_id === a.id ? 'selected' : ''}>${esc(a.name)}</option>`).join('')}
+        <option value="0" ${i.action === 'keep' ? 'selected' : ''}>${T('Stays an expense')}</option></select></label>`;
+      // one card per expense: date, description, amount; then its account, what happens and the pairing tick
+      const rows = r.items.map((i) => `<div class="ri ${i.action === 'keep' ? 'off' : ''}"><span class="ri-date">${fmtDate(i.date)}</span>
+        <span class="ri-desc">${esc(i.description)}</span><span class="ri-amt">${money(i.amount)}</span>
+        <div class="ri-act">${accSel(i)}<span>${tick(i)}${what(i)}</span></div>${i.suggestion ? `<div class="ri-note">${sug(i)}</div>` : ''}</div>`).join('');
+      // the category's recurring items: none converted unless ticked, each with its account (suggested by the recurring
+      // income that looks like the same money, or a split); what looks like the same money is only reported
+      const recs = r.recurring_items.map((x) => {
+        const warn = [
+          x.planned.length ? `<div class="small neg">⚠ ${T('A recurring transfer to that account already looks like the same money ({names}): converting this one too would record it twice.', { names: names(x.planned) })}</div>` : '',
+          x.dest_income.length ? `<div class="small">ℹ️ ${T('Recurring income in {space} that looks like the same money ({names}): after the change you can merge it, it is proposed right after.', { space: esc(r.to_space), names: names(x.dest_income) })}</div>` : '',
+          x.parts.length ? `<div class="small">✂️ ${T('Two recurring incomes in two accounts together make it ({names}): it can become two recurring transfers, {parts}.', { names: names(x.parts.map((p) => p.income)), parts: parts(x) })}</div>` : '',
+          !x.chosen && !r.flow_other ? `<div class="muted small">${T('Not converted: its future payments stay expenses and do not reach {space}. To count them under "Other spaces" meanwhile, mark the category as a contribution to other spaces.', { space: esc(r.to_space) })}</div>` : '',
+        ].join('');
+        const sel = `<label title="${esc(T('To account'))}">→ <select data-racc="${x.id}">${x.parts.length ? `<option value="split" ${x.to_account_id === 'split' ? 'selected' : ''}>✂️ ${T('Split')}</option>` : ''}
+          ${r.accounts.map((a) => `<option value="${a.id}" ${x.to_account_id === a.id ? 'selected' : ''}>${esc(a.name)}</option>`).join('')}</select></label>`;
+        return `<div class="ri ${x.chosen ? '' : 'off'}"><span class="ri-date">🔁 ${FREQ[x.frequency] || ''}</span><span class="ri-desc">${esc(x.name)}${x.active ? '' : ` · ${T('⏸ Paused')}`}</span>
+          <span class="ri-amt">${money(x.amount)}</span>
+          <div class="ri-act"><label><input type="checkbox" data-rec="${x.id}" ${x.chosen ? 'checked' : ''}> ${T('Turn into a recurring transfer')}</label>${sel}</div>
+          ${warn ? `<div class="ri-note">${warn}</div>` : ''}</div>`;
+      }).join('');
+      $('#cv-out', m).innerHTML = r.transactions || r.recurring_items.length ? lines.map((l) => `<div class="small">${l}</div>`).join('')
+        + (rows ? `<div class="ri-list">${rows}</div>` : '')
+        + (recs ? `<div class="small" style="margin-top:12px"><b>${T('Recurring items of this category: tick the ones to turn into recurring transfers. Nothing else is changed.')}</b></div><div class="ri-list">${recs}</div>` : '')
+        + effectTable(r)
+        : `<div class="muted small">${T('Nothing to convert: this category has no expenses or recurring items.')}</div>`;
+      $$('[data-pair]', m).forEach((el) => (el.onchange = () => { (el.checked ? unmatch.delete(+el.dataset.pair) : unmatch.add(+el.dataset.pair)); preview(); }));
+      $$('[data-confirm]', m).forEach((el) => (el.onchange = () => { (el.checked ? confirm.add(+el.dataset.confirm) : confirm.delete(+el.dataset.confirm)); preview(); }));
+      $$('[data-assign]', m).forEach((el) => (el.onchange = () => { if (el.value === 'split') delete assign[el.dataset.assign]; else assign[el.dataset.assign] = +el.value; preview(); }));
+      $$('[data-rec]', m).forEach((el) => (el.onchange = () => { (el.checked ? chosen.add(+el.dataset.rec) : chosen.delete(+el.dataset.rec)); preview(); }));
+      $$('[data-racc]', m).forEach((el) => (el.onchange = () => { recAcc[el.dataset.racc] = el.value === 'split' ? 'split' : +el.value; preview(); }));
+      $('#cv-go', m).disabled = !(r.items.some((i) => i.action !== 'keep') || r.recurring);
+    } catch (e) { $('#cv-out', m).innerHTML = `<div class="small neg">${esc(e.message)}</div>`; }
+  }
+  $('#cv-space', m).onchange = () => { reset(); defVal = null; drawAccounts(); preview(); };
+  $('#cv-def', m).onchange = () => { defVal = $('#cv-def', m).value; preview(); };
+  $$('#cv-merge, #cv-split, #cv-days, #cv-tol', m).forEach((el) => (el.onchange = preview));
+  $('#cv-go', m).onclick = async () => {
+    if (!(await confirmDialog(T('Convert now? A backup of the database is saved first.'), { ok: T('Convert'), danger: false }))) return;
+    try {
+      const r = await api(`/categories/${c.id}/to-transfers`, { method: 'POST', body: opts() });
+      toast(tn('{n} expense turned into a transfer', '{n} expenses turned into transfers', r.converted + r.merged + r.split)
+        + (r.duplicates ? ` · ${tn('{n} duplicate removed', '{n} duplicates removed', r.duplicates)}` : ''));
+      closeModal();
+      for (const id of r.converted_recurring) await reconcileModal(id, { quiet: true });  // proposes what to merge, if anything
+      await loadMeta(); route();
+    } catch (e) { fail(e); }
+  };
+  reset(); drawAccounts(); preview();
+}
+
+// effect of a change between two spaces on the reports of both (saved = income − spending), per account when the
+// money reaches several, and on net worth
+function effectTable(r) {
+  const e = r.effect, sign = (v) => (v > 0 ? '+' : '') + money(v);
+  const here = S.portfolios.find((p) => p.id === S.pid)?.name || '';
+  const balances = r.dest_balances ? r.dest_balances.map((x) => [r.to_space, T('Balance of {account}', { account: x.name }), x.delta])
+    : [[r.to_space, T('Balance of {account}', { account: r.to_account }), e.dest_balance]];
+  const fx = [
+    [here, T('Spending'), e.spending], [here, T('To other spaces'), e.to_others],
+    [here, T('Account balances'), e.source_balance], [here, T('Money saved'), e.source_balance],
+    [r.to_space, T('Income'), e.dest_income], [r.to_space, T('From other spaces'), e.dest_from_others],
+    ...balances, [r.to_space, T('Money saved'), e.dest_balance],
+    ['', T('Net worth'), e.source_balance + e.dest_balance],
+  ].filter((x) => x[2]).map(([s, k, v]) => `<tr><td>${esc(s)}</td><td>${esc(k)}</td><td class="num">${sign(v)}</td></tr>`).join('');
+  const changed = r.dest_balances ? r.dest_balances.map((x) => x.name) : (e.dest_balance ? [r.to_account] : []);
+  return (fx ? `<div class="small" style="margin-top:12px"><b>${T('Effect on the reports')}</b></div><table class="table small fx-table"><tbody>${fx}</tbody></table>` : '')
+    + (changed.length ? `<div class="muted small">${T('After the change, check that the balance of {account} matches your bank: if it does not, the same money was recorded there in another way (for example a balance adjustment).', { account: changed.map(esc).join(', ') })}</div>` : '');
+}
+
+// what changed in one account since an automatic backup: deleted transactions (they can be put back one by one),
+// changed and added ones, and the difference in the balance. Resolves when the window is closed.
+async function compareBackupModal(aid) {
+  let list;
+  try { list = await api('/backups/auto'); } catch (e) { fail(e); return; }
+  if (!list.length) { toast(T('There are no automatic backups yet'), 'err'); return; }
+  const acc = S.allAccounts.find((a) => a.id === aid);
+  const restore = new Set();
+  const reason = (x) => ({ startup: T('at start'), 'pre-convert': T('before turning expenses into transfers'), 'pre-reconcile': T('before a reconciliation'),
+    'pre-doubles': T('before removing doubles'), 'pre-import': T('before an import'), 'pre-restore': T('before a restore'),
+    'pre-restore-tx': T('before putting transactions back'), update: T('before an update') }[x.reason] || x.reason);
+  return new Promise((resolve) => {
+    const m = openModal(T('{account}: compare with an automatic backup', { account: acc?.name || '' }), `
+      <p class="muted small" style="margin-top:0">${T('HomeCoin saves an encrypted copy at every start and before every bulk change. Choose one: you see the transactions of this account deleted, changed or added since then, and you can put back the deleted ones you need. Nothing else changes.')}</p>
+      <label class="field">${T('Automatic backup')} <select id="cb-name">${list.map((x) => `<option value="${esc(x.name)}">${esc(fmtDate(x.at.slice(0, 10)))} ${esc(x.at.slice(11))} · ${esc(reason(x))}</option>`).join('')}</select></label>
+      <div id="cb-out" style="margin-top:12px"></div>
+      <div class="modal-foot"><button class="btn" data-cancel>${T('Close')}</button>
+        <button class="btn btn-primary" id="cb-go" disabled>${T('Put back the ticked ones')}</button></div>`, { wide: true });
+    const done = () => { closeModal(); resolve(); };
+    $('[data-cancel]', m).onclick = done;
+    const line = (t) => `${KIND_LABEL[t.kind] || t.kind}${t.kind === 'transfer' ? ` · ${esc(t.account_name || '')} → ${esc(t.to_account_name || '')}` : ''}`;
+    const card = (t, tick) => `<div class="ri"><span class="ri-date">${fmtDate(t.date)}</span><span class="ri-desc">${esc(t.description)}</span>
+      <span class="ri-amt ${t.effect > 0 ? 'pos' : 'neg'}">${t.effect > 0 ? '+' : ''}${money(t.effect)}</span>
+      <div class="ri-act">${tick ? `<label><input type="checkbox" data-restore="${t.id}" ${restore.has(t.id) ? 'checked' : ''}> ${T('Put back')}</label>` : ''}<span class="muted">${line(t)}</span></div></div>`;
+    const load = async () => {
+      $('#cb-go', m).disabled = true;
+      try {
+        const r = await api(`/accounts/${aid}/compare-backup`, { method: 'POST', body: { backup: $('#cb-name', m).value, dry_run: true } });
+        const sec = (title, html) => (html ? `<div class="small" style="margin-top:12px"><b>${title}</b></div><div class="ri-list">${html}</div>` : '');
+        $('#cb-out', m).innerHTML = `<div class="small">${T('Difference in the balance of {account} since then: {amount}', { account: esc(acc?.name || ''), amount: `<b>${r.difference > 0 ? '+' : ''}${money(r.difference)}</b>` })}</div>`
+          + sec(`🗑 ${T('Deleted since then')}`, r.deleted.map((t) => card(t, true)).join(''))
+          + sec(`✏️ ${T('Changed since then')}`, r.changed.map((x) => `<div class="ri"><span class="ri-date">${fmtDate(x.after.date)}</span><span class="ri-desc">${esc(x.after.description)}</span>
+              <span class="ri-amt">${money(x.after.effect)}</span><div class="ri-note muted">${T('before')}: ${fmtDate(x.before.date)} · ${esc(x.before.description)} · ${money(x.before.effect)} · ${line(x.before)}</div></div>`).join(''))
+          + sec(`＋ ${T('Added since then')}`, r.added.map((t) => card(t, false)).join(''))
+          + (r.deleted.length || r.changed.length || r.added.length ? '' : `<div class="muted small" style="margin-top:8px">${T('Nothing changed in this account since then.')}</div>`);
+        $$('[data-restore]', m).forEach((el) => (el.onchange = () => { el.checked ? restore.add(+el.dataset.restore) : restore.delete(+el.dataset.restore); $('#cb-go', m).disabled = !restore.size; }));
+        $('#cb-go', m).disabled = !restore.size;
+      } catch (e) { $('#cb-out', m).innerHTML = `<div class="small neg">${esc(e.message)}</div>`; }
+    };
+    $('#cb-name', m).onchange = () => { restore.clear(); load(); };
+    $('#cb-go', m).onclick = async () => {
+      if (!(await confirmDialog(T('Put back the ticked transactions? A backup of the database is saved first.'), { ok: T('Put back'), danger: false }))) { resolve(); return; }
+      try {
+        const res = await api(`/accounts/${aid}/compare-backup`, { method: 'POST', body: { backup: $('#cb-name', m)?.value || list[0].name, restore_ids: [...restore] } });
+        toast(tn('{n} transaction restored', '{n} transactions restored', res.restored)); done();
+      } catch (e) { fail(e); }
+    };
+    load();
+  });
+}
+
+// money recorded twice in one account (an income and a transfer for the same money, a generated transfer and the same
+// one entered by hand, an import done twice): pairs to tick, the most coherent record of each pair is kept.
+// Resolves when the window is closed.
+async function doublesModal(aid) {
+  const choices = {};
+  let days = 3, tol = 0, r;
+  const load = () => api(`/accounts/${aid}/doubles`, { method: 'POST', body: { dry_run: true, days, tolerance: tol, choices } });
+  try { r = await load(); } catch (e) { fail(e); return; }
+  const num = (m, sel, max) => Math.min(max, Math.max(0, Number($(sel, m).value) || 0));
+  return new Promise((resolve) => {
+    const m = openModal(T('Money recorded twice in {account}', { account: r.account }), `
+      <p class="muted small" style="margin-top:0">${T('Two records in the same direction with a similar amount and a close date are probably the same money recorded twice. For each pair HomeCoin keeps the most coherent record (a transfer, seen in both spaces) and deletes the other. Nothing changes until you confirm.')}</p>
+      <div class="form-grid">
+        <label class="field">${T('Date difference allowed (days)')} <input id="db-days" type="number" min="0" max="31" step="1" value="${days}"></label>
+        <label class="field">${T('Amount difference allowed (%)')} <input id="db-tol" type="number" min="0" max="100" step="1" value="${tol}"></label>
+      </div>
+      <div id="db-out" style="margin-top:12px"></div>
+      <div class="modal-foot"><button class="btn" data-cancel>${T('Cancel')}</button>
+        <button class="btn btn-primary" id="db-go">${T('Apply')}</button></div>`, { wide: true });
+    const done = () => { closeModal(); resolve(); };
+    $('[data-cancel]', m).onclick = done;
+    const what = (t) => {
+      const flow = t.kind === 'transfer'
+        ? (t.to_account_id === aid ? T('from {account} ({space})', { account: t.account_name, space: t.space }) : T('to {account} ({space})', { account: t.to_account_name, space: t.to_space }))
+        : '';
+      return `${KIND_LABEL[t.kind] || t.kind}${flow ? ' · ' + esc(flow) : ''}${t.recurring_id ? ' · 🔁' : ''} · ${fmtDate(t.date)} · <b>${money(t.amount)}</b> — ${esc(t.description)}`;
+    };
+    const draw = () => {
+      const cards = r.pairs.map((p) => `<div class="ri ${p.on ? '' : 'off'}"><span class="ri-date">${fmtDate(p.drop.date)}</span>
+        <span class="ri-desc">${p.direction === 'in' ? '📥' : '📤'} ${esc(p.drop.description || p.keep.description)}</span><span class="ri-amt ${p.different ? 'neg' : ''}">${money(p.drop.amount)}</span>
+        <div class="ri-act"><label><input type="checkbox" data-key="${esc(p.key)}" ${p.on ? 'checked' : ''}> ${T('Delete the double')}</label></div>
+        <div class="ri-note">✅ ${T('Kept')}: ${what(p.keep)}<br>🗑 ${T('Deleted')}: ${what(p.drop)}</div></div>`).join('');
+      const fx = r.effect.map((x) => `<tr><td>${esc(x.space)}</td><td>${T('Balance of {account}', { account: esc(x.name) })}</td><td class="num">${x.delta > 0 ? '+' : ''}${money(x.delta)}</td></tr>`).join('');
+      $('#db-out', m).innerHTML = cards
+        ? `<div class="ri-list">${cards}</div>` + (fx ? `<div class="small" style="margin-top:12px"><b>${T('Effect on the balances')}</b></div><table class="table small fx-table"><tbody>${fx}</tbody></table>` : '')
+        : `<div class="muted small">${T('No money recorded twice found in this account.')}</div>`;
+      $$('[data-key]', m).forEach((el) => (el.onchange = async () => { choices[el.dataset.key] = el.checked; await refresh(); }));
+      $('#db-go', m).disabled = !r.pairs.some((p) => p.on);
+    };
+    const refresh = async () => { try { r = await load(); draw(); } catch (e) { $('#db-out', m).innerHTML = `<div class="small neg">${esc(e.message)}</div>`; } };
+    $$('#db-days, #db-tol', m).forEach((el) => (el.onchange = () => { days = Math.round(num(m, '#db-days', 31)); tol = num(m, '#db-tol', 100); refresh(); }));
+    $('#db-go', m).onclick = async () => {
+      if (!(await confirmDialog(T('Apply the changes? A backup of the database is saved first.'), { ok: T('Apply'), danger: false }))) { resolve(); return; }
+      try {
+        const res = await api(`/accounts/${aid}/doubles`, { method: 'POST', body: { days, tolerance: tol, choices } });
+        toast(tn('{n} duplicate removed', '{n} duplicates removed', res.removed)); done();
+      } catch (e) { fail(e); }
+    };
+    draw();
+  });
+}
+
+// one flow of money between two spaces = one recurring transfer: proposes the records that look like the same money
+// (to link, convert or delete) and the recurring items to merge; changes only what the user ticks.
+// quiet: open only if there is something to propose. Resolves when the window is closed.
+async function reconcileModal(rid, { quiet = false } = {}) {
+  const choices = {};
+  const num = (m, sel, max) => Math.min(max, Math.max(0, Number($(sel, m).value) || 0));
+  let days = 5, tol = 2;
+  const load = () => api(`/recurring/${rid}/reconcile`, { method: 'POST', body: { dry_run: true, days, tolerance: tol, choices } });
+  let r;
+  try { r = await load(); } catch (e) { if (!quiet) fail(e); return; }
+  if (quiet && !r.rows.length && !r.recurring.length) return;
+  return new Promise((resolve) => {
+    const m = openModal(T('Make "{name}" coherent in both spaces', { name: r.name }), `
+      <p class="muted small" style="margin-top:0">${T('One flow of money between two spaces is one recurring transfer. Here are the records that look like the same money (similar amount, close date): tick what to fix. Nothing changes until you confirm.')}</p>
+      <div class="form-grid">
+        <label class="field">${T('Date difference allowed (days)')} <input id="rc-days" type="number" min="0" max="31" step="1" value="${days}"></label>
+        <label class="field">${T('Amount difference allowed (%)')} <input id="rc-tol" type="number" min="0" max="100" step="1" value="${tol}"></label>
+        <p class="muted small full" style="margin:0">${T('Records whose amount differs from the recurring item by more than 2% are shown in red and are not ticked: tick them only if they are the same money.')}</p>
+      </div>
+      <div id="rc-out" class="card" style="margin-top:12px"></div>
+      <div class="modal-foot"><button class="btn" data-cancel>${T('Not now')}</button>
+        <button class="btn btn-primary" id="rc-go">${T('Apply')}</button></div>`, { wide: true });
+    const done = () => { closeModal(); resolve(); };
+    $('[data-cancel]', m).onclick = done;
+    const what = (x) => ({
+      lnk: `🔗 ${T('Transfer already recorded: linked to this recurring item')}`,
+      cnv: `🔄 ${x.own ? T('Past payment of this recurring item, still an expense: becomes this transfer') : T('Expense: becomes this transfer')}`,
+      del: `♊ ${T('Income in {account}: the same money again, deleted', { account: esc(r.to_account) })}`,
+      inc: `❔ ${T('Income in {account} with no transfer: tick it only if this money left your account, then it becomes the transfer', { account: esc(r.to_account) })}`,
+    }[x.type]);
+    const draw = () => {
+      const differs = (x) => (x.different ? `<div class="small neg">≠ ${T('Different amount from the recurring item ({amount}): tick it only if it is the same money', { amount: money(r.amount) })}</div>` : '');
+      // one card per record: date, description, amount; then the tick and what happens (due date it belongs to)
+      const rows = r.rows.map((x) => `<div class="ri ${x.on ? '' : 'off'}"><span class="ri-date">${fmtDate(x.date)}</span><span class="ri-desc">${esc(x.description)}</span>
+        <span class="ri-amt ${x.different ? 'neg' : ''}">${money(x.amount)}</span>
+        <div class="ri-act"><label><input type="checkbox" data-key="${esc(x.key)}" ${x.on ? 'checked' : ''}> ${what(x)}</label>
+          <span class="muted">${T('Due date')}: ${fmtDate(x.due)}</span></div>${x.different ? `<div class="ri-note">${differs(x)}</div>` : ''}</div>`).join('');
+      const recs = r.recurring.map((x) => `<div class="ri ${x.on ? '' : 'off'}"><span class="ri-date">${x.kind === 'income' ? '📥' : x.kind === 'expense' ? '📤' : '🔄'} ${FREQ[x.frequency] || ''}</span>
+        <span class="ri-desc">${esc(x.name)}</span><span class="ri-amt ${x.different ? 'neg' : ''}">${money(x.amount)}</span>
+        <div class="ri-act"><label><input type="checkbox" data-key="${esc(x.key)}" ${x.on ? 'checked' : ''}> ${T('Remove (its past transactions stay)')}</label>
+          <span class="muted">📅 ${fmtDate(x.next_date)}</span></div>${x.different ? `<div class="ri-note">${differs(x)}</div>` : ''}</div>`).join('');
+      $('#rc-out', m).innerHTML = (r.linked ? `<div class="small">✅ ${tn('{n} due date already linked', '{n} due dates already linked', r.linked)}</div>` : '')
+        + (rows ? `<div class="ri-list">${rows}</div>` : '')
+        + (recs ? `<div class="small" style="margin-top:12px"><b>${T('Recurring items for the same money: removed if ticked (their past transactions stay). The amount of this recurring transfer is the one that counts.')}</b></div><div class="ri-list">${recs}</div>` : '')
+        + (rows || recs ? effectTable(r) : `<div class="muted small">${T('Nothing to fix: this recurring transfer is already coherent in both spaces.')}</div>`);
+      $$('[data-key]', m).forEach((el) => (el.onchange = async () => { choices[el.dataset.key] = el.checked; await refresh(); }));
+      $('#rc-go', m).disabled = ![...r.rows, ...r.recurring].some((x) => x.on);
+    };
+    const refresh = async () => { try { r = await load(); draw(); } catch (e) { $('#rc-out', m).innerHTML = `<div class="small neg">${esc(e.message)}</div>`; } };
+    $$('#rc-days, #rc-tol', m).forEach((el) => (el.onchange = () => { days = Math.round(num(m, '#rc-days', 31)); tol = num(m, '#rc-tol', 100); refresh(); }));
+    $('#rc-go', m).onclick = async () => {
+      // the confirmation replaces this window: cancelling ends it (nothing changed), the caller goes on
+      if (!(await confirmDialog(T('Apply the changes? A backup of the database is saved first.'), { ok: T('Apply'), danger: false }))) { resolve(); return; }
+      try {
+        await api(`/recurring/${rid}/reconcile`, { method: 'POST', body: { days, tolerance: tol, choices } });
+        toast(T('Recurring transfer made coherent in both spaces')); done();
+      } catch (e) { fail(e); }
+    };
+    draw();
+  });
 }
 
 // ================================================================ budgets
@@ -2570,11 +2992,21 @@ async function renderEmergenza(v) {
 async function renderObiettivi(v) {
   const goals = await api('/goals');
   const family = S.portfolio.type === 'family';
+  // summary of all the goals: how much in total, how much already there, how far, how many reached
+  const target = goals.reduce((s, gl) => s + gl.target, 0), current = goals.reduce((s, gl) => s + Math.min(gl.current, gl.target), 0);
+  const reached = goals.filter((gl) => gl.progress >= 1).length;
+  const monthly = goals.reduce((s, gl) => s + (gl.progress < 1 && gl.monthly_needed ? gl.monthly_needed : 0), 0);
   v.innerHTML = `
+    ${goals.length ? `<div class="kpis">
+      <div class="kpi g-indigo"><div class="k-label">🏁 ${T('All goals')}</div><div class="k-value">${money0(target)}</div><div class="k-sub">${tn('{n} goal', '{n} goals', goals.length)}</div></div>
+      <div class="kpi g-emerald"><div class="k-label">🐷 ${T('Already set aside')}</div><div class="k-value">${money0(current)}</div><div class="k-sub">${T('{percent} of the total', { percent: pct(target ? current / target : 0) })}</div></div>
+      <div class="kpi g-amber"><div class="k-label">📅 ${T('To set aside each month')}</div><div class="k-value">${money0(monthly)}</div><div class="k-sub">${T('for the goals with a date')}</div></div>
+      <div class="kpi g-sky"><div class="k-label">✅ ${T('Goals reached')}</div><div class="k-value">${reached}</div><div class="k-sub">${T('{amount} still to go', { amount: money0(target - current) })}</div></div>
+    </div>` : ''}
     <div class="toolbar"><h3 style="margin:0">🏁 ${family ? T('Shared goals') : T('Savings goals')}</h3><span class="spacer"></span><button class="btn btn-primary" id="gl-new">＋ ${T('New goal')}</button></div>
     <div class="rec-grid">${goals.map((gl) => `<div class="card rec-card">
       <div class="rec-head"><div class="cat-ico" style="--c:${esc(gl.color)}">${esc(gl.icon)}</div>
-        <div class="grow" style="min-width:0"><div class="title ellipsis">${esc(gl.name)}</div><div class="muted small ellipsis">${gl.account_id ? T('balance of {account}', { account: esc(gl.account_name) }) : T('amount set aside by hand')}${gl.target_date ? ` · ${T('by {date}', { date: esc(fmtDate(gl.target_date)) })}` : ''}</div></div></div>
+        <div class="grow" style="min-width:0"><div class="title ellipsis">${esc(gl.name)}</div><div class="muted small">${gl.account_id ? T('balance of {account}', { account: esc(gl.account_name) }) : T('amount set aside by hand')}${gl.target_date ? ` · ${T('by {date}', { date: esc(fmtDate(gl.target_date)) })}` : ''}</div></div></div>
       <div class="rec-line"><span class="rec-amount">${money0(gl.current)}</span><span class="rec-next">${T('of {amount}', { amount: money0(gl.target) })}</span></div>
       <div class="rec-progress"><div class="top small"><span>${T('{percent} reached', { percent: pct(gl.progress) })}</span><span class="muted">${T('{amount} to go', { amount: money0(gl.missing) })}</span></div>
         <div class="bar"><i style="width:${(gl.progress * 100).toFixed(1)}%"></i></div></div>
@@ -2649,6 +3081,12 @@ async function renderInvestimenti(v) {
   const pending = d.pac_pending || [];
   const unverified = d.pac_unverified || [];
   v.innerHTML = `
+    <div class="kpis">
+      <div class="kpi g-indigo"><div class="k-label">📊 ${T('Current value')}</div><div class="k-value">${money0(d.total_value)}</div><div class="k-sub">${tn('{n} account', '{n} accounts', d.accounts.length)}</div></div>
+      <div class="kpi g-sky"><div class="k-label">💶 ${T('Net invested')}</div><div class="k-value">${money0(d.total_invested)}</div><div class="k-sub">${T('capital put in')}</div></div>
+      <div class="kpi ${d.total_gain >= 0 ? 'g-emerald' : 'g-rose'}"><div class="k-label">${d.total_gain >= 0 ? '📈' : '📉'} ${T('Gain')}</div><div class="k-value">${d.total_gain >= 0 ? '+' : ''}${money0(d.total_gain)}</div><div class="k-sub">${T('{percent} on invested', { percent: pctSigned(d.total_return) })}</div></div>
+      <div class="kpi g-amber"><div class="k-label">⏱️ ${T('Annual return')}</div><div class="k-value">${pctSigned(d.total_xirr)}</div><div class="k-sub">${T('XIRR, accounts for when you invested')}</div></div>
+    </div>
     ${pending.length ? `<div class="card" style="margin-bottom:18px;border-color:var(--amber)"><div class="card-head"><h3>⏳ ${T('Investment plan purchases to complete')}</h3>
       <span class="muted small">${T('contribution made, but no known price to calculate the units')}</span></div>
       <div class="list">${pending.map((p, i) => `<div class="list-item"><div class="grow"><b>${esc(p.name)}</b><div class="muted small">${esc(fmtDate(p.date))} · ${esc(p.ticker)}</div></div>
@@ -2658,15 +3096,9 @@ async function renderInvestimenti(v) {
       <div class="list">${unverified.map((o, i) => `<div class="list-item"><div class="grow"><b>${esc(o.ticker || '')}</b> <span class="muted small">${esc(o.account_name)}</span><div class="muted small">${esc(fmtDate(o.date))} · ${T('estimated {price}', { price: esc(unitPrice(o.price)) })} · ${tn('{n} unit', '{n} units', o.quantity, { n: qtyFmt(o.quantity) })}</div></div>
         <b>${money(Math.abs(o.amount))}</b><button class="btn btn-sm btn-primary" data-pacv="${i}">✏️ ${T('Verify')}</button></div>`).join('')}</div></div>` : ''}`
     + `
-    <div class="toolbar"><span class="muted small">${T('Value = latest valuation (automatic from securities or entered by hand). Invested = net transfers/income into the account.')}</span><span class="spacer"></span>
-      ${hasHoldings ? `<button class="btn" id="iv-refresh" title="${esc(T('Uses the internet: it sends only the tickers to Yahoo Finance'))}">🌐 ${T('Update prices')}</button>` : ''}
-      <button class="btn btn-primary" id="iv-new">＋ ${T('Investment account')}</button></div>
-    <div class="kpis">
-      <div class="kpi g-indigo"><div class="k-label">📊 ${T('Current value')}</div><div class="k-value">${money0(d.total_value)}</div><div class="k-sub">${tn('{n} account', '{n} accounts', d.accounts.length)}</div></div>
-      <div class="kpi g-sky"><div class="k-label">💶 ${T('Net invested')}</div><div class="k-value">${money0(d.total_invested)}</div><div class="k-sub">${T('capital put in')}</div></div>
-      <div class="kpi ${d.total_gain >= 0 ? 'g-emerald' : 'g-rose'}"><div class="k-label">${d.total_gain >= 0 ? '📈' : '📉'} ${T('Gain')}</div><div class="k-value">${d.total_gain >= 0 ? '+' : ''}${money0(d.total_gain)}</div><div class="k-sub">${T('{percent} on invested', { percent: pctSigned(d.total_return) })}</div></div>
-      <div class="kpi g-amber"><div class="k-label">⏱️ ${T('Annual return')}</div><div class="k-value">${pctSigned(d.total_xirr)}</div><div class="k-sub">${T('XIRR, accounts for when you invested')}</div></div>
-    </div>
+    <div class="toolbar"><details class="help" style="flex:1 1 260px"><summary>ℹ️ ${T('How it works')}</summary><p>${T('Value = latest valuation (automatic from securities or entered by hand). Invested = net transfers/income into the account.')}</p></details>
+      <span class="btn-row">${hasHoldings ? `<button class="btn" id="iv-refresh" title="${esc(T('Uses the internet: it sends only the tickers to Yahoo Finance'))}">🌐 ${T('Update prices')}</button>` : ''}
+      <button class="btn btn-primary" id="iv-new">＋ ${T('Investment account')}</button></span></div>
     <div class="grid-3-2">
       <div class="card"><div class="card-head"><h3>${T('Value and invested over time')}</h3>
         <select id="iv-months" style="width:auto">${[['12', T('Last 12 months')], ['24', T('Last 24 months')], ['36', T('Last 36 months')], ['all', T('All')]].map(([k, l]) => `<option value="${k}" ${k === S.invMonths ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
@@ -3017,7 +3449,7 @@ async function renderRisparmio(v) {
   const signed = (c) => (c ? (c > 0 ? '' : '−') + money0(Math.abs(c)) : '—');
   v.innerHTML = `
     <div class="toolbar"><select id="sv-months">${[['6', T('Last 6 months')], ['12', T('Last 12 months')], ['24', T('Last 24 months')], ['36', T('Last 36 months')], ['all', T('All')]].map(([k, l]) => `<option value="${k}" ${k === String(S.savMonths) ? 'selected' : ''}>${l}</option>`).join('')}</select>
-      <span class="muted small">${T('Every month: income = spent + other spaces + saved (the month\'s surplus). Next to it, invested: purchases − sales of securities in investment accounts (money market ETFs are cash and do not count), even if paid with earlier savings · other spaces = transfers and contributions to other spaces.')}</span></div>
+      <details class="help" style="flex:1 1 260px"><summary>ℹ️ ${T('How it works')}</summary><p>${T('Every month: income = spent + other spaces + saved (the month\'s surplus). Next to it, invested: purchases − sales of securities in investment accounts (money market ETFs are cash and do not count), even if paid with earlier savings · other spaces = transfers and contributions to other spaces.')}</p></details></div>
     <div class="kpis">
       <div class="kpi g-emerald"><div class="k-label">🐷 ${T('Savings rate')}</div><div class="k-value">${t.rate == null ? '—' : pct(t.rate)}</div><div class="k-sub">${T('{amount} saved per month', { amount: money0(t.saved / n) })}</div></div>
       <div class="kpi g-indigo"><div class="k-label">📈 ${T('Invested')}</div><div class="k-value">${money0(t.invested / n)}</div><div class="k-sub">${T('per month in securities ({percent} of income)', { percent: t.invest_rate == null ? '—' : pct(t.invest_rate) })}</div></div>
@@ -3227,7 +3659,6 @@ async function renderImpostazioni(v, params) {
         <br>${backupAge()}</p></div><a class="btn btn-sm" href="/api/backup" id="s-backup">⬇ ${T('Backup')}</a></div>
       <div class="settings-row"><div><b>${T('Restore from backup')}</b><p class="muted small">${T('Replaces all current data (a copy is saved first). Old .json backups are accepted too')}</p></div>
         <label class="btn btn-sm">⬆ ${T('Restore')}<input type="file" id="s-restore" accept=".hcbackup,.json" hidden></label></div>
-      <div class="settings-row"><div><b>${T('Automatic backups')}</b><p class="muted small">${T('At every start an encrypted copy of the database is saved (last 15 kept)')}</p></div></div>
     </div>
     <div class="card"><div class="card-head"><h3>📤 ${T('Export')}</h3></div>
       <div class="settings-row"><div><p class="muted small" style="margin:0">⚠️ ${T('Exported files (CSV, Excel, reports) are <b>not encrypted</b>: keep them in a safe place and delete them when you no longer need them.')}</p></div></div>
@@ -3235,6 +3666,7 @@ async function renderImpostazioni(v, params) {
         <div style="display:flex;gap:8px"><a class="btn btn-sm" href="/api/export/transactions?format=csv&pf=${S.pid}">CSV</a><a class="btn btn-sm" href="/api/export/transactions?format=xlsx&pf=${S.pid}">${T('Excel')}</a></div></div>
       <div class="settings-row"><div><b>${T('Annual report')}</b><p class="muted small">${T('From the Reports page')}</p></div><a class="btn btn-sm" href="#/report">${T('Go →')}</a></div>
     </div></div>
+    <div class="card" style="margin-top:18px" id="bk-card"><div class="loading">${T('Loading…')}</div></div>
     <div class="card" style="margin-top:18px"><div class="card-head"><h3>🛡️ ${T('Where your data lives')}</h3></div>
       <div class="settings-row"><div><b>${T('Data encrypted on your PC')}</b><p class="muted small"><code class="path">${esc(S.data_dir)}</code></p>
         ${S.legacyCopies.length ? `<p class="small"><span class="tag warn">${T('old copy')}</span> ${T('Since version 1.2 the data lives in the folder above. The previous folder was kept, unused:')} ${S.legacyCopies.map((p) => `<code class="path">${esc(p)}</code>`).join(' ')} — ${T('delete it once you have checked that everything is here (it is encrypted, like the data).')}</p>` : ''}</div></div>
@@ -3249,6 +3681,7 @@ async function renderImpostazioni(v, params) {
     route();
   }));
   if (tab === 'updates') bindUpdatePane(v);
+  if (tab === 'data') drawBackups();
   $('#s-pw')?.addEventListener('click', () => passwordModal());
   $('#s-rk')?.addEventListener('click', () => recoveryModal());
   $('#s-lock')?.addEventListener('click', () => lockNow());
@@ -3362,6 +3795,121 @@ async function loadUpdate(mode) {
   $('#nav-update-dot').classList.toggle('hidden', !on);
   return S.update;
 }
+// automatic backups, all in the user's hands: where they are saved (and another folder), when (at start, every day
+// or week), how many are kept, before which operations; one by hand; and for each backup the comparison with the
+// current data, to put back rows one by one or everything
+const BACKUP_REASONS = () => ({
+  startup: T('at start'), scheduled: T('periodic'), manual: T('by hand'), 'pre-convert': T('before turning expenses into transfers'),
+  'pre-reconcile': T('before a reconciliation'), 'pre-doubles': T('before removing doubles'), 'pre-import': T('before an import'),
+  'pre-restore': T('before a restore'), 'pre-restore-tx': T('before putting rows back'), update: T('before an update'),
+});
+const fmtSize = (n) => (n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
+
+async function drawBackups() {
+  const card = $('#bk-card');
+  if (!card) return;
+  let d;
+  try { d = await api('/backup-settings'); } catch (e) { card.innerHTML = `<div class="small neg">${esc(e.message)}</div>`; return; }
+  const s = d.settings, why = BACKUP_REASONS();
+  card.innerHTML = `<div class="card-head"><div><h3>🕘 ${T('Automatic backups')}</h3>
+      <p class="muted small" style="margin:3px 0 0">${T('Encrypted copies of all the data, saved by HomeCoin by itself. From any of them you can see what changed and put back only what you need.')}</p></div>
+      <button class="btn btn-sm btn-primary" id="bk-now">💾 ${T('Save a backup now')}</button></div>
+    <div class="bk-grid">
+      <div class="bk-box"><h4>📁 ${T('Folder')}</h4>
+        <code class="path">${esc(d.folder)}</code>
+        ${d.fallback ? `<p class="small neg">⚠️ ${T('The folder you chose cannot be reached (a drive removed?): backups go to the default folder until it is back.')}</p>` : ''}
+        <div class="bk-row"><button class="btn btn-sm" id="bk-open">📂 ${T('Open folder')}</button>
+          ${s.dir ? `<button class="btn btn-sm btn-ghost" id="bk-default">${T('Use the default folder')}</button>` : ''}</div>
+        <label class="field">${T('Another folder (full path)')}<span class="bk-row"><input id="bk-dir" placeholder="${esc(d.default_folder)}" value="${esc(s.dir)}"><button class="btn btn-sm" id="bk-dir-save">${T('Use')}</button></span></label>
+        <p class="muted small">${T('For example a USB drive or a synced folder: the copies are encrypted and open only in HomeCoin with your password.')}</p></div>
+      <div class="bk-box"><h4>⏱️ ${T('When')}</h4>
+        <label class="check"><input type="checkbox" id="bk-start" ${s.on_start ? 'checked' : ''}> ${T('At every start')}</label>
+        <label class="field">${T('Also periodically, while HomeCoin is open')}
+          <select id="bk-every">${[['none', T('Never')], ['daily', T('Every day')], ['weekly', T('Every week')]].map(([k, l]) => `<option value="${k}" ${s.every === k ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+        <label class="field">${T('How many to keep (the oldest are deleted)')}<input id="bk-keep" type="number" min="3" max="200" value="${s.keep}"></label></div>
+      <div class="bk-box"><h4>🛟 ${T('Before these operations')}</h4>
+        ${d.triggers.map((t) => `<label class="check"><input type="checkbox" data-trigger="${t}" ${s.triggers[t] ? 'checked' : ''}> ${esc(why[t] || t)}</label>`).join('')}
+        <p class="muted small">${T('Each one is the way back if the operation goes wrong: switch them off only if you have another backup. Before a full restore a copy is always saved.')}</p></div>
+    </div>
+    <div class="section-title" style="margin:18px 0 8px">${tn('{n} backup', '{n} backups', d.backups.length)}</div>
+    <div class="bk-list">${d.backups.length ? d.backups.map((b) => `<div class="bk-item">
+        <span class="bk-when">${esc(fmtDate(b.at.slice(0, 10)))} <b>${esc(b.at.slice(11))}</b></span>
+        <span class="tag">${esc(why[b.reason] || b.reason)}</span>${b.default_folder && s.dir && !d.fallback ? `<span class="tag">${T('default folder')}</span>` : ''}
+        <span class="muted small">${fmtSize(b.size)}</span><span class="spacer"></span>
+        <button class="btn btn-sm" data-bk="${esc(b.name)}">🔍 ${T('Compare and restore')}</button></div>`).join('')
+      : `<div class="muted small">${T('There are no automatic backups yet')}</div>`}</div>`;
+  const save = async (body) => { try { await api('/backup-settings', { method: 'PUT', body }); toast(T('Backup settings saved')); drawBackups(); } catch (e) { fail(e); } };
+  $('#bk-now').onclick = async () => { try { await api('/backup-now', { method: 'POST' }); toast(T('Backup saved')); S.lastBackupAuto = todayIso(); drawBackups(); } catch (e) { fail(e); } };
+  $('#bk-open').onclick = async () => { try { await api('/backup-folder/open', { method: 'POST' }); } catch (e) { fail(e); } };
+  $('#bk-default')?.addEventListener('click', () => save({ dir: '' }));
+  $('#bk-dir-save').onclick = () => save({ dir: $('#bk-dir').value.trim() });
+  $('#bk-start').onchange = (e) => save({ on_start: e.target.checked });
+  $('#bk-every').onchange = (e) => save({ every: e.target.value });
+  $('#bk-keep').onchange = (e) => { const n = Math.round(Number(e.target.value)); if (n >= 3 && n <= 200) save({ keep: n }); else { toast(T('Keep between 3 and 200 backups'), 'err'); e.target.value = s.keep; } };
+  $$('[data-trigger]', card).forEach((el) => (el.onchange = async () => {
+    if (!el.checked && !(await confirmDialog(T('Without this backup a wrong operation cannot be undone from here. Switch it off?'), { ok: T('Switch off') }))) { route(); return; }
+    save({ triggers: { [el.dataset.trigger]: el.checked } });
+  }));
+  $$('[data-bk]', card).forEach((b) => (b.onclick = async () => { await backupCompareModal(b.dataset.bk); drawBackups(); }));
+}
+
+// one backup against the current data, for each kind of row: deleted since then (put back), changed (take back to how
+// it was), added (only shown). Then put back the ticked rows, or restore everything to that backup.
+async function backupCompareModal(name) {
+  let r;
+  try { r = await api('/backups/compare', { method: 'POST', body: { backup: name } }); } catch (e) { fail(e); return; }
+  const TAB = { transactions: `💸 ${T('Transactions')}`, recurring: `🔁 ${T('Recurring')}`, accounts: `🏦 ${T('Accounts')}`, categories: `🏷️ ${T('Categories')}`, rules: `⚙️ ${T('Rules')}` };
+  const put = {}, rev = {};
+  Object.keys(TAB).forEach((t) => { put[t] = new Set(); rev[t] = new Set(); });
+  let tab = Object.keys(TAB).find((t) => r.tables[t].deleted.length || r.tables[t].changed.length) || 'transactions';
+  return new Promise((resolve) => {
+    const m = openModal(T('Compare with the backup of {date}', { date: `${fmtDate(name.slice(9, 13) + '-' + name.slice(13, 15) + '-' + name.slice(15, 17))} ${name.slice(18, 20)}:${name.slice(20, 22)}` }), `
+      <p class="muted small" style="margin-top:0">${T('What changed in all the spaces since this backup. Tick what to put back: only those rows change, everything else stays as it is now.')}</p>
+      <div class="seg" id="bc-tabs">${Object.entries(TAB).map(([t, l]) => {
+        const n = r.tables[t].deleted.length + r.tables[t].changed.length + r.tables[t].added.length;
+        return `<button type="button" data-t="${t}">${l}${n ? ` <span class="tag">${n}</span>` : ''}</button>`;
+      }).join('')}</div>
+      <div id="bc-out" style="margin-top:12px"></div>
+      <div class="modal-foot"><button class="btn btn-ghost left neg" id="bc-all">⚠️ ${T('Restore everything to this backup')}</button>
+        <button class="btn" data-cancel>${T('Close')}</button><button class="btn btn-primary" id="bc-go" disabled>${T('Put back the ticked ones')}</button></div>`, { wide: true });
+    const done = () => { closeModal(); resolve(); };
+    $('[data-cancel]', m).onclick = done;
+    const desc = (x) => `${x.kind ? `${KIND_LABEL[x.kind] || x.kind} · ` : ''}${x.account ? esc(x.account) : ''}${x.to_account ? ` → ${esc(x.to_account)}` : ''}`;
+    const amount = (x) => (x.amount != null ? money(x.amount) : '');
+    const count = () => Object.values(put).reduce((s, x) => s + x.size, 0) + Object.values(rev).reduce((s, x) => s + x.size, 0);
+    const draw = () => {
+      $$('#bc-tabs button', m).forEach((b) => b.classList.toggle('on', b.dataset.t === tab));
+      const d = r.tables[tab];
+      const card = (x, box, set) => `<div class="ri"><span class="ri-date">${x.date ? fmtDate(String(x.date).slice(0, 10)) : ''}</span><span class="ri-desc">${esc(x.label)}</span>
+        <span class="ri-amt">${amount(x)}</span><div class="ri-act">${box ? `<label><input type="checkbox" data-${box}="${x.id}" ${set.has(x.id) ? 'checked' : ''}> ${box === 'put' ? T('Put back') : T('Take back to how it was')}</label>` : ''}<span class="muted">${desc(x)}</span></div></div>`;
+      const sec = (title, html) => (html ? `<div class="small" style="margin-top:12px"><b>${title}</b></div><div class="ri-list">${html}</div>` : '');
+      $('#bc-out', m).innerHTML = sec(`🗑 ${T('Deleted since then')}`, d.deleted.map((x) => card(x, 'put', put[tab])).join(''))
+        + sec(`✏️ ${T('Changed since then')}`, d.changed.map((c) => card({ ...c.before }, 'rev', rev[tab])
+          .replace('</div></div>', `</div><div class="ri-note muted">${T('now')}: ${esc(c.after.label)} · ${amount(c.after)} · ${desc(c.after)}</div></div>`)).join(''))
+        + sec(`＋ ${T('Added since then')}`, d.added.map((x) => card(x)).join(''))
+        + (d.deleted.length || d.changed.length || d.added.length ? '' : `<div class="muted small">${T('Nothing changed here since then.')}</div>`);
+      $$('[data-put]', m).forEach((el) => (el.onchange = () => { el.checked ? put[tab].add(+el.dataset.put) : put[tab].delete(+el.dataset.put); $('#bc-go', m).disabled = !count(); }));
+      $$('[data-rev]', m).forEach((el) => (el.onchange = () => { el.checked ? rev[tab].add(+el.dataset.rev) : rev[tab].delete(+el.dataset.rev); $('#bc-go', m).disabled = !count(); }));
+      $('#bc-go', m).disabled = !count();
+    };
+    $$('#bc-tabs button', m).forEach((b) => (b.onclick = () => { tab = b.dataset.t; draw(); }));
+    $('#bc-go', m).onclick = async () => {
+      if (!(await confirmDialog(T('Put back the ticked rows? A backup of the current data is saved first.'), { ok: T('Put back'), danger: false }))) { resolve(); return; }
+      try {
+        const res = await api('/backups/put-back', { method: 'POST', body: { backup: name,
+          put_back: Object.fromEntries(Object.entries(put).map(([t, x]) => [t, [...x]])), revert: Object.fromEntries(Object.entries(rev).map(([t, x]) => [t, [...x]])) } });
+        toast(tn('{n} row put back', '{n} rows put back', res.done) + (res.skipped ? ` · ${tn('{n} skipped: its account no longer exists', '{n} skipped: their account no longer exists', res.skipped)}` : ''));
+        await loadMeta(); done();
+      } catch (e) { fail(e); }
+    };
+    $('#bc-all', m).onclick = async () => {
+      if (!(await confirmDialog(T('All the current data will be replaced by this backup (a copy of the current data is saved first). Continue?'), { ok: T('Restore everything') }))) { resolve(); return; }
+      try { await api('/backups/restore-all', { method: 'POST', body: { backup: name } }); toast(T('Data restored')); await loadMeta(); done(); route(); } catch (e) { fail(e); }
+    };
+    draw();
+  });
+}
+
 function updatePane() {
   const u = S.update;
   if (!u) return `<div class="card"><div class="empty">${T('The update status could not be read')}</div></div>`;

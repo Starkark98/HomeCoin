@@ -8,6 +8,7 @@ import secrets
 import threading
 import time
 from collections import Counter
+from pathlib import Path
 
 from flask import Flask, Response, abort, g, jsonify, request, send_from_directory
 from werkzeug.exceptions import HTTPException
@@ -27,7 +28,7 @@ from . import updater
 from . import util
 from .util import FREQUENCIES, add_months, months_between, parse_date, parse_number, rule_matches
 
-VERSION = "2.2.0"
+VERSION = "2.3.0"
 STATIC_DIR = dbm.BASE_DIR / "static"
 KINDS = ("expense", "income", "transfer")
 ACCOUNT_TYPES = ("corrente", "risparmio", "credito", "prepagata", "contanti", "investimenti", "altro")
@@ -294,16 +295,24 @@ def tx_filters(args):
         where.append("t.date >= ?"); params.append(as_date(args["from"], "from"))
     if args.get("to"):
         where.append("t.date <= ?"); params.append(as_date(args["to"], "to"))
-    if args.get("account_id"):
-        a = as_int(args["account_id"], "account")
-        where.append("(t.account_id = ? OR t.to_account_id = ?)"); params += [a, a]
-    if args.get("category_id"):
-        if args["category_id"] == "none":
-            where.append("t.category_id IS NULL AND t.kind != 'transfer'")
-        else:
-            where.append("t.category_id = ?"); params.append(as_int(args["category_id"], "category"))
-    if args.get("kind") in KINDS:
-        where.append("t.kind = ?"); params.append(args["kind"])
+    # account, category and type take one value or several, comma-separated (any of them: OR within a filter, AND
+    # between filters)
+    def many(name):
+        return [v.strip() for v in str(args.get(name) or "").split(",") if v.strip()]
+    accs = [as_int(v, "account") for v in many("account_id")]
+    if accs:
+        marks = ",".join("?" * len(accs))
+        where.append(f"(t.account_id IN ({marks}) OR t.to_account_id IN ({marks}))"); params += accs + accs
+    cats = many("category_id")
+    if cats:
+        ids = [as_int(v, "category") for v in cats if v != "none"]
+        parts = [f"t.category_id IN ({','.join('?' * len(ids))})"] if ids else []
+        if "none" in cats:
+            parts.append("(t.category_id IS NULL AND t.kind != 'transfer')")
+        where.append("(" + " OR ".join(parts) + ")"); params += ids
+    kinds = [k for k in many("kind") if k in KINDS]
+    if kinds:
+        where.append(f"t.kind IN ({','.join('?' * len(kinds))})"); params += kinds
     if args.get("excluded") in ("0", "1"):
         where.append("t.excluded = ?"); params.append(int(args["excluded"]))
     if args.get("recurring_id"):
@@ -1017,6 +1026,316 @@ def create_app(port):
         db.commit()
         return jsonify(ok=True)
 
+    # ------------------------------------------- the same money recorded twice (between spaces)
+
+    REC_COLS = "id, name, amount, frequency, start_date, generated, active, account_id, to_account_id"
+
+    def match_limits(b):
+        """How close two records must be to be the same money: days (0-31, default 5), amount % (0-100, default 2;
+        of the smaller amount, as people say it: 600 is 50% more than 400)."""
+        days, tol = b.get("days", 5), b.get("tolerance", 2)
+        if isinstance(days, bool) or not isinstance(days, int) or not 0 <= days <= 31:
+            raise ApiError(i18n.t("The date difference must be between 0 and 31 days"))
+        if isinstance(tol, bool) or not isinstance(tol, (int, float)) or not 0 <= tol <= 100:
+            raise ApiError(i18n.t("The amount difference must be between 0 and 100%"))
+        return days, tol
+
+    CLOSE = 2  # % within which two amounts are simply the same money; beyond it a pairing is shown as "different"
+
+    def far_apart(a, b):
+        """The two amounts differ more than CLOSE % (of the smaller one): the pairing needs the user's tick."""
+        return abs(a - b) * 100 > min(a, b) * CLOSE
+
+    def int_list(v):
+        v = v or []
+        if not isinstance(v, list) or not all(isinstance(x, int) and not isinstance(x, bool) for x in v):
+            raise ApiError(i18n.t("Invalid request"))
+        return v
+
+    def similar_amount(a, b, tol):
+        """None if the two amounts are not the same money, else the cost of the difference (‰ of the smaller one)."""
+        diff, low = abs(a - b), min(a, b)
+        return None if diff * 100 > low * tol else 1000 * diff // max(low, 1)
+
+    def same_money(t, o, days, tol):
+        """Cost of pairing two records with a "date" and an "amount" (None = not the same money): one day weighs like
+        1% of amount difference."""
+        d = abs((dt.date.fromisoformat(o["date"]) - dt.date.fromisoformat(t["date"])).days)
+        s = similar_amount(t["amount"], o["amount"], tol)
+        return None if s is None or d > days else 10 * d + s
+
+    def next_due(r):
+        return util.occurrence(dt.date.fromisoformat(r["start_date"]), r["frequency"], r["generated"])
+
+    def same_flow(a, o, days, tol):
+        """Two recurring items for the same money: same frequency, similar amount, next due dates within `days`."""
+        if a["frequency"] != o["frequency"]:
+            return None
+        d = abs((next_due(a) - next_due(o)).days)
+        s = similar_amount(a["amount"], o["amount"], tol)
+        return None if s is None or d > days else 10 * d + s
+
+    @app.post("/api/categories/<int:cid>/to-transfers")
+    def category_to_transfers(cid):
+        """Turn the expenses of a category (e.g. "Contributions to household") into transfers to the accounts of another
+        space, so that each movement of money exists once: out of one account, into one account, seen in both spaces.
+        dry_run=true only shows what would happen. Options:
+          to_account_ids: the accounts the money reaches, all in ONE other space (to_account_id: a single one);
+          default_account_id: where an expense with no matching record goes (one of them; null = it stays an expense);
+          merge (default true): the same money already recorded is recognized, among ALL the chosen accounts, so the
+            account is the one where the money really arrived: similar amount (within `tolerance` %, default 2),
+            close date (within `days`, default 5), the best overall pairing (repeated similar amounts never steal each
+            other's partner):
+              an existing transfer from this space to one of the accounts → the expense is a duplicate, deleted;
+              an income in one of the accounts → replaced by the transfer (which keeps the expense's amount);
+              two incomes in two different accounts that together make the expense (`split`, default true) → the
+              expense becomes two transfers, one per account (together exactly the expense);
+            `unmatch`: ids of expenses the user says are not paired (they go to the default account);
+          assign: {expense id: account id, or 0 = leave as an expense}: the user's choice for a row, over the rest;
+          recurring_ids: the category's recurring expenses the user chose to turn into recurring transfers (none by
+            default: a recurring item is only ever changed by the user's choice); recurring_accounts: {id: account id
+            or "split"}; by default the account of the recurring income that looks like the same money (or two that
+            together make it: "split"), else the default account. No other recurring item is touched: a recurring
+            income of the destination or a recurring transfer already planned is only reported; the user can then merge
+            it with /api/recurring/<id>/reconcile."""
+        b, db, p = body(), get_db(), pf()
+        c = db.execute("SELECT name, kind, code, flow FROM categories WHERE id = ? AND portfolio_id = ?", (cid, p)).fetchone()
+        if not c:
+            raise ApiError(i18n.t("Category not found in this space"), 404)
+        if c["kind"] != "expense" or c["code"] in util.SYSTEM_CODES:
+            raise ApiError(i18n.t("Only the expenses of an ordinary category can become transfers"))
+        ids = int_list(b.get("to_account_ids")) or [as_int(b.get("to_account_id"), "destination account")]
+        accs = {}
+        for aid in ids:
+            a = db.execute("SELECT id, name, portfolio_id, archived FROM accounts WHERE id = ?", (aid,)).fetchone()
+            if not a or a["portfolio_id"] == p or a["archived"]:
+                raise ApiError(i18n.t("Choose an active account of another space"))
+            accs[aid] = dict(a)
+        if len({a["portfolio_id"] for a in accs.values()}) > 1:
+            raise ApiError(i18n.t("The destination accounts must all be in the same space"))
+        dest_space = next(iter(accs.values()))["portfolio_id"]
+        default = b.get("default_account_id", ids[0])
+        if default is not None and default not in accs:
+            raise ApiError(i18n.t("The default account must be one of the destination accounts"))
+        dry, merge, split = bool(b.get("dry_run")), b.get("merge", True) is not False, b.get("split", True) is not False
+        days, tol = match_limits(b)
+        unmatch, rec_ids = set(int_list(b.get("unmatch"))), set(int_list(b.get("recurring_ids")))
+        confirm = set(int_list(b.get("confirm")))  # pairings with a different amount the user ticked
+        assign, rec_acc = b.get("assign") or {}, b.get("recurring_accounts") or {}
+        if not isinstance(assign, dict) or not all(isinstance(v, int) and not isinstance(v, bool) and (v == 0 or v in accs)
+                                                   for v in assign.values()):
+            raise ApiError(i18n.t("Invalid request"))
+        if not isinstance(rec_acc, dict) or not all(v == "split" or (isinstance(v, int) and not isinstance(v, bool) and v in accs)
+                                                    for v in rec_acc.values()):
+            raise ApiError(i18n.t("Invalid request"))
+        assign = {int(k): v for k, v in assign.items() if str(k).isdigit()}
+        rec_acc = {int(k): v for k, v in rec_acc.items() if str(k).isdigit()}
+        marks = ",".join("?" * len(ids))
+
+        def cost(t, o):
+            return same_money(t, o, days, tol)
+
+        txs = [dict(r) for r in db.execute(
+            f"""SELECT id, date, amount, account_id, description FROM transactions
+                WHERE category_id = ? AND kind = 'expense' AND account_id IN {PF_ACCOUNTS} ORDER BY date, id""", (cid, p))]
+        open_ = [t for t in txs if t["id"] not in unmatch and t["id"] not in assign] if merge else []
+        transfers = [dict(r) for r in db.execute(
+            f"""SELECT id, date, amount, to_account_id AS acc FROM transactions WHERE kind = 'transfer'
+                AND to_account_id IN ({marks}) AND account_id IN {PF_ACCOUNTS}""", (*ids, p))] if merge else []
+        incomes = [dict(r) for r in db.execute(
+            f"SELECT id, date, amount, account_id AS acc FROM transactions WHERE account_id IN ({marks}) AND kind = 'income'",
+            ids)] if merge else []
+        # 1) already a transfer (duplicate), 2) an income of one of the accounts (merge), 3) two incomes in two accounts
+        # that together make the expense (split), for those left
+        hits = {}
+        for i, j in util.best_pairs(open_, transfers, cost):
+            hits[open_[i]["id"]] = ("duplicate", [transfers[j]])
+        rest = [t for t in open_ if t["id"] not in hits]
+        for i, j in util.best_pairs(rest, incomes, cost):
+            hits[rest[i]["id"]] = ("merge", [incomes[j]])
+        if split and len(ids) > 1:
+            used = {h[0]["id"] for a, h in hits.values() if a == "merge"}
+            free = [x for x in incomes if x["id"] not in used]
+            cands = []
+            for t in (t for t in rest if t["id"] not in hits):
+                d0 = dt.date.fromisoformat(t["date"])
+                near = [x for x in free if abs((dt.date.fromisoformat(x["date"]) - d0).days) <= days and x["amount"] < t["amount"]]
+                for k, x in enumerate(near):
+                    for y in near[k + 1:]:
+                        s = x["acc"] != y["acc"] and similar_amount(t["amount"], x["amount"] + y["amount"], tol)
+                        if s is not None and s is not False:
+                            dd = abs((dt.date.fromisoformat(x["date"]) - d0).days) + abs((dt.date.fromisoformat(y["date"]) - d0).days)
+                            cands.append((10 * dd + s, t["id"], x, y))
+            taken = set()
+            for _, tid, x, y in sorted(cands, key=lambda z: (z[0], z[1])):  # closest first; each record once
+                if tid not in hits and x["id"] not in taken and y["id"] not in taken:
+                    hits[tid] = ("split", [x, y])
+                    taken |= {x["id"], y["id"]}
+        items = []
+        for t in txs:
+            action, hit = hits.get(t["id"], ("convert", []))
+            # a pairing whose amount is far from the expense's (beyond CLOSE %) is only a suggestion until ticked
+            suggestion = None
+            if hit and far_apart(t["amount"], sum(h["amount"] for h in hit)) and t["id"] not in confirm:
+                suggestion = {"action": action, "date": hit[0]["date"], "amount": sum(h["amount"] for h in hit)}
+                action, hit = "convert", []
+            to = hit[0]["acc"] if action in ("merge", "duplicate") else None
+            if t["id"] in assign:  # the user's choice for the row
+                action, hit, to = ("convert", [], assign[t["id"]]) if assign[t["id"]] else ("keep", [], None)
+            elif action == "convert":
+                to = default
+                if to is None:
+                    action = "keep"
+            parts = []
+            if action == "split":  # together exactly the expense: the second part takes what is left
+                parts = [{"account_id": hit[0]["acc"], "amount": hit[0]["amount"]},
+                         {"account_id": hit[1]["acc"], "amount": t["amount"] - hit[0]["amount"]}]
+            items.append({"id": t["id"], "date": t["date"], "amount": t["amount"], "description": t["description"],
+                          "action": action, "to_account_id": to, "parts": parts,
+                          "match_id": hit[0]["id"] if hit else None, "match_date": hit[0]["date"] if hit else None,
+                          "match_amount": sum(h["amount"] for h in hit) if hit else None,
+                          "matches": [{"id": h["id"], "date": h["date"], "amount": h["amount"], "account_id": h["acc"]} for h in hit],
+                          "unmatched": t["id"] in unmatch, "assigned": t["id"] in assign, "suggestion": suggestion,
+                          "confirmed": t["id"] in confirm and bool(hit)})
+        # an income for the same money in ANOTHER account of the destination space: maybe an account is missing
+        elsewhere = 0
+        conv = [t for t in items if t["action"] == "convert"]
+        if conv:
+            others = [dict(r) for r in db.execute(
+                f"""SELECT id, date, amount FROM transactions WHERE kind = 'income' AND account_id NOT IN ({marks})
+                    AND account_id IN (SELECT id FROM accounts WHERE portfolio_id = ?)""", (*ids, dest_space))]
+            elsewhere = len(util.best_pairs(conv, others, cost))
+
+        # recurring expenses of the category (plain ones: no loan schedule, no variable amount): listed, unticked, with
+        # the account suggested by the recurring income that looks like the same money (or two that together make it)
+        recs = [dict(r) for r in db.execute(
+            f"""SELECT {REC_COLS} FROM recurring WHERE category_id = ? AND kind = 'expense' AND NOT expected
+                AND installments IS NULL AND principal IS NULL AND account_id IN {PF_ACCOUNTS} ORDER BY name""", (cid, p))]
+        planned = [dict(r) for r in db.execute(
+            f"""SELECT {REC_COLS} FROM recurring WHERE kind = 'transfer' AND to_account_id IN ({marks}) AND active
+                AND account_id IN {PF_ACCOUNTS}""", (*ids, p))]
+        dest_inc = [dict(r) for r in db.execute(
+            f"SELECT {REC_COLS} FROM recurring WHERE account_id IN ({marks}) AND kind = 'income' AND active", ids)]
+        pairs = util.best_pairs(recs, dest_inc, lambda a, o: same_flow(a, o, days, tol))
+        sugg = {recs[i]["id"]: {"account_id": dest_inc[j]["account_id"], "parts": []} for i, j in pairs}
+        if len(ids) > 1:  # two recurring incomes in two accounts that together make one recurring expense
+            used = {dest_inc[j]["id"] for _, j in pairs}
+            for r in recs:
+                if r["id"] in sugg:
+                    continue
+                best = None
+                for k, x in enumerate(dest_inc):
+                    for y in dest_inc[k + 1:]:
+                        if x["account_id"] == y["account_id"] or x["frequency"] != r["frequency"] or y["frequency"] != r["frequency"] \
+                                or {x["id"], y["id"]} & used:
+                            continue
+                        s = similar_amount(r["amount"], x["amount"] + y["amount"], tol)
+                        dd = abs((next_due(x) - next_due(r)).days) + abs((next_due(y) - next_due(r)).days)
+                        if s is not None and dd <= 2 * days and (best is None or 10 * dd + s < best[0]):
+                            best = (10 * dd + s, x, y)
+                if best:
+                    _, x, y = best
+                    used |= {x["id"], y["id"]}
+                    sugg[r["id"]] = {"account_id": "split", "parts": [
+                        {"account_id": x["account_id"], "amount": x["amount"], "income": x["name"]},
+                        {"account_id": y["account_id"], "amount": r["amount"] - x["amount"], "income": y["name"]}]}
+        rec_items = []
+        for r in recs:
+            s = sugg.get(r["id"], {"account_id": None, "parts": []})
+            to = rec_acc.get(r["id"], s["account_id"] if s["account_id"] is not None else (default or ids[0]))
+            if to == "split" and not s["parts"]:
+                raise ApiError(i18n.t("Invalid request"))
+            rec_items.append({"id": r["id"], "name": r["name"], "amount": r["amount"], "frequency": r["frequency"],
+                              "active": bool(r["active"]), "chosen": r["id"] in rec_ids, "to_account_id": to,
+                              "suggested": s["account_id"], "parts": s["parts"],
+                              "planned": [o["name"] for o in planned if same_flow(r, o, days, tol) is not None],
+                              "dest_income": [o["name"] for o in dest_inc if same_flow(r, o, days, tol) is not None]})
+        rec_conv = [x for x in rec_items if x["chosen"]]
+
+        # effect on the reports (saved = income + from other spaces − spending − to other spaces), per account: a
+        # merged transfer keeps the expense's amount, so the account moves by the difference
+        flow_other = c["flow"] == "other"
+        moved = sum(i["amount"] for i in items if i["action"] in ("convert", "merge", "split"))
+        dup = sum(i["amount"] for i in items if i["action"] == "duplicate")
+        replaced = sum(i["match_amount"] for i in items if i["action"] in ("merge", "split"))
+        per = {a: 0 for a in ids}
+        for i in items:
+            if i["action"] == "convert":
+                per[i["to_account_id"]] += i["amount"]
+            elif i["action"] == "merge":
+                per[i["to_account_id"]] += i["amount"] - i["match_amount"]
+            elif i["action"] == "split":
+                for part, m in zip(i["parts"], i["matches"]):
+                    per[part["account_id"]] += part["amount"] - m["amount"]
+        effect = {
+            "spending": 0 if flow_other else -(moved + dup),
+            "to_others": moved - dup if flow_other else moved,
+            "source_balance": dup,                        # a deleted duplicate expense gives back what it took
+            "dest_income": -replaced,                     # replaced incomes now count as "from other spaces"
+            "dest_from_others": moved,
+            "dest_balance": sum(per.values()),
+        }
+        n = {k: sum(i["action"] == k for i in items) for k in ("convert", "merge", "split", "duplicate", "keep")}
+        to_space = db.execute("SELECT name FROM portfolios WHERE id = ?", (dest_space,)).fetchone()["name"]
+        names = {a: accs[a]["name"] for a in ids}
+        summary = {"category": c["name"], "to_account": ", ".join(names.values()), "to_space": to_space,
+                   "accounts": [{"id": a, "name": names[a]} for a in ids], "default_account_id": default,
+                   "transactions": len(txs), "total": sum(t["amount"] for t in txs),
+                   "first": txs[0]["date"] if txs else None, "last": txs[-1]["date"] if txs else None,
+                   "converted": n["convert"], "merged": n["merge"], "split": n["split"], "duplicates": n["duplicate"],
+                   "kept": n["keep"], "items": items, "effect": effect,
+                   "dest_balances": [{"account_id": a, "name": names[a], "delta": per[a]} for a in ids if per[a]],
+                   "elsewhere": elsewhere, "days": days, "tolerance": tol,
+                   "recurring": len(rec_conv), "recurring_items": rec_items, "flow_other": flow_other}
+        if dry or not (any(i["action"] != "keep" for i in items) or rec_conv):
+            g.audit_skip = True  # a preview changes nothing: not in the activity log
+            return jsonify(dry_run=True, **summary)
+        dbm.backup_now("pre-convert")
+        tx_cols = "date, amount, kind, account_id, to_account_id, category_id, description, notes, recurring_id, source, excluded"
+        for i in items:
+            if i["action"] == "keep":
+                continue
+            if i["action"] == "duplicate":
+                db.execute("DELETE FROM transactions WHERE id = ?", (i["id"],))
+                continue
+            if i["action"] == "split":  # the expense becomes the first part; a copy becomes the second
+                first, second = i["parts"]
+                row = dict(db.execute(f"SELECT {tx_cols} FROM transactions WHERE id = ?", (i["id"],)).fetchone())
+                db.execute("""UPDATE transactions SET kind = 'transfer', to_account_id = ?, amount = ?, category_id = NULL
+                              WHERE id = ?""", (first["account_id"], first["amount"], i["id"]))
+                row.update(kind="transfer", to_account_id=second["account_id"], amount=second["amount"], category_id=None)
+                db.execute(f"INSERT INTO transactions ({tx_cols}) VALUES ({','.join('?' * len(row))})", tuple(row.values()))
+                for m in i["matches"]:
+                    db.execute("DELETE FROM transactions WHERE id = ?", (m["id"],))
+                continue
+            db.execute("UPDATE transactions SET kind = 'transfer', to_account_id = ?, category_id = NULL WHERE id = ?",
+                       (i["to_account_id"], i["id"]))
+            if i["action"] == "merge":
+                db.execute("DELETE FROM transactions WHERE id = ?", (i["match_id"],))
+        converted = []
+        for x in rec_conv:
+            if x["to_account_id"] == "split":  # one recurring transfer per account, together exactly the expense
+                first, second = x["parts"]
+                row = dict(db.execute("SELECT * FROM recurring WHERE id = ?", (x["id"],)).fetchone())
+                db.execute("""UPDATE recurring SET kind = 'transfer', to_account_id = ?, amount = ?, category_id = NULL
+                              WHERE id = ?""", (first["account_id"], first["amount"], x["id"]))
+                row.pop("id")
+                row.update(kind="transfer", to_account_id=second["account_id"], amount=second["amount"], category_id=None)
+                cur = db.execute(f"INSERT INTO recurring ({','.join(row)}) VALUES ({','.join('?' * len(row))})", tuple(row.values()))
+                converted += [x["id"], cur.lastrowid]
+            else:
+                db.execute("UPDATE recurring SET kind = 'transfer', to_account_id = ?, category_id = NULL WHERE id = ?",
+                           (x["to_account_id"], x["id"]))
+                converted.append(x["id"])
+        db.commit()
+        done = n["convert"] + n["merge"] + n["split"]
+        note(i18n.t("{category} → transfers to {account}", category=c["name"], account=summary["to_account"]) + " · "
+             + i18n.tn("{n} transaction", "{n} transactions", done)
+             + (" · " + i18n.tn("{n} income merged", "{n} incomes merged", n["merge"]) if n["merge"] else "")
+             + (" · " + i18n.tn("{n} duplicate removed", "{n} duplicates removed", n["duplicate"]) if n["duplicate"] else "")
+             + (" · " + i18n.tn("{n} recurring item", "{n} recurring items", len(rec_conv)) if rec_conv else ""))
+        return jsonify(dry_run=False, converted_recurring=converted, **summary)
+
     # ---------------------------------------------------------- rules
 
     @app.post("/api/rules")
@@ -1278,6 +1597,33 @@ def create_app(port):
                              "count": count[forecast.payee_key(r["description"])], "amount": r["amount"], "date": r["date"]} for r in top])
         return jsonify([r["description"] for r in top])
 
+    @app.get("/api/notes")
+    def notes_for_description():
+        """Notes used recently in transactions with the same or a similar description (same payer/payee key, else one
+        that shares its longest word), most recent first, one per text; q filters them by what is already typed."""
+        desc = as_text(request.args.get("description"), 200)
+        q = as_text(request.args.get("q"), 200).lower()
+        kind = request.args.get("kind") if request.args.get("kind") in KINDS else None
+        key = forecast.payee_key(desc)
+        if len(desc.strip()) < 3 or not key:
+            return jsonify([])
+        rows = get_db().execute(
+            f"""SELECT description, notes, date FROM transactions
+               WHERE notes IS NOT NULL AND TRIM(notes) != '' AND account_id IN {PF_ACCOUNTS} {'AND kind = ?' if kind else ''}
+               ORDER BY date DESC, id DESC LIMIT 3000""", (pf(), *([kind] if kind else []))).fetchall()
+        word = max(key.split(), key=len)
+        same = [r for r in rows if forecast.payee_key(r["description"]) == key]
+        if not same and len(word) >= 3:  # nothing with the same payee: descriptions that share its main word
+            same = [r for r in rows if word in forecast.payee_key(r["description"]).split()]
+        out, count = {}, Counter()
+        for r in same:
+            text = r["notes"].strip()
+            if q and q not in text.lower():
+                continue
+            count[text] += 1
+            out.setdefault(text, r["date"])
+        return jsonify([{"notes": t, "date": d, "count": count[t]} for t, d in list(out.items())[:8]])
+
     @app.get("/api/rules/suggestions")
     def rule_suggestions():
         """Keywords suggested for new rules: payees that repeat among the transactions still uncategorized."""
@@ -1354,18 +1700,23 @@ def create_app(port):
 
     @app.get("/api/recurring")
     def recurring_list():
+        """Recurring items of the space, plus the recurring transfers that other spaces send to its accounts
+        ("incoming": one record, shown in both spaces, read-only here: only the space that created it changes it)."""
         db = get_db()
         rows = db.execute(
             """SELECT r.*, a.name AS account_name, ta.name AS to_account_name, c.name AS category_name,
                       c.icon AS category_icon, c.color AS category_color,
-                      h.ticker AS holding_ticker, h.name AS holding_name, h.asset_class AS holding_class
+                      h.ticker AS holding_ticker, h.name AS holding_name, h.asset_class AS holding_class,
+                      a.portfolio_id != ? AS incoming, pa.name AS from_space
                FROM recurring r JOIN accounts a ON a.id = r.account_id
+               JOIN portfolios pa ON pa.id = a.portfolio_id
                LEFT JOIN accounts ta ON ta.id = r.to_account_id
                LEFT JOIN categories c ON c.id = r.category_id
                LEFT JOIN holdings h ON h.id = r.holding_id
-               WHERE a.portfolio_id = ?
-               ORDER BY r.active DESC, r.name""", (pf(),)).fetchall()
-        out = [recurring_view(r) for r in rows]
+               WHERE a.portfolio_id = ? OR (r.kind = 'transfer' AND ta.portfolio_id = ?)
+               ORDER BY r.active DESC, r.name""", (pf(), pf(), pf())).fetchall()
+        out = [{**recurring_view(r), "incoming": bool(r["incoming"]),
+                "from_space": r["from_space"] if r["incoming"] else None} for r in rows]
         today = dt.date.today()
         for r in out:  # expected items: next date and amount predicted from recent payments, delay
             if r.get("expected"):
@@ -1467,6 +1818,498 @@ def create_app(port):
         process_recurring(db)
         linked = db.execute("SELECT COUNT(*) FROM transactions WHERE recurring_id = ?", (rid,)).fetchone()[0]
         return jsonify(ok=True, linked=linked, **recurring_view(db.execute("SELECT * FROM recurring WHERE id = ?", (rid,)).fetchone()))
+
+    @app.post("/api/recurring/<int:rid>/reconcile")
+    def recurring_reconcile(rid):
+        """One flow of money between two spaces = one recurring transfer. For a recurring transfer to an account of
+        another space, proposes (dry_run) and then applies only what the user ticked (`choices`: {key: bool}, the rest
+        keeps its default):
+          per past due date (same money: similar amount, close date, best overall pairing), on the sending side
+            link "lnk:<id>": a transfer to that account already recorded and not linked → linked (default on);
+            conv "cnv:<id>": an expense of the sending account → becomes the transfer and is linked (default on only
+              when its category counts under "Other spaces");
+          and on the receiving side, the income of the same due date:
+            "del:<id>": the due date is covered by a transfer → the income is the same money twice, deleted (on);
+            "inc:<id>": no transfer for that due date → stays an income (default), or becomes the transfer from
+              the sending account (the sending balance then goes down: only if that money really left it);
+          recurring items for the same money (same frequency, similar amount, close next due date), default on:
+            "rec:<id>": a recurring income of the receiving account, a recurring expense of the sending account or
+              another recurring transfer between the two → removed (its past transactions stay). The amount of this
+              recurring transfer is the one that counts."""
+        db = get_db()
+        own_recurring(rid)
+        b = body()
+        r = dict(db.execute("SELECT * FROM recurring WHERE id = ?", (rid,)).fetchone())
+        dest = db.execute("SELECT id, name, portfolio_id FROM accounts WHERE id = ?", (r["to_account_id"],)).fetchone() \
+            if r["to_account_id"] else None
+        if r["kind"] != "transfer" or not dest or dest["portfolio_id"] == pf() or r["holding_id"] or r["installments"]:
+            raise ApiError(i18n.t("Only a recurring transfer to an account of another space can be reconciled"))
+        days, tol = match_limits(b)
+        choices = b.get("choices") or {}
+        if not isinstance(choices, dict) or not all(isinstance(v, bool) for v in choices.values()):
+            raise ApiError(i18n.t("Invalid request"))
+        src, to = r["account_id"], r["to_account_id"]
+        today = dt.date.today()
+        start, end = dt.date.fromisoformat(r["start_date"]), r["end_date"] and dt.date.fromisoformat(r["end_date"])
+        dues = []
+        for k in range(2000):  # past due dates (at most ~40 years weekly)
+            d = util.occurrence(start, r["frequency"], k)
+            if d > today or (end and d > end):
+                break
+            dues.append({"date": d.isoformat(), "amount": r["amount"]})
+
+        def cost(due, t, extra=0):
+            c = same_money(due, t, days, tol)
+            return None if c is None else c + extra
+
+        tx_cols = "t.id, t.date, t.amount, t.description, t.kind, t.recurring_id, c.flow"
+        sending = [dict(x) for x in db.execute(
+            f"""SELECT {tx_cols} FROM transactions t LEFT JOIN categories c ON c.id = t.category_id
+                WHERE t.account_id = ? AND ((t.kind = 'transfer' AND t.to_account_id = ?
+                      AND (t.recurring_id IS NULL OR t.recurring_id = ?))
+                   OR (t.kind = 'expense' AND (t.recurring_id IS NULL OR t.recurring_id = ?)))""", (src, to, rid, rid))]
+        # already linked transfer first, then a transfer to link or a past payment of this recurring item still recorded
+        # as an expense (it was an expense before becoming a transfer), then any other expense to convert
+        rank = lambda t: (0 if t["kind"] == "transfer" and t["recurring_id"] == rid  # noqa: E731
+                          else 1 if t["kind"] == "transfer" or t["recurring_id"] == rid else 2)
+        rows, covered, already = [], set(), 0
+        for i, j in util.best_pairs(dues, sending, lambda d, t: cost(d, t, rank(t))):
+            t, due = sending[j], dues[i]["date"]
+            if rank(t) == 0:
+                covered.add(due)
+                already += 1
+                continue
+            key = f"{'lnk' if t['kind'] == 'transfer' else 'cnv'}:{t['id']}"
+            # an amount far from the recurring item's (beyond CLOSE %) is shown as different and waits for the user
+            diff = far_apart(t["amount"], r["amount"])
+            on = choices.get(key, not diff and (t["kind"] == "transfer" or t["flow"] == "other" or t["recurring_id"] == rid))
+            rows.append({"key": key, "type": key[:3], "id": t["id"], "date": t["date"], "amount": t["amount"],
+                         "description": t["description"], "due": due, "on": on, "flow_other": t["flow"] == "other",
+                         "own": t["recurring_id"] == rid, "different": diff})
+            if on:
+                covered.add(due)
+        incomes = [dict(x) for x in db.execute(
+            "SELECT id, date, amount, description FROM transactions WHERE account_id = ? AND kind = 'income'", (to,))]
+        for i, j in util.best_pairs(dues, incomes, cost):
+            t, due = incomes[j], dues[i]["date"]
+            key = f"{'del' if due in covered else 'inc'}:{t['id']}"
+            diff = far_apart(t["amount"], r["amount"])
+            rows.append({"key": key, "type": key[:3], "id": t["id"], "date": t["date"], "amount": t["amount"],
+                         "description": t["description"], "due": due, "different": diff,
+                         "on": choices.get(key, key[:3] == "del" and not diff)})
+        rows.sort(key=lambda x: (x["due"], x["type"]))
+        # recurring items for the same money
+        cands = [dict(x) for x in db.execute(
+            f"""SELECT {REC_COLS}, kind FROM recurring WHERE active AND id != ? AND (
+                    (kind = 'income' AND account_id = ?) OR (kind = 'expense' AND account_id = ?)
+                 OR (kind = 'transfer' AND account_id = ? AND to_account_id = ?))
+                AND NOT expected AND installments IS NULL AND holding_id IS NULL""", (rid, to, src, src, to))]
+        recs = [{"key": f"rec:{x['id']}", "type": "rec", "id": x["id"], "name": x["name"], "kind": x["kind"],
+                 "amount": x["amount"], "frequency": x["frequency"], "next_date": next_due(x).isoformat(),
+                 "different": far_apart(x["amount"], r["amount"]),
+                 "on": choices.get(f"rec:{x['id']}", not far_apart(x["amount"], r["amount"]))}
+                for x in cands if same_flow(r, x, days, tol) is not None]
+
+        # effect on the reports of both spaces (saved = income + from other spaces − spending − to other spaces)
+        on = [x for x in rows if x["on"]]
+        cnv = [x for x in on if x["type"] == "cnv"]
+        cnv_cat = sum(x["amount"] for x in cnv if not x["flow_other"])  # leave spending for "Other spaces"
+        cnv_all = sum(x["amount"] for x in cnv)
+        dele = sum(x["amount"] for x in on if x["type"] == "del")
+        inc = sum(x["amount"] for x in on if x["type"] == "inc")
+        effect = {"spending": -cnv_cat, "to_others": cnv_cat + inc, "source_balance": -inc,
+                  "dest_income": -(dele + inc), "dest_from_others": cnv_all + inc, "dest_balance": cnv_all - dele}
+        to_space = db.execute("SELECT name FROM portfolios WHERE id = ?", (dest["portfolio_id"],)).fetchone()["name"]
+        summary = {"name": r["name"], "amount": r["amount"], "to_account": dest["name"], "to_space": to_space, "dues": len(dues),
+                   "linked": already,
+                   "rows": rows, "recurring": recs, "effect": effect, "days": days, "tolerance": tol}
+        if b.get("dry_run") or not (on or any(x["on"] for x in recs)):
+            g.audit_skip = True  # a preview changes nothing: not in the activity log
+            return jsonify(dry_run=True, **summary)
+        dbm.backup_now("pre-reconcile")
+        for x in on:
+            if x["type"] == "lnk":
+                db.execute("UPDATE transactions SET recurring_id = ? WHERE id = ?", (rid, x["id"]))
+            elif x["type"] == "cnv":
+                db.execute("""UPDATE transactions SET kind = 'transfer', to_account_id = ?, category_id = NULL,
+                              recurring_id = ? WHERE id = ?""", (to, rid, x["id"]))
+            elif x["type"] == "del":
+                db.execute("DELETE FROM transactions WHERE id = ?", (x["id"],))
+            elif x["type"] == "inc":  # the money left the sending account: the income becomes that transfer
+                db.execute("""UPDATE transactions SET kind = 'transfer', account_id = ?, to_account_id = ?,
+                              category_id = NULL, recurring_id = ? WHERE id = ?""", (src, to, rid, x["id"]))
+        removed = [x for x in recs if x["on"]]
+        for x in removed:  # its past transactions stay (recurring_id becomes NULL); it never generates again
+            db.execute("DELETE FROM recurring WHERE id = ?", (x["id"],))
+        db.commit()
+        n = lambda t: sum(1 for x in on if x["type"] == t)  # noqa: E731
+        note(f"{r['name']} → {dest['name']} · "
+             + i18n.tn("{n} transaction", "{n} transactions", n("lnk") + n("cnv") + n("inc"))
+             + (" · " + i18n.tn("{n} duplicate removed", "{n} duplicates removed", n("del")) if n("del") else "")
+             + (" · " + i18n.tn("{n} recurring item", "{n} recurring items", len(removed)) if removed else ""))
+        return jsonify(dry_run=False, **summary)
+
+    @app.post("/api/accounts/<int:aid>/doubles")
+    def account_doubles(aid):
+        """Money recorded twice in one account: two records in the same direction (both bring money in, or both take it
+        out), similar amount, close date (`days` default 3, `tolerance` % default 0), each record in one pair at most,
+        the closest pairs first. Typical after mixing recurring items, imports and conversions: an income and a transfer
+        for the same money, a transfer generated by a recurring item and the same one entered by hand, the same import
+        twice. Per pair the record kept is the most coherent one (a transfer, seen in both spaces, over an income or an
+        expense; an imported one over a generated one); the other is deleted, and its recurring link moves to the one
+        kept. dry_run shows the pairs and the effect on each account; then only what is ticked (`choices` {key: bool};
+        by default the pairs with the same amount)."""
+        db = get_db()
+        own_account(aid)
+        b = body()
+        days, tol = b.get("days", 3), b.get("tolerance", 0)
+        days, tol = match_limits({"days": days, "tolerance": tol})
+        choices = b.get("choices") or {}
+        if not isinstance(choices, dict) or not all(isinstance(v, bool) for v in choices.values()):
+            raise ApiError(i18n.t("Invalid request"))
+        rows = [dict(r) for r in db.execute(
+            """SELECT t.id, t.date, t.amount, t.kind, t.account_id, t.to_account_id, t.description, t.source,
+                      t.recurring_id, a.name AS account_name, ta.name AS to_account_name, pa.name AS space,
+                      tp.name AS to_space
+               FROM transactions t JOIN accounts a ON a.id = t.account_id JOIN portfolios pa ON pa.id = a.portfolio_id
+               LEFT JOIN accounts ta ON ta.id = t.to_account_id LEFT JOIN portfolios tp ON tp.id = ta.portfolio_id
+               WHERE t.account_id = ? OR t.to_account_id = ? ORDER BY t.date, t.id""", (aid, aid))]
+        inflow = [t for t in rows if (t["kind"] == "income" and t["account_id"] == aid)
+                  or (t["kind"] == "transfer" and t["to_account_id"] == aid)]
+        outflow = [t for t in rows if (t["kind"] == "expense" and t["account_id"] == aid)
+                   or (t["kind"] == "transfer" and t["account_id"] == aid)]
+
+        def score(t):  # the record to keep: a transfer (seen in both spaces), then an imported one, then a linked one
+            return (t["kind"] == "transfer") * 4 + (t["source"] == "import") * 2 + (t["recurring_id"] is not None), -t["id"]
+
+        pairs = []
+        for direction, group in (("in", inflow), ("out", outflow)):
+            cands = []
+            for k, x in enumerate(group):
+                for y in group[k + 1:]:
+                    if x["kind"] == y["kind"] == "transfer" and x["recurring_id"] and x["recurring_id"] == y["recurring_id"] \
+                            and x["date"] != y["date"]:
+                        continue  # two due dates of the same recurring item, not a double
+                    c = same_money(x, y, days, tol)
+                    if c is not None:
+                        cands.append((c, x["id"], y["id"], x, y))
+            used = set()
+            for _, _, _, x, y in sorted(cands, key=lambda z: z[:3]):
+                if x["id"] in used or y["id"] in used:
+                    continue
+                used |= {x["id"], y["id"]}
+                keep, drop = (x, y) if score(x) >= score(y) else (y, x)
+                key = f"dbl:{drop['id']}:{keep['id']}"
+                default = keep["amount"] == drop["amount"]
+                pairs.append({"key": key, "direction": direction, "keep": keep, "drop": drop,
+                              "different": keep["amount"] != drop["amount"], "on": choices.get(key, default)})
+        pairs.sort(key=lambda p: p["drop"]["date"])
+        # effect on the balances: a deleted record gives back (or takes back) its amount on each account it touched
+        effect = {}
+        for p in (p for p in pairs if p["on"]):
+            d = p["drop"]
+            if d["kind"] == "transfer":
+                effect[d["account_id"]] = effect.get(d["account_id"], 0) + d["amount"]
+                effect[d["to_account_id"]] = effect.get(d["to_account_id"], 0) - d["amount"]
+            else:
+                effect[d["account_id"]] = effect.get(d["account_id"], 0) + (-d["amount"] if d["kind"] == "income" else d["amount"])
+        names = {t["account_id"]: (t["account_name"], t["space"]) for t in rows}
+        names.update({t["to_account_id"]: (t["to_account_name"], t["to_space"]) for t in rows if t["to_account_id"]})
+        acc = db.execute("SELECT name FROM accounts WHERE id = ?", (aid,)).fetchone()
+        summary = {"account": acc["name"], "pairs": pairs, "days": days, "tolerance": tol,
+                   "effect": [{"account_id": k, "name": names[k][0], "space": names[k][1], "delta": v}
+                              for k, v in effect.items() if v]}
+        on = [p for p in pairs if p["on"]]
+        if b.get("dry_run") or not on:
+            g.audit_skip = True  # a preview changes nothing: not in the activity log
+            return jsonify(dry_run=True, **summary)
+        dbm.backup_now("pre-doubles")
+        for p in on:
+            keep, drop = p["keep"], p["drop"]
+            if drop["recurring_id"] and not keep["recurring_id"]:  # the due date stays paid, by the record kept
+                db.execute("UPDATE transactions SET recurring_id = ? WHERE id = ?", (drop["recurring_id"], keep["id"]))
+            db.execute("DELETE FROM transactions WHERE id = ?", (drop["id"],))
+        db.commit()
+        note(f"{acc['name']} · " + i18n.tn("{n} duplicate removed", "{n} duplicates removed", len(on)))
+        return jsonify(dry_run=False, removed=len(on), **summary)
+
+    def auto_backups():
+        """The automatic backups (newest first): at start, periodic, before bulk changes, by hand."""
+        return [{"name": b["name"], "at": b["at"].isoformat(timespec="minutes"), "reason": b["reason"], "size": b["size"],
+                 "default_folder": b["default_folder"]} for b in dbm.list_backups()]
+
+    # ------------------------------------------------------- backups: settings, by hand, compare, put back
+    # (all under /api/backup…: never reachable with the temporary import code)
+
+    def same_row(a, b):
+        """Is a transaction with the same id in a backup and now the same one (edited or not)? SQLite may give the id
+        of a deleted transaction to a new one: same creation time (to the second), type and accounts, and at least one
+        of description, amount and date unchanged."""
+        return (a.get("created_at") == b.get("created_at")
+                and all(a[k] == b[k] for k in ("kind", "account_id", "to_account_id"))
+                and any(a[k] == b[k] for k in ("description", "amount", "date")))
+
+    _sched = {"checked": 0.0}
+
+    @app.before_request
+    def scheduled_backup():
+        """Periodic backup (daily or weekly, if chosen): checked at most every 10 minutes while HomeCoin is unlocked."""
+        if dbm._key is None or time.time() - _sched["checked"] < 600:
+            return None
+        _sched["checked"] = time.time()
+        try:
+            if dbm.scheduled_backup_due():
+                dbm.backup_now("scheduled", force=True)
+        except Exception:  # a backup problem never blocks the app; it shows in Settings
+            pass
+        return None
+
+    @app.get("/api/backup-settings")
+    def backup_settings_get():
+        s = dbm.backup_settings()
+        folder, fallback = dbm.backup_dir()
+        return jsonify(settings=s, folder=str(folder), default_folder=str(dbm.BACKUP_DIR), fallback=fallback,
+                       triggers=list(dbm.BACKUP_TRIGGERS), backups=auto_backups())
+
+    @app.put("/api/backup-settings")
+    def backup_settings_put():
+        b, s = body(), dbm.backup_settings()
+        if "on_start" in b:
+            s["on_start"] = bool(b["on_start"])
+        if "every" in b:
+            if b["every"] not in dbm.BACKUP_EVERY:
+                raise ApiError(i18n.t("Invalid request"))
+            s["every"] = b["every"]
+        if "keep" in b:
+            keep = b["keep"]
+            if isinstance(keep, bool) or not isinstance(keep, int) or not 3 <= keep <= 200:
+                raise ApiError(i18n.t("Keep between 3 and 200 backups"))
+            s["keep"] = keep
+        if "triggers" in b:
+            t = b["triggers"]
+            if not isinstance(t, dict) or not all(k in dbm.BACKUP_TRIGGERS and isinstance(v, bool) for k, v in t.items()):
+                raise ApiError(i18n.t("Invalid request"))
+            s["triggers"].update(t)
+        if "dir" in b:
+            d = as_text(b.get("dir"), 400).strip()
+            if d:
+                p = Path(d)
+                if not p.is_absolute():
+                    raise ApiError(i18n.t("Write the full path of the folder (for example D:\\Backup\\HomeCoin)"))
+                try:
+                    p.mkdir(parents=True, exist_ok=True)
+                    (p / ".hc-write-test").write_bytes(b"")
+                    (p / ".hc-write-test").unlink()
+                except OSError:
+                    raise ApiError(i18n.t("HomeCoin cannot write in this folder"))
+            s["dir"] = d
+        dbm.save_backup_settings(s)
+        note(i18n.t("Backup settings changed"))
+        return backup_settings_get()
+
+    @app.post("/api/backup-now")
+    def backup_by_hand():
+        target = dbm.backup_now("manual", force=True)
+        return jsonify(ok=True, name=target.name if target else None, backups=auto_backups())
+
+    @app.post("/api/backup-folder/open")
+    def backup_folder_open():
+        """Opens the backup folder in the file manager of this PC (HomeCoin runs only on this PC)."""
+        folder, _ = dbm.backup_dir()
+        folder.mkdir(parents=True, exist_ok=True)
+        if hasattr(os, "startfile"):
+            os.startfile(str(folder))  # noqa: S606 - a local folder chosen by the user
+        g.audit_skip = True
+        return jsonify(ok=True, folder=str(folder))
+
+    # what a backup can put back, row by row: name → (columns of identity shown, rows that must exist first)
+    RESTORABLE = {
+        "accounts": ("name", {"portfolio_id": "portfolios"}),
+        "categories": ("name", {"portfolio_id": "portfolios"}),
+        "rules": ("pattern", {"category_id": "categories"}),
+        "recurring": ("name", {"account_id": "accounts", "to_account_id": "accounts"}),
+        "transactions": ("description", {"account_id": "accounts", "to_account_id": "accounts"}),
+    }
+
+    def backup_rows(path):
+        conn = dbm.connect(path=path)
+        try:
+            return {t: {r["id"]: dict(r) for r in conn.execute(f"SELECT * FROM {t}")} for t in RESTORABLE}
+        finally:
+            conn.close()
+
+    @app.post("/api/backups/compare")
+    def backups_compare():
+        """Differences between an automatic backup and the current data, for accounts, categories, rules, recurring
+        items and transactions: deleted since then (can be put back), changed (can be taken back to how they were),
+        added. All the spaces: a backup is of the whole database."""
+        b, db = body(), get_db()
+        path = dbm.find_backup(b.get("backup"))
+        if not path:
+            raise ApiError(i18n.t("Backup not found"), 404)
+        old = backup_rows(path)
+        names = {r["id"]: r["name"] for r in db.execute("SELECT id, name FROM accounts")}
+        names.update({r["id"]: r["name"] for t, rows in [("accounts", old["accounts"])] for r in rows.values()})
+        out = {}
+        for t, (label, _) in RESTORABLE.items():
+            now = {r["id"]: dict(r) for r in db.execute(f"SELECT * FROM {t}")}
+            ignore = {"created_at", "updated_at", "generated", "last_used"}
+            # SQLite may give the id of a deleted row to a new one: the same id is the same row only if it was created
+            # at the same moment (an edit keeps created_at), else it is "deleted + added"
+            same = {i for i in old[t] if i in now and (same_row(old[t][i], now[i]) if t == "transactions"
+                                                        else old[t][i].get("created_at") == now[i].get("created_at"))}
+
+            def show(r):
+                x = {"id": r["id"], "label": r.get(label) or "", "date": r.get("date") or r.get("start_date"),
+                     "amount": r.get("amount"), "kind": r.get("kind"), "account": names.get(r.get("account_id")),
+                     "to_account": names.get(r.get("to_account_id"))}
+                return x
+
+            changed = []
+            for i in sorted(same):
+                diff = [k for k in old[t][i] if k not in ignore and k in now[i] and old[t][i][k] != now[i][k]]
+                if diff:
+                    changed.append({"before": show(old[t][i]), "after": show(now[i]), "fields": diff})
+            out[t] = {"deleted": [show(r) for i, r in old[t].items() if i not in same],
+                      "changed": changed, "added": [show(r) for i, r in now.items() if i not in same]}
+            for k in ("deleted", "added"):
+                out[t][k].sort(key=lambda x: str(x["date"] or ""))
+        g.audit_skip = True  # a comparison changes nothing
+        return jsonify(backup=b.get("backup"), tables=out)
+
+    @app.post("/api/backups/put-back")
+    def backups_put_back():
+        """Puts back rows deleted since an automatic backup (`put_back` {table: [ids]}) and takes changed rows back to
+        how they were (`revert` {table: [ids]}). Rows whose account (or space, category) no longer exists are skipped
+        and reported; optional links that no longer exist are emptied. A copy of the current data is saved first."""
+        b, db = body(), get_db()
+        path = dbm.find_backup(b.get("backup"))
+        if not path:
+            raise ApiError(i18n.t("Backup not found"), 404)
+        put, rev = b.get("put_back") or {}, b.get("revert") or {}
+        for d in (put, rev):
+            if not isinstance(d, dict) or not all(k in RESTORABLE for k in d):
+                raise ApiError(i18n.t("Invalid request"))
+        put = {t: set(int_list(v)) for t, v in put.items()}
+        rev = {t: set(int_list(v)) for t, v in rev.items()}
+        if not any(put.values()) and not any(rev.values()):
+            raise ApiError(i18n.t("Tick at least one row"))
+        old = backup_rows(path)
+        dbm.backup_now("pre-restore-tx", force=True)
+        done, skipped = 0, 0
+        optional = {"category_id": "categories", "recurring_id": "recurring", "holding_id": "holdings", "person_id": "people"}
+        for t, (_, needed) in RESTORABLE.items():  # parents first: accounts and categories before what points to them
+            cols = [r[1] for r in db.execute(f"PRAGMA table_info({t})")]
+            for i in sorted(put.get(t, set()) | rev.get(t, set())):
+                row = old[t].get(i)
+                if not row:
+                    continue
+                row = {k: v for k, v in row.items() if k in cols}
+                exists = lambda table, v: v is None or db.execute(f"SELECT 1 FROM {table} WHERE id = ?", (v,)).fetchone()  # noqa: E731
+                if not all(exists(tab, row.get(col)) for col, tab in needed.items()):
+                    skipped += 1
+                    continue
+                for col, tab in optional.items():
+                    if col in row and not exists(tab, row[col]):
+                        row[col] = None
+                current = db.execute(f"SELECT 1 FROM {t} WHERE id = ?", (i,)).fetchone()
+                if i in rev.get(t, set()) and current:
+                    keep = {k: v for k, v in row.items() if k != "id"}
+                    db.execute(f"UPDATE {t} SET {', '.join(f'{k} = ?' for k in keep)} WHERE id = ?", (*keep.values(), i))
+                else:
+                    if current:
+                        row.pop("id")  # the id was reused meanwhile: a new one
+                    db.execute(f"INSERT INTO {t} ({','.join(row)}) VALUES ({','.join('?' * len(row))})", tuple(row.values()))
+                done += 1
+        db.commit()
+        note(i18n.tn("{n} row put back from a backup", "{n} rows put back from a backup", done) + f" · {b.get('backup')}")
+        return jsonify(ok=True, done=done, skipped=skipped)
+
+    @app.post("/api/backups/restore-all")
+    def backups_restore_all():
+        """Replaces all the data with an automatic backup (a copy of the current data is saved first)."""
+        b = body()
+        path = dbm.find_backup(b.get("backup"))
+        if not path:
+            raise ApiError(i18n.t("Backup not found"), 404)
+        conn = dbm.connect(path=path)
+        try:
+            payload = {t: [dict(r) for r in conn.execute(f"SELECT * FROM {t}")] for t in TABLES}
+        finally:
+            conn.close()
+        note(b.get("backup"))
+        return restore_payload(payload)
+
+    @app.get("/api/backups/auto")
+    @app.get("/api/auto-backups")  # names and times only: not under /api/backup, which the import code may not use
+    def backups_auto():
+        return jsonify(auto_backups())
+
+    @app.post("/api/accounts/<int:aid>/compare-backup")
+    def account_compare_backup(aid):
+        """What changed in one account since an automatic backup: the transactions deleted since then (they can be put
+        back, one by one: `restore_ids`), the ones changed and the ones added, with the effect on the balance. For
+        mistakes such as deleting a real transaction while cleaning up doubles. dry_run=true only compares."""
+        db = get_db()
+        own_account(aid)
+        b = body()
+        name = b.get("backup")
+        if not isinstance(name, str) or not dbm.find_backup(name):  # only a listed file: never a path
+            raise ApiError(i18n.t("Backup not found"), 404)
+        restore = set(int_list(b.get("restore_ids")))
+        cols = "id, date, amount, kind, account_id, to_account_id, category_id, description, notes, recurring_id, source, excluded, created_at"
+        q = f"SELECT {cols} FROM transactions WHERE account_id = ? OR to_account_id = ?"
+        old_db = dbm.connect(path=dbm.find_backup(name))
+        try:
+            old = {r["id"]: dict(r) for r in old_db.execute(q, (aid, aid))}
+        finally:
+            old_db.close()
+        now = {r["id"]: dict(r) for r in db.execute(q, (aid, aid))}
+
+        def effect(t):  # what the record does to this account's balance
+            inflow = t["kind"] == "income" or (t["kind"] == "transfer" and t["to_account_id"] == aid)
+            return t["amount"] if inflow else -t["amount"]
+
+        names = {r["id"]: r["name"] for r in db.execute("SELECT id, name FROM accounts")}
+
+        def label(t):
+            return {**t, "effect": effect(t), "account_name": names.get(t["account_id"]),
+                    "to_account_name": names.get(t["to_account_id"])}
+
+        keys = ("date", "amount", "kind", "account_id", "to_account_id", "description")
+        # the same id is the same transaction only if its type and accounts are the same: SQLite may give the id of a
+        # deleted transaction to a new one, which is then "deleted + added", not "changed"
+        same = {i for i in old if i in now and same_row(old[i], now[i])}
+        deleted = [label(t) for i, t in sorted(old.items(), key=lambda x: x[1]["date"]) if i not in same]
+        changed = [{"before": label(old[i]), "after": label(now[i])} for i in sorted(same, key=lambda i: now[i]["date"])
+                   if any(old[i][k] != now[i][k] for k in keys)]
+        added = [label(t) for i, t in sorted(now.items(), key=lambda x: x[1]["date"]) if i not in same]
+        bal_now = sum(effect(t) for t in now.values())
+        bal_old = sum(effect(t) for t in old.values())
+        summary = {"backup": name, "deleted": deleted, "changed": changed, "added": added,
+                   "difference": bal_now - bal_old}
+        todo = [t for t in deleted if t["id"] in restore]
+        if b.get("dry_run") or not todo:
+            g.audit_skip = True  # a comparison changes nothing: not in the activity log
+            return jsonify(dry_run=True, **summary)
+        dbm.backup_now("pre-restore-tx")
+        accounts = {r["id"] for r in db.execute("SELECT id FROM accounts")}
+        cats = {r["id"] for r in db.execute("SELECT id FROM categories")}
+        recs = {r["id"] for r in db.execute("SELECT id FROM recurring")}
+        put_back = 0
+        for t in todo:
+            if t["account_id"] not in accounts or (t["to_account_id"] and t["to_account_id"] not in accounts):
+                continue  # its account no longer exists
+            row = {k: old[t["id"]][k] for k in cols.split(", ")}
+            row["category_id"] = row["category_id"] if row["category_id"] in cats else None
+            row["recurring_id"] = row["recurring_id"] if row["recurring_id"] in recs else None
+            if db.execute("SELECT 1 FROM transactions WHERE id = ?", (row["id"],)).fetchone():
+                row.pop("id")  # the id was reused meanwhile: a new one
+            db.execute(f"INSERT INTO transactions ({','.join(row)}) VALUES ({','.join('?' * len(row))})", tuple(row.values()))
+            put_back += 1
+        db.commit()
+        note(i18n.tn("{n} transaction restored", "{n} transactions restored", put_back) + f" · {name}")
+        return jsonify(dry_run=False, restored=put_back, **summary)
 
     @app.post("/api/recurring/run")
     def recurring_run():
@@ -2585,7 +3428,11 @@ def create_app(port):
         if not isinstance(payload, dict) or payload.get("app") != "HomeCoin" or \
                 not all(isinstance(payload.get(t), list) for t in CORE_TABLES):
             raise ApiError(i18n.t("The file is not a valid HomeCoin backup"))
-        dbm.backup_now("pre-restore")
+        return restore_payload(payload)
+
+    def restore_payload(payload):
+        """Replace all the data with a backup's (dict of table → rows); a copy of the current data is saved first."""
+        dbm.backup_now("pre-restore", force=True)  # never skipped: the way back from a wrong restore
         db = get_db()
         cols = {t: [r[1] for r in db.execute(f"PRAGMA table_info({t})")] for t in TABLES}
         try:

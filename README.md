@@ -2,7 +2,7 @@
 
 # HomeCoin *by Starkark98*
 
-![Version](https://img.shields.io/badge/version-2.2.0-8b5cf6)
+![Version](https://img.shields.io/badge/version-2.3.0-8b5cf6)
 ![Python](https://img.shields.io/badge/Python-3.12%20%7C%203.13%20%7C%203.14-3776AB?logo=python&logoColor=white)
 ![Platform](https://img.shields.io/badge/platform-Windows-0078D6)
 ![Data](https://img.shields.io/badge/data-encrypted%2C%20on%20your%20PC-16a34a)
@@ -212,7 +212,7 @@ A space is a separate set of books (a separate ledger) inside the same HomeCoin,
 
 The type matters: a *Household* space gets shared categories (mortgage, utilities, groceries, contributions) and the Fair split page; a *Personal* space gets personal categories and the Investments and Savings pages. You can change the pages later.
 
-**Money between spaces.** A transfer from your personal account to the household account is not an expense or an income: it is shown in both spaces and counts correctly in **net worth** (everything you own minus what you owe). You create, edit, archive or delete spaces in Settings → Spaces.
+**Money between spaces.** A transfer from your personal account to the household account is not an expense or an income: it is shown in both spaces and counts correctly in **net worth** (everything you own minus what you owe). Record it as a **Transfer** and choose the account of the other space as destination: one transaction, seen from both sides. If you recorded such payments as expenses in a category (e.g. *Contributions to household*), open that category and use **Turn into transfers…** (see [Categories and rules](#categories-and-rules)). You create, edit, archive or delete spaces in Settings → Spaces.
 
 ### Dashboard
 
@@ -230,12 +230,12 @@ Each transaction is an **expense**, an **income** or a **transfer** between two 
 ![Transactions](docs/images/03-transactions.png)
 *Transactions: filters, search, bulk edit and export.*
 
-- **Adding one:** ＋ New transaction (or <kbd>N</kbd>). As you type the description, HomeCoin suggests previous ones and fills in the usual account, category and amount.
+- **Adding one:** ＋ New transaction (or <kbd>N</kbd>). As you type the description, HomeCoin suggests previous ones and fills in the usual account, category and amount. When you click on **Notes**, it proposes the notes you wrote recently for the same or a similar description (for example "weekly shopping" for *Supermarket*): pick one with a click, or just type your own.
 
   ![New transaction](docs/images/04-new-transaction.png)
   *A new transaction: account, amount and category filled in from history and rules.*
 
-- **Finding one:** filter by period, account, category or type, or search the text.
+- **Finding one:** filter by period, account, category or type, or search the text. Account, type and category take several values at once (tick them in the list): for example two accounts and three categories together.
 - **Several at once** (bulk edit): select them to change their category, exclude or include them, or delete them, in one go.
 - **⧉ Duplicate** copies a transaction, handy for one that repeats now and then.
 - **👁 Exclude:** a transaction you don't want in reports and budgets (for example something you bought for a friend who paid you back) still counts in the account balance but not in your spending.
@@ -249,16 +249,25 @@ Add every place where you keep money: current accounts, savings accounts, credit
 - A **credit card** can have a negative opening balance (what you owe).
 - An account you closed can be **archived**: it disappears from the lists but its history stays in the totals of the past.
 - HomeCoin warns you before a change that would alter your figures (for example changing the type of an account with transactions) and refuses to delete accounts that still have data.
+- At the top of the page: the money available (current and savings accounts, cash, prepaid cards), the investments at market value, the credit cards (if you have any) and the total net worth. Click a card to see its transactions; its **⋯** menu also has *Check for money recorded twice* (an income and a transfer for the same money, the same import done twice: the most coherent record is kept) and *Compare with an automatic backup*.
 
 ### Recurring payments
 
-Payments that repeat — rent, mortgage, loans, bills, subscriptions, salary, transfers to savings — are set up once in **Recurring**. On each due date HomeCoin records the transaction for you.
+Payments that repeat — rent, mortgage, loans, bills, subscriptions, salary, transfers to savings — are set up once in **Recurring**. On each due date HomeCoin records the transaction for you. At the top, the three kinds as a monthly amount: fixed expenses, fixed income (with the margin left each month) and fixed transfers (with those coming in from other spaces). The remaining debt of loans is in Mortgage and loans.
 
 - **Frequency:** weekly, monthly, every 2, 3 or 6 months, yearly.
 - **Loans in installments:** add the number of installments, the amount borrowed and the rate, and the loan appears in [Mortgage and loans](#mortgage-and-loans). With *constant principal* repayment you don't type the amount: HomeCoin records each installment with its own amount, taken from the schedule.
 - **Investment plans** (regular savings plans, also known as dollar-cost averaging; *PAC* in Italy): a monthly transfer to an investment account can buy units of a security automatically, at an estimated price; HomeCoin reminds you to confirm the real price later.
 - **Variable items** (a bill or salary that changes a little every time): mark them as *expected*. HomeCoin does not record them by itself: it links the real transaction when it arrives (by a keyword in the description) and forecasts the next amount as the median (the middle value) of the last six payments. After a raise or a new tariff you can tell it to use the amount you set instead, until the median catches up. If a payment is more than a week late, you get a warning.
 - Pausing an item or changing its dates never creates payments in the past by surprise.
+- **Recurring transfers between spaces** (for example your monthly share to the household account) are one item, set up in the space the money leaves. Choose *Transfer* and answer *Where does the money go?*: *To another space* shows only the accounts of the other spaces. The receiving space shows the item too, marked *from …, read only*. It can be changed only where it was created, so the same money is never planned twice.
+- **Reconcile** (on such a recurring transfer, and proposed when you save one): HomeCoin looks for the same money already recorded in other ways (similar amount, close date) and proposes, line by line:
+  - linking the transfers already recorded;
+  - turning the expenses of those due dates into the transfer, including the past payments of a recurring expense you have just changed into a transfer (ticked, because they are its own payments);
+  - deleting an income in the receiving account that records the same money a second time;
+  - removing other recurring items for the same money (a recurring income in the receiving space, a recurring expense, a second recurring transfer). Their past transactions stay, and the amount of this recurring transfer is the one that counts.
+
+  An income with no matching transfer stays as it is. Tick it only if that money really left your account: then it becomes the transfer, and your account's balance goes down. Nothing changes until you confirm, you see the effect on both spaces first, and a backup is saved before the change.
 
 ### Calendar
 
@@ -278,7 +287,7 @@ Set a **monthly limit** for the categories you want to watch, directly on the Bu
 
 ### Goals
 
-A goal is something you are saving for: a trip, a car, a down payment. Give it an amount and, if you want, a date. Its progress comes either from **the balance of an account** (for example a savings account dedicated to it) or from **an amount you update by hand**.
+A goal is something you are saving for: a trip, a car, a down payment. Give it an amount and, if you want, a date. Its progress comes either from **the balance of an account** (for example a savings account dedicated to it) or from **an amount you update by hand**. At the top: the total of all goals, what is already set aside, what to set aside each month for those with a date, and how many are reached.
 
 HomeCoin calculates **how much to put aside each month** to get there on time; in a household space, also each person's share in proportion to income. It warns you if the date has passed or if two goals use the same account (the same money would be counted twice).
 
@@ -405,6 +414,26 @@ Most banks let you download your transactions as **CSV or Excel** from online ba
 
 **Categories** group your spending and income (Groceries, Utilities, Salary…). Keep them few and broad: reports are easier to read. Each category can have a color, an icon and a monthly [budget](#budgets).
 
+**Turn into transfers…** (in an expense category's window): if the money you put into another space, for example your monthly share to the household account, was recorded as expenses in a category, HomeCoin turns them into transfers to that space. Choose the space and tick the accounts the money reaches there; it can be more than one, for example a joint account and a bills account. Then:
+- each expense becomes a transfer, with the same amount, date and description, and appears in both spaces;
+- **the account is the one where the money really arrived**: HomeCoin looks for the matching record among all the ticked accounts. An expense with no matching record goes to the account you choose as default, or stays an expense if you prefer. Each row has its own account menu to correct it;
+- **one payment received in two accounts**: if two incomes in two different accounts together make the amount of one expense, the expense is split into two transfers, one per account. Together they are exactly the expense, so nothing changes on your side;
+- money already recorded is recognized, so nothing is counted twice. "The same money" means a similar amount and a close date; you choose how close (by default 2% and 5 days, up to 100% and 31 days). The percentage is of the smaller amount, the way people say it: 600 is 50% more than 400. A pairing whose amounts differ by more than 2% is never applied by itself: it is shown in red, unticked, and you tick it only if it is the same money:
+  - the same money as an **income** in the destination account (for example from an imported bank statement) is replaced by the transfer;
+  - an expense that is already there as a **transfer** to that account is a duplicate (a double record) and is deleted;
+  - each record is paired only once, and HomeCoin looks for the best pairing of all of them together (not just the closest one each time), so similar amounts repeated in the same weeks are paired correctly;
+  - when the amounts differ a little, the transfer keeps the amount of the expense (the money that left your account);
+- recurring items are never changed by themselves. The category's recurring expenses are listed, unticked, and only the ones you tick become recurring transfers. Each one gets the account of the recurring income that looks like the same money in the other space; if two recurring incomes in two accounts together make it, it can become two recurring transfers. You can always change the account. A warning tells you if a recurring transfer to that account already exists for the same money, which would record it twice. It also tells you if the receiving space has a recurring income for it: right after the change, HomeCoin proposes to merge it ([Reconcile](#recurring-payments)). A recurring expense you leave as it is keeps recording expenses; mark the category as a contribution to other spaces to count them under *Other spaces* in the meantime.
+
+**How it is counted.** A transfer between your spaces is not spending. In the space it leaves, it counts under *Other spaces* (money given to another space); in the space it reaches, under *From other spaces* (money received, like an income for your savings). The balance of the account the money leaves does not change, because the money already left it.
+
+**The preview** shows, before anything changes:
+- each expense and what happens to it (*becomes a transfer*, *replaces the income of…*, *duplicate, deleted*, with any difference in the amount). Untick a pairing if it is not the same money;
+- the effect on spending, savings, balances and net worth in both spaces. An expense converted with no matching income adds its money to the destination account. If that account's balance then no longer matches your bank, the money had been recorded there in another way, for example with a balance adjustment;
+- a warning if a similar income is in another account of that space, which may mean you chose the wrong destination.
+
+An encrypted backup of the database is saved before the change; each option can be switched off.
+
 **Rules** fill in categories automatically: *if the description contains "supermarket", the category is Groceries*. Create them for the payees you see often; HomeCoin suggests keywords from your history. Rules apply to new and imported transactions, and you can apply them again to existing uncategorized ones.
 
 ### Activity log
@@ -437,7 +466,15 @@ Five tabs:
 
 ## Backups
 
-- **Automatic:** every time HomeCoin starts (when you first unlock it), and before every import, restore and update, an encrypted copy of the database is saved next to the data (the last 15 are kept). They protect you from mistakes, not from a broken or stolen PC: for that you need the downloaded backup below.
+- **Automatic:** encrypted copies of all the data, saved by HomeCoin by itself. You decide everything in Settings → Backup & data → *Automatic backups*:
+  - **where:** the folder is shown, with a button to open it; you can choose another one, for example a USB drive or a synced folder. If it cannot be reached (the drive is removed), backups go to the default folder next to the data until it is back;
+  - **when:** at every start, and also every day or every week while HomeCoin is open;
+  - **how many:** from 3 to 200 (the oldest are deleted; 15 by default);
+  - **before which operations:** turning expenses into transfers, reconciling, removing doubles, importing, putting rows back, updating. Each one is the way back if the operation goes wrong, so switch it off only if you have another backup. Before a full restore a copy is always saved;
+  - **by hand:** *Save a backup now*.
+
+  They protect you from mistakes, not from a broken or stolen PC: for that you need the downloaded backup below, kept outside your PC.
+- **Compare and restore:** next to each automatic backup, *Compare and restore* shows what changed since then in all the spaces, for transactions, recurring items, accounts, categories and rules: rows deleted (you can put them back), rows changed (you can take them back to how they were) and rows added. Only the rows you tick change; *Restore everything to this backup* replaces all the data instead. A copy of the current data is saved first. For a single account the same comparison is in its card: **⋯ → Compare with an automatic backup**.
 - **Downloaded:** Settings → Backup & data → **Backup** saves an encrypted `.hcbackup` file. Keep a copy **outside your PC** (USB drive, cloud storage): the automatic copies don't help if the disk breaks. The same page shows when you last downloaded one, with a warning after 30 days.
 - A backup opens only in HomeCoin, with the password (or recovery key) that was valid when it was made.
 - **Restore** (same tab) replaces all current data with the backup; HomeCoin saves a copy of the current data first.
@@ -601,4 +638,4 @@ Any copy or modified version must keep the [LICENSE](LICENSE) file, including th
 
 ---
 
-*HomeCoin by **Starkark98** · v2.2.0 · see the [changelog](CHANGELOG.md)*
+*HomeCoin by **Starkark98** · v2.3.0 · see the [changelog](CHANGELOG.md)*

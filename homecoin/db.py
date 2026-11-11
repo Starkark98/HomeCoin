@@ -398,22 +398,126 @@ def close_db(_exc=None):
         conn.close()
 
 
-def backup_now(reason="auto"):
-    """Consistent copy of the database into data/backups; keeps the latest KEEP_BACKUPS."""
+# ------------------------------------------------------------------ automatic backups: user settings
+# Kept in a small file next to the data (no financial data: options and a folder), readable before HomeCoin is
+# unlocked, because the start backup is taken while the database is being opened.
+BACKUP_TRIGGERS = ("pre-convert", "pre-reconcile", "pre-doubles", "pre-import", "pre-restore-tx", "update")
+BACKUP_EVERY = ("none", "daily", "weekly")
+BACKUP_DEFAULTS = {"on_start": True, "every": "none", "keep": KEEP_BACKUPS, "dir": "",
+                   "triggers": {t: True for t in BACKUP_TRIGGERS}}
+
+
+def _settings_path():
+    return DATA_DIR / "backup-settings.json"
+
+
+def backup_settings():
+    """The user's backup settings, completed with the defaults (a damaged file = the defaults)."""
+    import json
+    s = {**BACKUP_DEFAULTS, "triggers": dict(BACKUP_DEFAULTS["triggers"])}
+    try:
+        saved = json.loads(_settings_path().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return s
+    if isinstance(saved, dict):
+        if isinstance(saved.get("on_start"), bool):
+            s["on_start"] = saved["on_start"]
+        if saved.get("every") in BACKUP_EVERY:
+            s["every"] = saved["every"]
+        if isinstance(saved.get("keep"), int) and 3 <= saved["keep"] <= 200:
+            s["keep"] = saved["keep"]
+        if isinstance(saved.get("dir"), str):
+            s["dir"] = saved["dir"]
+        if isinstance(saved.get("triggers"), dict):
+            s["triggers"].update({k: v for k, v in saved["triggers"].items() if k in BACKUP_TRIGGERS and isinstance(v, bool)})
+    return s
+
+
+def save_backup_settings(s):
+    import json
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    tmp = _settings_path().with_suffix(".tmp")
+    tmp.write_bytes(json.dumps(s, indent=1).encode("utf-8"))
+    tmp.replace(_settings_path())
+
+
+def backup_dir():
+    """(folder in use, the chosen folder is unreachable): a chosen folder that cannot be used (a USB drive removed)
+    falls back to the default one, next to the data, so a backup is never lost."""
+    chosen = backup_settings()["dir"]
+    if chosen:
+        p = Path(chosen)
+        try:
+            p.mkdir(parents=True, exist_ok=True)
+            probe = p / ".hc-write-test"
+            probe.write_bytes(b"")
+            probe.unlink()
+            return p, False
+        except OSError:
+            return BACKUP_DIR, True
+    return BACKUP_DIR, False
+
+
+def list_backups():
+    """Automatic backups in the folder in use and in the default one (newest first): name, folder, time, reason, size."""
+    out, seen = [], set()
+    for folder in dict.fromkeys([backup_dir()[0], BACKUP_DIR]):
+        if not folder.exists():
+            continue
+        for f in folder.glob("homecoin-*.db"):
+            parts = f.stem.split("-", 3)  # homecoin-YYYYMMDD-HHMMSS-reason
+            try:
+                when = dt.datetime.strptime(parts[1] + parts[2], "%Y%m%d%H%M%S")
+            except (IndexError, ValueError):
+                continue
+            if f.name in seen:
+                continue
+            seen.add(f.name)
+            out.append({"name": f.name, "path": f, "at": when, "reason": parts[3] if len(parts) > 3 else "",
+                        "size": f.stat().st_size, "default_folder": folder == BACKUP_DIR})
+    return sorted(out, key=lambda x: x["at"], reverse=True)
+
+
+def find_backup(name):
+    """The file of a listed backup (only names from the list: never a path given by the caller)."""
+    if not isinstance(name, str) or not name:
+        return None
+    return next((b["path"] for b in list_backups() if b["name"] == name), None)
+
+
+def backup_now(reason="auto", force=False):
+    """Consistent encrypted copy of the database into the backup folder; keeps the latest `keep` there. Skipped when
+    the user switched off this kind of backup (start, or the action in `reason`), unless `force`."""
     if not DB_PATH.exists():
         return None
-    BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+    s = backup_settings()
+    if not force and ((reason == "startup" and not s["on_start"]) or (reason in BACKUP_TRIGGERS and not s["triggers"][reason])):
+        return None
+    folder, _ = backup_dir()
+    folder.mkdir(parents=True, exist_ok=True)
     stamp = dt.datetime.now().strftime("%Y%m%d-%H%M%S")
-    target = BACKUP_DIR / f"homecoin-{stamp}-{reason}.db"
+    target = folder / f"homecoin-{stamp}-{reason}.db"
     src = connect()
     try:
         _export(src, target, _key)  # the copies are encrypted with the same key too
     finally:
         src.close()
-    old = sorted(BACKUP_DIR.glob("homecoin-*.db"))[:-KEEP_BACKUPS]
+    old = sorted(folder.glob("homecoin-*.db"))[:-s["keep"]]
     for f in old:
         f.unlink(missing_ok=True)
     return target
+
+
+def scheduled_backup_due(now=None):
+    """A periodic backup is due: daily or weekly, counted from the newest backup of any kind."""
+    s = backup_settings()
+    if s["every"] == "none":
+        return False
+    newest = list_backups()[:1]
+    if not newest:
+        return True
+    gap = dt.timedelta(days=1 if s["every"] == "daily" else 7)
+    return (now or dt.datetime.now()) - newest[0]["at"] >= gap
 
 
 class MigrationError(Exception):
