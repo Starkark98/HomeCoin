@@ -958,7 +958,7 @@
 "Last 36 months": "最近36個月",
 "Last 6 months": "最近6個月",
 "Last 7 days": "最近7天",
-"last checked": "上次檢查",
+"last checked {date} at {time}": "上次檢查 {date} {time}",
 "Last downloaded: <b>{date}</b>": "上次下載：<b>{date}</b>",
 "Last installment": "最後一期",
 "Last month": "上個月",

@@ -932,7 +932,7 @@
 "Last 36 months": "Laatste 36 maanden",
 "Last 6 months": "Laatste 6 maanden",
 "Last 7 days": "Laatste 7 dagen",
-"last checked": "laatst gecontroleerd",
+"last checked {date} at {time}": "laatst gecontroleerd op {date} om {time}",
 "Last downloaded: <b>{date}</b>": "Laatst gedownload: <b>{date}</b>",
 "Last installment": "Laatste termijn",
 "Last month": "Vorige maand",

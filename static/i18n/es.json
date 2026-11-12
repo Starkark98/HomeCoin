@@ -919,7 +919,7 @@
 "Last 36 months": "Últimos 36 meses",
 "Last 6 months": "Últimos 6 meses",
 "Last 7 days": "Últimos 7 días",
-"last checked": "última comprobación",
+"last checked {date} at {time}": "última comprobación el {date} a las {time}",
 "Last downloaded: <b>{date}</b>": "Última descarga: <b>{date}</b>",
 "Last installment": "Última cuota",
 "Last month": "Mes pasado",

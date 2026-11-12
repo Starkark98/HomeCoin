@@ -472,7 +472,10 @@ tr:hover .row-actions { opacity: 1; }
 .amount.income { color: var(--green); }
 .amount.transfer { color: var(--blue); }
 
-.heat td { text-align: right; font-variant-numeric: tabular-nums; font-size: 13px; white-space: nowrap; font-weight: 550; }
+.heat td { text-align: right; font-variant-numeric: tabular-nums; font-size: 12.5px; white-space: nowrap; font-weight: 550; }
+/* twelve months + total + share fit a 1366 px screen: tighter cells, long category names wrap */
+.heat th, .heat td { padding: 8px 7px; }
+.heat td:first-child .pill { white-space: normal; line-height: 1.25; }
 .heat tbody td + td { border-left: 2px solid var(--surface); }
 .heat td:first-child { text-align: left; }
 .heat tfoot td { font-weight: 800; border-top: 2px solid var(--border); }
@@ -619,6 +622,9 @@ select:disabled, input:disabled { opacity: .5; cursor: not-allowed; }
 .sp-rule button.on[data-r="equal"] { color: #fff; background: linear-gradient(135deg, #f59e0b, #f97316); }
 .sp-rule button.on[data-r="none"] { color: #fff; background: #8b8fa8; }
 .sp-people-res { display: flex; flex-direction: column; gap: 16px; }
+/* fair split: the contributions table gets the whole width (six columns), the people side by side below it */
+.sp-stack { display: grid; gap: 18px; margin-bottom: 18px; }
+.sp-stack .sp-people-res { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px 28px; }
 .sp-pres .top { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 8px; }
 .sp-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin-bottom: 8px; padding: 10px 12px; border-radius: 12px; background: var(--surface-2); }
 .sp-stats span { display: block; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }

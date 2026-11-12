@@ -2,6 +2,14 @@
 
 All notable changes to HomeCoin are listed here, newest first.
 
+## 2.4.1 — 2026-11-12
+
+- **A new user guide.** Every page is described the same way (what it is for, what you see, what you can do, tips) with its own screenshot: 22 in all, in the order of the menu. New *Your first five minutes*, a table of the account types and how each one counts, a glossary, and the long technical parts (currencies, loan indexes, conversions, reconciliation, import formats) in boxes that open with a click.
+- **Pages no longer overwrite each other**: opening a page while a slower one was still loading could show the slower one, or its error, on top of the new page.
+- Household goals show each person's full name in the monthly share (it was cut to four letters).
+- Settings → Updates: the date and time of the last check are one sentence in every language.
+- **Wide tables fit the screen:** in Fair split the proposed contributions take the whole width (the last column was cut), with the people side by side below; the month-by-month table of Reports fits a 1366-pixel screen without scrolling sideways.
+
 ## 2.4.0 — 2026-11-12
 
 - **Variable recurring items keep their expected date**: while waiting for a payment that has not arrived yet, the card showed today as its date, so it moved one day forward every day; now it shows the expected date (and "expected since" after a week). New **＋ Record the one that arrived** on the card: a new transaction already filled in like the item, to correct with the real amount and date; it is linked to the item.

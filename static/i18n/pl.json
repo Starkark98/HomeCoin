@@ -1030,7 +1030,7 @@
 "Last 36 months": "Ostatnie 36 miesięcy",
 "Last 6 months": "Ostatnie 6 miesięcy",
 "Last 7 days": "Ostatnie 7 dni",
-"last checked": "ostatnio sprawdzono",
+"last checked {date} at {time}": "ostatnio sprawdzono {date} o {time}",
 "Last downloaded: <b>{date}</b>": "Ostatnio pobrana: <b>{date}</b>",
 "Last installment": "Ostatnia rata",
 "Last month": "Poprzedni miesiąc",

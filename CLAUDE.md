@@ -1,6 +1,6 @@
 # CLAUDE.md — HomeCoin
 
-Guidance for Claude Code when working in this repository. Household finance app that runs locally on Windows: Python/Flask server on `127.0.0.1`, encrypted SQLCipher database, vanilla JS single-page UI. Current version: see `VERSION` in `homecoin/app.py` (2.4.0 at the time of writing).
+Guidance for Claude Code when working in this repository. Household finance app that runs locally on Windows: Python/Flask server on `127.0.0.1`, encrypted SQLCipher database, vanilla JS single-page UI. Current version: see `VERSION` in `homecoin/app.py` (2.4.1 at the time of writing).
 
 ## Hard rules
 
@@ -11,7 +11,7 @@ Guidance for Claude Code when working in this repository. Household finance app 
 - **Updates are signed.** Never weaken `updater.py`: Ed25519 signature on the manifest with the embedded `PUBLIC_KEY`, newer version only, size + SHA-256 of every file, ZIP paths validated, git working trees never updated. The private key lives outside the repository (maintainer only); changing `PUBLIC_KEY` cuts off every installed copy.
 - Do not commit or push without the maintainer's confirmation.
 - **Honest attribution, everywhere:** every idea, feature, concept and design choice is the maintainer's (Starkark98); the code is written with the support of Claude Code. The project is free; its purpose is to help people take care of their money and build good habits (not charity). Never invent other purposes.
-- **The README is the user guide** (the in-app *Help* opens it): plain English, step by step, and the correct technical term next to each plain explanation (e.g. "the annual return that accounts for when you added money: XIRR, a money-weighted return"). Accessible but professional. **Every change to the software updates the guide in the same change**: the feature's section, the screenshots when the UI changes (`dev\shots\capture.ps1` on the demo, maintainer side), the contents list. The guide follows the app menu: basics → Everyday → Planning → Wealth → Tools → Your data. It must always match the current software. The "Why it exists" text is the maintainer's own words: never rewrite it.
+- **The README is the user guide** (the in-app *Help* opens it): plain English, step by step, and the correct technical term next to each plain explanation (e.g. "the annual return that accounts for when you added money: XIRR, a money-weighted return"). Accessible but professional. **Every change to the software updates the guide in the same change**: the feature's section, the screenshots when the UI changes (`dev\shots\capture.ps1` on the demo, maintainer side), the contents list. The guide follows the app menu: basics → Everyday → Planning → Wealth → Tools → Your data. Each page has the same structure: **What it is for** → screenshot → **What you see** → **What you can do** → **Tips**; long technical parts go in `<details>` boxes; new terms go in the Glossary. One screenshot per page (`docs/images/NN-page.png`, numbered in menu order, made by the maintainer's capture script on the demo). It must always match the current software. The "Why it exists" text is the maintainer's own words: never rewrite it.
 
 ## Commands (Windows, PowerShell)
 
@@ -92,6 +92,7 @@ Key concepts:
 - **Updates** (1.2.1): `GET /api/update` (`?check=1` now, `?auto=1` at most every 20 h if `update_auto`), `PUT /api/update/settings`, `POST /api/update/apply` (session only: `/api/update*` is closed to the import code; backup `*-update.db` first; then exit via `HC_EXIT`, restart via `HC_RESTART` in tests). Settings keys `update_auto`, `update_checked`, `update_info` (global). UI: `loadUpdate()`, chip `#update-chip`, dot `#nav-update-dot`, Settings → Updates tab.
 - **UI layout** (1.2.1): sidebar groups Everyday / Planning / Wealth / Tools (`.nav-group`, hidden when empty); rare actions in the top-right **⋯** menu; Settings tabs `SETTINGS_TABS` (`#/impostazioni?tab=general|spaces|security|data|updates`). New settings go in the tab where a user would look for them; keep the top bar for daily actions only.
 - **Space color** (1.3.1): `applySpaceColor()` sets `--space`/`--space-ink`/`--space-fill`; used only for small "where am I" accents (active menu item, `#quick-add`, selected `.seg` tab line, `.toast.space`). Semantic colors (warnings, income/expense, charts, confirm buttons) never follow the space.
+- **Page rendering** (2.4.x): `route()` gives each page its own box inside `#view` and a sequence number (`routeSeq`): a slower page opened earlier writes into a detached box, so it can never overwrite the newer page or show its error there. Render functions keep writing into the `v` they receive.
 - **Redraws keep the focus** (1.3.1): `snapFocus()`/`restoreFocus()` around `route()` and calculators that re-render their own inputs (rebalancing); give re-rendered inputs an id or `data-k` + class so they can be found again.
 - **Calculator warnings** (1.2.2): tools return `warnings`/`notes` lists of `{level: 'warn'|'info', text}` for what can make a result misleading (missing or stale prices, data gaps, inputs that cannot be acted on); the UI shows them with `calcNotes()`. Hard errors stay 400s; a new calculator gets both.
 - **Demo** (`homecoin/demo.py`): must keep showing every feature with made-up data; when a feature is added, add sample data for it. `GET /api/demo/statement.csv` (demo only) feeds Import → "Try it with a sample bank statement".
@@ -120,7 +121,7 @@ Key concepts:
 
 ## Known gaps
 
-- No automated tests in the repo: the maintainer keeps a regression + fuzz suite outside it (made-up data only); last full run on 2.4.0.
+- No automated tests in the repo: the maintainer keeps a regression + fuzz suite outside it (made-up data only); last full run on 2.4.1.
 - Automatic updates only work once the GitHub repository is public (the API returns 404 for a private one without a token) and for releases published with their signed manifest.
 - `util.STOPWORDS` contains Italian bank words only (adding English ones would change payee keys of existing data).
 - Activity-log rows written before the translation stay in Italian; old investment-plan notes may read half Italian, half English. Category names are not renamed when the language changes.

@@ -978,7 +978,7 @@
 "Last 36 months": "過去36か月",
 "Last 6 months": "過去6か月",
 "Last 7 days": "過去7日",
-"last checked": "最終確認",
+"last checked {date} at {time}": "最終確認 {date} {time}",
 "Last downloaded: <b>{date}</b>": "最終ダウンロード：<b>{date}</b>",
 "Last installment": "最終返済",
 "Last month": "先月",

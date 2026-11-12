@@ -817,6 +817,7 @@ function currentRoute() {
   const [path, query] = location.hash.replace(/^#\/?/, '').split('?');
   return { key: ROUTES[path] ? path : 'dashboard', params: new URLSearchParams(query || '') };
 }
+let routeSeq = 0;  // the page being shown: a slower page opened before it must not overwrite it
 async function route() {
   const { key, params } = currentRoute();
   if (S.portfolio && !featureOn(key)) { location.hash = '#/dashboard'; return; }  // tab hidden in this space
@@ -826,14 +827,20 @@ async function route() {
   $$('#nav a').forEach((a) => a.classList.toggle('active', a.dataset.route === key));
   $('#page-title').textContent = title;
   $('#page-sub').textContent = S.portfolio ? `${S.portfolio.name} · ${sub}` : sub;
-  const v = $('#view');
-  const focus = snapFocus(v);
+  const view = $('#view');
+  const focus = snapFocus(view);
+  // each page renders into its own box: if another page is opened before this one has finished loading, this box is
+  // already detached, so the slower page can no longer overwrite the newer one (or show its error on it)
+  const seq = ++routeSeq;
+  const v = document.createElement('div');
+  v.style.display = 'contents';
   v.innerHTML = `<div class="loading">${T('Loading…')}</div>`;
+  view.replaceChildren(v);
   try {
     await render(v, params);
-    restoreFocus(v, focus);
+    if (seq === routeSeq) restoreFocus(v, focus);
   } catch (e) {
-    v.innerHTML = `<div class="card empty"><div class="big">😕</div><h3>${T('Something went wrong')}</h3><p>${esc(e.message)}</p></div>`;
+    if (seq === routeSeq) v.innerHTML = `<div class="card empty"><div class="big">😕</div><h3>${T('Something went wrong')}</h3><p>${esc(e.message)}</p></div>`;
   }
 }
 const refresh = async () => { await loadMeta(); await route(); };
@@ -2368,7 +2375,7 @@ async function renderRipartizione(v) {
         <div class="kpi g-amber"><div class="k-label">½ ${T('Split equally')}</div><div class="k-value">${money(r.equal_total)}</div><div class="k-sub">${T('{amount} each', { amount: money(r.equal_total / (r.people.length || 1)) })}</div></div>
         <div class="kpi g-rose"><div class="k-label">⚖️ ${T('Proportional')}</div><div class="k-value">${money(r.prop_total)}</div><div class="k-sub">${r.excluded_total ? T('excluded {amount}', { amount: money(r.excluded_total) }) : T('no excluded categories')}</div></div>
       </div>
-      <div class="grid-2">
+      <div class="sp-stack">
         <div class="card"><div class="card-head"><h3>💸 ${T('Proposed monthly contributions')}</h3><button class="btn btn-sm btn-primary" id="sp-apply">${T('Update recurring contributions')}</button></div>
           <div class="table-wrap"><table class="sp-table">
             <thead><tr><th>${T('Account')}</th><th>${T('Person')}</th><th class="right">${T('Proposed / month')}</th><th class="right">${T('Paid in the period')}</th><th class="right">÷ ${tn('{n} month', '{n} months', r.months)}</th><th class="right">${T('Difference')}</th></tr></thead>
@@ -3018,7 +3025,7 @@ async function renderObiettivi(v) {
       <div class="rec-progress"><div class="top small"><span>${T('{percent} reached', { percent: pct(gl.progress) })}</span><span class="muted">${T('{amount} to go', { amount: money0(gl.missing) })}</span></div>
         <div class="bar"><i style="width:${(gl.progress * 100).toFixed(1)}%"></i></div></div>
       <div class="rec-stats">${gl.target_date ? `<div class="rec-stat"><span>${T('Per month')}</span><b>${money0(gl.monthly_needed)}</b></div><div class="rec-stat"><span>${T('Months')}</span><b>${gl.months_left}</b></div>` : `<div class="rec-stat"><span>${T('Deadline')}</span><b>${T('none')}</b></div><div class="rec-stat"><span></span><b></b></div>`}
-        <div class="rec-stat"><span>${gl.per_person ? T('Each') : ''}</span><b>${gl.per_person ? gl.per_person.map((p) => `${esc(p.name.slice(0, 4))} ${money0(p.monthly)}`).join(' · ') : ''}</b></div></div>
+        <div class="rec-stat"><span>${gl.per_person ? T('Each') : ''}</span><b>${gl.per_person ? gl.per_person.map((p) => `${esc(p.name)} ${money0(p.monthly)}`).join(' · ') : ''}</b></div></div>
       ${calcNotes(gl.notes)}
       <div class="rec-actions"><button class="btn btn-sm" data-gl="${gl.id}">✏️ ${T('Edit')}</button></div></div>`).join('')
       || `<div class="card empty"><div class="big">🏁</div><h3>${T('No goals')}</h3><p>${family ? T('Holiday, new car, home improvements…') : T('Trip, car, course, home down payment…')} ${T('Set the amount and the date: HomeCoin calculates how much to set aside each month')}${family ? T(' and each person\'s share based on income') : ''}.</p></div>`}</div>`;
@@ -3926,7 +3933,7 @@ function updatePane() {
   if (!u) return `<div class="card"><div class="empty">${T('The update status could not be read')}</div></div>`;
   if (u.demo) return `<div class="card empty"><div class="big">🔄</div><h3>${T('Updates are off in the demo')}</h3>
     <p>${T('The demo works offline with made-up data. In your own HomeCoin this tab checks GitHub for new versions and installs them after verifying their signature.')}</p></div>`;
-  const when = u.checked ? `${T('last checked')} ${esc(fmtDate(u.checked.slice(0, 10)))} at ${esc(u.checked.slice(11, 16))}` : T('not checked yet');
+  const when = u.checked ? T('last checked {date} at {time}', { date: esc(fmtDate(u.checked.slice(0, 10))), time: esc(u.checked.slice(11, 16)) }) : T('not checked yet');
   const status = u.error ? `<span class="tag warn">${T('could not check')}</span> ${esc(u.error)}`
     : u.available ? `<span class="tag ai">${T('version {version} is available', { version: esc(u.latest) })}</span>` : u.checked ? `<span class="tag ok">✔ ${T('up to date')}</span>` : '';
   const how = { installer: T('The new installer runs by itself in the background and HomeCoin reopens.'),

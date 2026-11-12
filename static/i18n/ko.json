@@ -960,7 +960,7 @@
 "Last 36 months": "최근 36개월",
 "Last 6 months": "최근 6개월",
 "Last 7 days": "최근 7일",
-"last checked": "마지막 확인",
+"last checked {date} at {time}": "마지막 확인 {date} {time}",
 "Last downloaded: <b>{date}</b>": "마지막 다운로드: <b>{date}</b>",
 "Last installment": "마지막 회차",
 "Last month": "지난달",
