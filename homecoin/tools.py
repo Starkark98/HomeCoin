@@ -549,16 +549,31 @@ def idle_cash(db, account, cash, value, today=None):
     return {"since": since, "days": days, "cash": cash} if days >= IDLE_DAYS else None
 
 
+def opening_date(db, account):
+    """Date the opening balance of an account refers to: there is no such field, so the oldest of its first transaction,
+    first valuation, first trade and creation date."""
+    a = account["id"]
+    dates = [db.execute("SELECT MIN(date) FROM transactions WHERE account_id = ? OR to_account_id = ?", (a, a)).fetchone()[0],
+             db.execute("SELECT MIN(date) FROM valuations WHERE account_id = ?", (a,)).fetchone()[0],
+             db.execute("SELECT MIN(date) FROM trades WHERE account_id = ?", (a,)).fetchone()[0],
+             (account["created_at"] or "")[:10] or None]
+    return min(d for d in dates if d) if any(dates) else dt.date.today().isoformat()
+
+
 def investments(db, pid, months=24):
     accs = [a for a in pf_accounts(db, pid) if a["type"] == INVEST]
     mv = market_values(db, pid)
     out, all_flows, total_value, total_in = [], [], 0, 0
     alloc = {}
+    opening = {}  # account id → (date, opening balance): money already in the account counts as capital put in
     for a in accs:
         flows = [dict(r) for r in db.execute(
             """SELECT date, CASE WHEN (kind = 'transfer' AND to_account_id = :a) OR (kind = 'income' AND account_id = :a)
                                  THEN amount ELSE -amount END AS v
                FROM transactions WHERE account_id = :a OR to_account_id = :a ORDER BY date""", {"a": a["id"]})]
+        if a["initial_balance"]:
+            opening[a["id"]] = (opening_date(db, a), a["initial_balance"])
+            flows.insert(0, {"date": opening[a["id"]][0], "v": a["initial_balance"]})
         invested = sum(f["v"] for f in flows)
         value = mv[a["id"]]["value"]
         vals = [dict(v) for v in db.execute("SELECT id, date, value, source FROM valuations WHERE account_id = ? ORDER BY date",
@@ -606,6 +621,8 @@ def investments(db, pid, months=24):
                                        THEN amount ELSE -amount END), 0)
                    FROM transactions WHERE (account_id=:a OR to_account_id=:a) AND date <= :d""",
                 {"a": a["id"], "d": end.isoformat()}).fetchone()[0]
+            if a["id"] in opening and opening[a["id"]][0] <= end.isoformat():
+                inv += opening[a["id"]][1]
             val += market_values(db, pid, end).get(a["id"], {"value": 0})["value"]
         series.append({"month": ym, "invested": inv, "value": val})
     from .services import pac_pending

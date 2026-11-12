@@ -2,7 +2,7 @@
 
 # HomeCoin *by Starkark98*
 
-![Version](https://img.shields.io/badge/version-2.3.0-8b5cf6)
+![Version](https://img.shields.io/badge/version-2.4.0-8b5cf6)
 ![Python](https://img.shields.io/badge/Python-3.12%20%7C%203.13%20%7C%203.14-3776AB?logo=python&logoColor=white)
 ![Platform](https://img.shields.io/badge/platform-Windows-0078D6)
 ![Data](https://img.shields.io/badge/data-encrypted%2C%20on%20your%20PC-16a34a)
@@ -49,9 +49,9 @@ Starkark98
 
 **Guide** (same order as the app menu)
 - *The basics:* [How HomeCoin is organized](#how-homecoin-is-organized) · [Language and currency](#language-and-currency) · [Typing amounts and dates](#typing-amounts-and-dates) · [Spaces](#spaces) · [Dashboard](#dashboard)
-- *Everyday:* [Transactions](#transactions) · [Accounts](#accounts) · [Recurring payments](#recurring-payments) · [Calendar](#calendar)
+- *Everyday:* [Transactions](#transactions) · [Accounts](#accounts) · [Recurring payments](#recurring-payments) · [Calendar](#calendar) · [Reports](#reports)
 - *Planning:* [Budgets](#budgets) · [Goals](#goals) · [Emergency fund](#emergency-fund) · [Mortgage and loans](#mortgage-and-loans) · [Fair split](#fair-split)
-- *Wealth:* [Investments](#investments) (with [Rebalancing](#rebalancing)) · [Savings](#savings) · [Reports](#reports)
+- *Wealth:* [Investments](#investments) (with [Rebalancing](#rebalancing)) · [Savings](#savings)
 - *Tools:* [Importing bank statements](#importing-bank-statements) · [Categories and rules](#categories-and-rules) · [Activity log](#activity-log) · [Settings](#settings)
 
 **Your data**
@@ -144,9 +144,9 @@ The guide follows the menu of the app: first the basics, then the pages of each 
 ### How HomeCoin is organized
 
 - **Left menu**, grouped by what you do:
-  - **Everyday:** Transactions, Accounts, Recurring, Calendar
+  - **Everyday:** Transactions, Accounts, Recurring, Calendar, Reports
   - **Planning:** Budgets, Goals, Emergency fund, Mortgage, Fair split
-  - **Wealth:** Investments, Savings, Reports
+  - **Wealth:** Investments, Savings
   - **Tools:** Import, Categories, Activity log, Settings
 - **Top left:** the space you are in, and the switch to the others.
 - **Bottom left:** the version of HomeCoin you are using.
@@ -255,10 +255,11 @@ Add every place where you keep money: current accounts, savings accounts, credit
 
 Payments that repeat — rent, mortgage, loans, bills, subscriptions, salary, transfers to savings — are set up once in **Recurring**. On each due date HomeCoin records the transaction for you. At the top, the three kinds as a monthly amount: fixed expenses, fixed income (with the margin left each month) and fixed transfers (with those coming in from other spaces). The remaining debt of loans is in Mortgage and loans.
 
+- **Each card** shows the amount and the next date, then on one line the monthly equivalent, the start and end dates and how many payments were recorded; below, the buttons for its transactions, pause and edit.
 - **Frequency:** weekly, monthly, every 2, 3 or 6 months, yearly.
 - **Loans in installments:** add the number of installments, the amount borrowed and the rate, and the loan appears in [Mortgage and loans](#mortgage-and-loans). With *constant principal* repayment you don't type the amount: HomeCoin records each installment with its own amount, taken from the schedule.
 - **Investment plans** (regular savings plans, also known as dollar-cost averaging; *PAC* in Italy): a monthly transfer to an investment account can buy units of a security automatically, at an estimated price; HomeCoin reminds you to confirm the real price later.
-- **Variable items** (a bill or salary that changes a little every time): mark them as *expected*. HomeCoin does not record them by itself: it links the real transaction when it arrives (by a keyword in the description) and forecasts the next amount as the median (the middle value) of the last six payments. After a raise or a new tariff you can tell it to use the amount you set instead, until the median catches up. If a payment is more than a week late, you get a warning.
+- **Variable items** (a bill or salary that changes a little every time): mark them as *expected*. HomeCoin does not record them by itself: it links the real transaction when it arrives (by a keyword in the description) and forecasts the next amount as the median (the middle value) of the last six payments. After a raise or a new tariff you can tell it to use the amount you set instead, until the median catches up. If a payment is more than a week late, you get a warning. The card shows the expected date itself (it does not move while you wait); when the money arrives, **＋ Record the one that arrived** on the card opens a new transaction already filled in like the item: correct the real amount and date, save, and it is linked.
 - Pausing an item or changing its dates never creates payments in the past by surprise.
 - **Recurring transfers between spaces** (for example your monthly share to the household account) are one item, set up in the space the money leaves. Choose *Transfer* and answer *Where does the money go?*: *To another space* shows only the accounts of the other spaces. The receiving space shows the item too, marked *from …, read only*. It can be changed only where it was created, so the same money is never planned twice.
 - **Reconcile** (on such a recurring transfer, and proposed when you save one): HomeCoin looks for the same money already recorded in other ways (similar amount, close date) and proposes, line by line:
@@ -275,6 +276,13 @@ A **cash-flow forecast**: the payments of the coming months — confirmed recurr
 
 ![Calendar](docs/images/05-calendar.png)
 *Calendar: confirmed and estimated payments, with the cash left after each one.*
+
+### Reports
+
+Categories month by month as a table (heatmap) and a chart, with averages, from one month to the whole history; export to Excel.
+
+![Reports](docs/images/07-reports.png)
+*Reports: categories month by month (heatmap), with averages.*
 
 ## Planning
 
@@ -367,7 +375,7 @@ For investment accounts (broker, pension fund…) there are two ways to work, an
 
 You then see:
 - the **value over time against the money you put in** (net contributions);
-- the **gain** (value minus contributions) and the **return** in % (gain divided by contributions);
+- the **gain** (value minus contributions) and the **return** in % (gain divided by contributions). Money that was already in the account when you added it to HomeCoin (its opening balance) counts as money you put in, not as gain;
 - the **XIRR**, the annual return that takes into account *when* you added or withdrew money (a money-weighted return, comparable between accounts of different ages);
 - the **asset allocation**: how your money is split among stocks, bonds, money market, commodities, cash and the rest.
 
@@ -388,14 +396,7 @@ Over time some investments grow faster than others and your portfolio drifts awa
 
 ### Savings
 
-Month by month: how much of your income you **saved** (income minus spending; as a share of income it is your **savings rate**), how much you **invested** (purchases minus sales of securities, money market funds excluded), and your **net worth** over time. Money market funds count as cash.
-
-### Reports
-
-Categories month by month as a table (heatmap) and a chart, with averages, from one month to the whole history; export to Excel.
-
-![Reports](docs/images/07-reports.png)
-*Reports: categories month by month (heatmap), with averages.*
+Month by month: how much of your income you **saved** (income minus spending; as a share of income it is your **savings rate**), how much you **invested** (purchases minus sales of securities, money market funds excluded), and your **net worth** over time. Money market funds count as cash. The current month is marked *in progress*: until it is over, its income may not have arrived yet, so its result is not a final one.
 
 ## Tools
 
@@ -638,4 +639,4 @@ Any copy or modified version must keep the [LICENSE](LICENSE) file, including th
 
 ---
 
-*HomeCoin by **Starkark98** · v2.3.0 · see the [changelog](CHANGELOG.md)*
+*HomeCoin by **Starkark98** · v2.4.0 · see the [changelog](CHANGELOG.md)*

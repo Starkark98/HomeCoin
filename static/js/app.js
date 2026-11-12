@@ -807,7 +807,7 @@ const ROUTES = {
   investimenti: [T('Investments'), T('Value, contributions and return of the investment accounts'), renderInvestimenti],
   risparmio: [T('Savings'), T('Savings rate and net worth'), renderRisparmio],
   obiettivi: [T('Goals'), T('Savings targets and how much to set aside each month'), renderObiettivi],
-  emergenza: [T('Emergency fund'), T('How many months of expenses the available reserve covers (accounts + broker cash and money market funds)'), renderEmergenza],
+  emergenza: [T('Emergency fund'), T('How many months of expenses your reserve covers'), renderEmergenza],
   calendario: [T('Calendar'), T('Due dates for the coming months and projected balance'), renderCalendario],
   categorie: [T('Categories'), T('Categories, budgets and automatic rules'), renderCategorie],
   registro: [T('Activity log'), T('Sign-ins, changes and important deletions over the last 12 months'), renderRegistro],
@@ -1288,6 +1288,7 @@ function txModal(tx = null, defaults = {}) {
       }
       if (res.warning) toast(res.warning, 'info');
       else toast(editing ? T('Transaction updated') : T('Transaction recorded ✓'));
+      if (defaults.afterSave) await defaults.afterSave(res);
       await loadMeta();
       if (again) { txModal(null, { kind, date: body.date, account_id: body.account_id }); } else closeModal();
       route();
@@ -1527,6 +1528,12 @@ async function renderRicorrenti(v) {
     const r = list.find((x) => x.id === +b.dataset.id);
     if (b.dataset.r === 'tx') location.hash = '#/movimenti?recurring_id=' + r.id;
     if (r.incoming) return;  // changed only in the space that created it
+    // a variable item that arrived: a new transaction filled in like it (the keyword in the description links it);
+    // the real date and amount are the user's, the item's next expected date follows from it
+    if (b.dataset.r === 'arrived') txModal(null, {
+      kind: r.kind, account_id: r.account_id, category_id: r.category_id, description: r.match_text || r.name,
+      amount: r.expected_amount, date: todayIso(), afterSave: () => api('/recurring/run', { method: 'POST' }),
+    });
     if (b.dataset.r === 'edit') recurringModal(r);
     if (b.dataset.r === 'reconcile') { await reconcileModal(r.id); refresh(); }
     if (b.dataset.r === 'toggle') {
@@ -1607,16 +1614,15 @@ function recCard(r) {
   const progress = r.installments
     ? `<div class="top small"><span>${T('Installment <b>{paid}</b> of {total}', { paid: r.paid, total: r.installments })}</span><span class="muted">${pct(r.progress)}</span></div>
        <div class="bar"><i style="width:${(r.progress * 100).toFixed(1)}%"></i></div>`
-    : r.expected ? `<div class="top small"><span>≈ ${T('Variable amount and date')}${r.match_text ? ` · «${esc(r.match_text)}»` : ''}</span><span class="muted">${tn('{n} linked', '{n} linked', r.generated)}</span></div>
-       <div class="bar bar-flat"></div>`
-    : `<div class="top small"><span>${T('Ongoing recurring item')}</span><span class="muted">${tn('{n} recorded', '{n} recorded', r.generated)}</span></div>
-       <div class="bar bar-flat"></div>`;
+    : r.expected ? `<div class="top small"><span>≈ ${T('Variable amount and date')}${r.match_text ? ` · «${esc(r.match_text)}»` : ''}</span><span class="muted">${tn('{n} linked', '{n} linked', r.generated)}</span></div>`
+    : '';  // ongoing item: how many were recorded is in the stats line
   const stats = r.expected
     ? stat(r.expected_source === 'fixed' ? T('Expected (set)') : r.expected_source === 'set' ? T('Expected (typical)') : tn('Expected (median of {n})', 'Expected (median of {n})', r.expected_count), money(r.expected_amount))
       + stat(T('Range'), r.expected_count > 1 ? `${money0(r.expected_min)}–${money0(r.expected_max)}` : '—') + stat(T('Last'), r.last_date ? fmtDate(r.last_date) : '—')
     : r.installments
     ? stat(T('Remaining'), money(r.remaining_amount)) + stat(T('Last installment'), fmtDate(r.last_date)) + stat(T('Interest'), r.principal ? (r.interest > 0 ? money(r.interest) : T('0% rate')) : '—')
-    : stat(T('Per month'), money(r.monthly_equivalent)) + stat(T('From'), fmtDate(r.start_date)) + stat(T('Until'), r.end_date ? fmtDate(r.end_date) : '—');
+    : stat(T('Per month'), money(r.monthly_equivalent)) + stat(T('From'), fmtDate(r.start_date)) + stat(T('Until'), r.end_date ? fmtDate(r.end_date) : '—')
+      + stat(T('Recorded'), r.generated);
   return `<div class="card rec-card ${r.active ? '' : 'paused'}">
     <div class="rec-head"><div class="cat-ico" style="--c:${esc(color)}">${esc(ico)}</div>
       <div class="grow" style="min-width:0"><div class="title ellipsis" title="${esc(r.name)}">${esc(r.name)}</div>
@@ -1625,12 +1631,13 @@ function recCard(r) {
       <span>${T('buys')} <b>${esc(r.holding_ticker || '')}</b> <span class="muted">${esc(r.holding_name || '')}</span></span>
       ${r.pac_unverified ? `<a class="tag warn" href="#/investimenti" title="${esc(T('Purchases with an estimated price for more than 30 days'))}">⚠️ ${tn('{n} price to verify', '{n} prices to verify', r.pac_unverified)}</a>` : ''}</div>` : ''}
     <div class="rec-line"><span class="rec-amount amount ${r.kind}">${r.expected ? '≈ ' + money(r.expected_amount) : money(r.amount)}</span><span class="rec-next">${status}</span></div>
-    <div class="rec-progress">${progress}</div>
+    ${progress ? `<div class="rec-progress">${progress}</div>` : ''}
     <div class="rec-stats">${stats}</div>
     ${r.incoming
     ? `<div class="rec-actions"><span class="tag" title="${esc(T('It can be changed only in the space that created it'))}">↘ ${T('From {space} · read only', { space: esc(r.from_space) })}</span>
         <button class="btn btn-sm btn-ghost" data-r="tx" data-id="${r.id}">📄 ${T('Transactions')}</button></div></div>`
-    : `<div class="rec-actions"><button class="btn btn-sm btn-ghost" data-r="tx" data-id="${r.id}">📄 ${T('Transactions')}</button>
+    : `<div class="rec-actions">${r.expected && r.active ? `<button class="btn btn-sm btn-primary" data-r="arrived" data-id="${r.id}" title="${esc(T('A new transaction already filled in: correct the real amount and date, it is linked to this recurring item'))}">＋ ${T('Record the one that arrived')}</button>` : ''}
+      <button class="btn btn-sm btn-ghost" data-r="tx" data-id="${r.id}">📄 ${T('Transactions')}</button>
       ${toOtherSpace(r) ? `<button class="btn btn-sm btn-ghost" data-r="reconcile" data-id="${r.id}" title="${esc(T('Find the same money recorded in other ways in both spaces'))}">🔗 ${T('Reconcile')}</button>` : ''}
       <button class="btn btn-sm btn-ghost" data-r="toggle" data-id="${r.id}">${r.active ? T('⏸ Pause') : T('▶ Resume')}</button>
       <button class="btn btn-sm" data-r="edit" data-id="${r.id}">✏️ ${T('Edit')}</button></div></div>`}`;
@@ -2850,7 +2857,7 @@ async function renderBudget(v) {
     return `<tr><td><span class="pill quick-filter" style="--c:${esc(c.color)}" ${txLink({ category_id: c.id, kind: 'expense', ...monthBounds(S.budgetMonth), excluded: 0 })}>${esc(c.icon)} ${esc(c.name)}</span></td>
       <td><input class="bd-input" data-cat="${c.id}" inputmode="decimal" value="${c.budget ? moneyInput(c.budget) : ''}" placeholder="—"></td>
       <td class="right"><b>${money0(c.spent)}</b></td><td class="right muted">${money0(c.avg)}</td>
-      <td style="min-width:160px">${c.budget ? `<div class="bar ${r > 1 ? 'over' : ''}"><i style="width:${Math.min(100, r * 100).toFixed(1)}%"></i></div><div class="muted small">${T('{percent} of budget', { percent: pct(r) })}</div>` : `<button class="btn btn-sm btn-ghost" data-suggest="${c.id}" data-v="${Math.ceil(c.avg / 1000) * 1000}" ${c.avg ? '' : 'disabled'}>${T('Use the average ({amount})', { amount: money0(Math.ceil(c.avg / 1000) * 1000) })}</button>`}</td>
+      <td style="min-width:160px">${c.budget ? `<div class="bar ${r > 1 ? 'over' : ''}"><i style="width:${Math.min(100, r * 100).toFixed(1)}%"></i></div><div class="muted small">${T('{percent} of budget', { percent: pct(r) })}</div>` : c.avg ? `<button class="btn btn-sm btn-ghost" data-suggest="${c.id}" data-v="${Math.ceil(c.avg / 1000) * 1000}">${T('Use the average ({amount})', { amount: money0(Math.ceil(c.avg / 1000) * 1000) })}</button>` : ''}</td>
       <td>${state}</td></tr>`;
   };
   v.innerHTML = `
@@ -3461,9 +3468,13 @@ async function renderRisparmio(v) {
       <div class="card"><div class="card-head"><h3>${T('Net worth')}</h3></div><div class="chart-box"><canvas id="sv-nw"></canvas></div></div>
     </div>
     <div class="card"><div class="table-wrap"><table class="sp-table"><thead><tr><th>${T('Month')}</th><th class="right">${T('Income')}</th><th class="right">${T('Spent')}</th><th class="right">${T('Other spaces')}</th><th class="right">${T('Saved')}</th><th class="right">${T('Savings rate')}</th><th class="right">${T('Invested in securities')}</th></tr></thead>
-      <tbody>${rows.slice().reverse().map((r) => `<tr><td>${fmtMonth(r.month)}</td><td class="right"><b>${money0(r.income + r.from_others)}</b></td><td class="right">${money0(r.expense)}</td>
-        <td class="right">${signed(r.to_others)}</td><td class="right ${r.saved >= 0 ? 'pos' : 'neg'}"><b>${signed(r.saved)}</b></td>
-        <td class="right">${r.rate == null ? '—' : pct(r.rate)}</td><td class="right ${r.invested < 0 ? 'neg' : ''}">${signed(r.invested)}</td></tr>`).join('')}</tbody></table></div></div>`;
+      <tbody>${rows.slice().reverse().map((r) => {
+        // the current month is not over: income may still arrive, so its saved amount is not a result (no red)
+        const now = r.month === todayIso().slice(0, 7);
+        return `<tr class="${now ? 'muted' : ''}"><td>${fmtMonth(r.month)}${now ? ` <span class="tag" title="${esc(T('The month is not over: income and expenses may still arrive'))}">${T('in progress')}</span>` : ''}</td><td class="right"><b>${money0(r.income + r.from_others)}</b></td><td class="right">${money0(r.expense)}</td>
+        <td class="right">${signed(r.to_others)}</td><td class="right ${now ? '' : r.saved >= 0 ? 'pos' : 'neg'}"><b>${signed(r.saved)}</b></td>
+        <td class="right">${r.rate == null || now ? '—' : pct(r.rate)}</td><td class="right ${r.invested < 0 ? 'neg' : ''}">${signed(r.invested)}</td></tr>`;
+      }).join('')}</tbody></table></div></div>`;
   $('#sv-months').onchange = (e) => { S.savMonths = e.target.value; route(); };
   const labels = rows.map((r) => fmtMonth(r.month));
   const bar = (label, key, color) => ({ type: 'bar', label, data: rows.map((r) => r[key]), backgroundColor: color, stack: 's', maxBarThickness: 34 });
@@ -3619,7 +3630,7 @@ async function renderImpostazioni(v, params) {
         <div style="width:220px;flex:none">${currencySelect('s-cur', CUR)}</div></div>
       ${S.currencyUnavailable ? `<div class="settings-row"><p class="small" style="margin:0"><span class="tag warn">⚠️</span> ${esc(T('The currency {code} saved in your data is no longer available: amounts are shown in euro. Choose the currency of your accounts above.', { code: S.currencyUnavailable }))}</p></div>` : ''}
       <div class="settings-row"><div><b>${T('Hide amounts')}</b><p class="muted small">${T('The eye at the top blurs every amount, for when someone is looking at the screen')}</p></div></div>
-      <div class="settings-row"><div><b>${T('Shortcuts')}</b><p class="muted small"><span class="kbd">N</span> ${T('new transaction ·')} <span class="kbd">Esc</span> ${T('closes dialogs')}</p></div></div>
+      <div class="settings-row"><div><b>${T('Shortcuts')}</b><p class="muted small">${T('{key_n} new transaction · {key_esc} closes dialogs', { key_n: '<span class="kbd">N</span>', key_esc: '<span class="kbd">Esc</span>' })}</p></div></div>
     </div>
     <div class="card"><div class="card-head"><h3>🪙 ${T('About HomeCoin')}</h3></div>
       <div class="settings-row"><div><b>HomeCoin ${esc(S.version)}</b><p class="muted small">${S.update?.available ? `<span class="tag ai">${T('version {version} available', { version: esc(S.update.latest) })}</span>` : T('Household finances on your own PC, by Starkark98')}</p></div><a class="btn btn-sm" href="#/impostazioni?tab=updates">🔄 ${T('Updates')}</a></div>
@@ -3655,7 +3666,7 @@ async function renderImpostazioni(v, params) {
     </div></div>`,
     data: `<div class="grid-2">
     <div class="card"><div class="card-head"><h3>💾 ${T('Backup and restore')}</h3></div>
-      <div class="settings-row"><div><b>${T('Download full backup')}</b><p class="muted small">${T('Encrypted')} <code>.hcbackup</code> ${T('file: it opens only with the current password (or recovery key). Keep a copy outside this PC (USB drive, cloud): the automatic backups below stay in the same folder as the data.')}
+      <div class="settings-row"><div><b>${T('Download full backup')}</b><p class="muted small">${T('Encrypted {file} file: it opens only with the current password (or recovery key). Keep a copy outside this PC (USB drive, cloud): the automatic backups below stay in the same folder as the data.', { file: '<code>.hcbackup</code>' })}
         <br>${backupAge()}</p></div><a class="btn btn-sm" href="/api/backup" id="s-backup">⬇ ${T('Backup')}</a></div>
       <div class="settings-row"><div><b>${T('Restore from backup')}</b><p class="muted small">${T('Replaces all current data (a copy is saved first). Old .json backups are accepted too')}</p></div>
         <label class="btn btn-sm">⬆ ${T('Restore')}<input type="file" id="s-restore" accept=".hcbackup,.json" hidden></label></div>

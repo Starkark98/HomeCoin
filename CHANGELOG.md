@@ -2,6 +2,15 @@
 
 All notable changes to HomeCoin are listed here, newest first.
 
+## 2.4.0 — 2026-11-12
+
+- **Variable recurring items keep their expected date**: while waiting for a payment that has not arrived yet, the card showed today as its date, so it moved one day forward every day; now it shows the expected date (and "expected since" after a week). New **＋ Record the one that arrived** on the card: a new transaction already filled in like the item, to correct with the real amount and date; it is linked to the item.
+- **Investments: the opening balance counts as money put in.** Money already in an investment account when it was added (for example a pension fund with years of history) was counted as gain, so gain, return and XIRR came out far too high; now it counts as a contribution made when the account starts.
+- **Tidier screens:** compact recurring cards (monthly amount, dates and payments recorded on one line, smaller buttons); full category names in the chart legends of Dashboard and Reports; the current month in Savings is marked *in progress* instead of showing a loss before the salary arrives; shorter Emergency fund subtitle; the date column of Transactions is no longer cut; *Use the average* is offered in Budgets only when there is an average.
+- **Reports moved to Everyday** in the menu (after Calendar), next to the pages about where the money goes; the guide follows the new order.
+- Two texts in Settings (shortcuts, full backup) are now whole sentences in every language.
+- Demo: sample descriptions now match their categories.
+
 ## 2.3.0 — 2026-11-11
 
 - **Turn expenses into transfers to another space** (category window → *Turn into transfers…*): money moved to another space but recorded as expenses becomes transfers, visible in both spaces. You tick the accounts the money reaches (one or more): each expense goes to the account where its money really arrived, found from the records of that space. An expense received in two accounts is split into two transfers. The rest goes to a default account or stays an expense, and every row's account can be changed. A preview comes first, row by row, with the effect on spending, savings and balances of both spaces. Money already recorded is never counted twice: similar amount and close date (adjustable, by default 2% and 5 days, up to 100% of the smaller amount and 31 days; a pairing whose amounts differ by more than 2% is only proposed, in red, until you tick it), with the best overall pairing, so repeated similar amounts are paired correctly, and any pairing can be unticked. The same income in the destination account is replaced, and an expense already recorded as a transfer to that account is deleted as a duplicate. Recurring items are never changed by themselves: the category's recurring expenses become recurring transfers only if you tick them, each to the account of its matching recurring income (or split in two), with warnings for the same money already planned elsewhere. A similar income in another account of that space is flagged, and a backup is saved before the change.

@@ -28,7 +28,7 @@ from . import updater
 from . import util
 from .util import FREQUENCIES, add_months, months_between, parse_date, parse_number, rule_matches
 
-VERSION = "2.3.0"
+VERSION = "2.4.0"
 STATIC_DIR = dbm.BASE_DIR / "static"
 KINDS = ("expense", "income", "transfer")
 ACCOUNT_TYPES = ("corrente", "risparmio", "credito", "prepagata", "contanti", "investimenti", "altro")
@@ -1726,7 +1726,8 @@ def create_app(port):
                 r.update(expected_source=st["source"], expected_median=st["median"])
                 r.update(expected_amount=st["amount"], expected_count=st["count"], expected_min=st.get("min"),
                          expected_max=st.get("max"), last_date=st["last"].isoformat() if st["last"] else None,
-                         next_date=nxt[0][0].isoformat() if nxt else None,
+                         # the expected date itself (not moved to today while waiting: it would shift every day)
+                         next_date=nxt[0][3].isoformat() if nxt else None,
                          late_since=nxt[0][3].isoformat() if nxt and nxt[0][2] else None,
                          generated=db.execute("SELECT COUNT(*) FROM transactions WHERE recurring_id = ?", (r["id"],)).fetchone()[0])
         unverified = {}  # investment plan purchases with an estimated price for more than 30 days, per recurring item

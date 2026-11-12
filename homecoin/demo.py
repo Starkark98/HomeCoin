@@ -138,8 +138,9 @@ def build(today=None):
                 for _ in range(rnd.randint(2, 4)):
                     dd = m + dt.timedelta(days=rnd.randint(7, 27))
                     if dd <= today:
-                        _tx(conn, dd, rnd.randint(300, 2500), "expense", cash, rnd.choice([rist, spesa, other_c]),
-                            rnd.choice([L("Bakery"), L("Newsstand"), L("Coffee"), L("Parking"), L("Street market")]))
+                        cat, desc = rnd.choice([(rist, L("Coffee")), (spesa, L("Bakery")), (spesa, L("Street market")),
+                                                (other_c, L("Newsstand")), (other_c, L("Parking"))])
+                        _tx(conn, dd, rnd.randint(300, 2500), "expense", cash, cat, desc)
         for m in months:
             for w in range(4):
                 d = m + dt.timedelta(days=3 + w * 7)
@@ -151,8 +152,9 @@ def build(today=None):
                     _tx(conn, d, rnd.randint(2500, 9000), "expense", comune, rist, rnd.choice([L("Pizzeria"), L("Trattoria"), L("Café")]))
             d = m + dt.timedelta(days=rnd.randint(5, 25))
             if d <= today:
-                _tx(conn, d, rnd.randint(3000, 25000), "expense", comune, rnd.choice([casa_c, trasp, salute]),
-                    rnd.choice([L("Hardware store"), L("Pharmacy"), L("Fuel"), L("Furniture"), L("Car tax")]))
+                cat, desc = rnd.choice([(casa_c, L("Hardware store")), (casa_c, L("Furniture")), (salute, L("Pharmacy")),
+                                        (trasp, L("Fuel")), (trasp, L("Car tax"))])
+                _tx(conn, d, rnd.randint(3000, 25000), "expense", comune, cat, desc)
         # a purchase made for someone else and paid back: excluded from reports, still in the balance
         _tx(conn, months[-4].replace(day=9), 38000, "expense", comune, casa_c, L("Bike bought for a friend"),
             notes=L("Paid back in cash: excluded from reports and budgets"), excluded=1)
@@ -233,8 +235,10 @@ def build(today=None):
             for _ in range(rnd.randint(2, 4)):
                 d = m + dt.timedelta(days=rnd.randint(0, 27))
                 if d <= today:
-                    name = rnd.choice(["Restaurants & bars", "Shopping & gifts", "Transport", "Books & learning"])
-                    _tx(conn, d, rnd.randint(1500, 12000), "expense", cc, cats[name], rnd.choice([L("Shop"), L("Bookstore"), L("Train"), L("Dinner"), L("Gift")]))
+                    name, desc = rnd.choice([("Restaurants & bars", L("Dinner")), ("Shopping & gifts", L("Gift")),
+                                             ("Shopping & gifts", L("Shop")), ("Transport", L("Train")),
+                                             ("Books & learning", L("Bookstore"))])
+                    _tx(conn, d, rnd.randint(1500, 12000), "expense", cc, cats[name], desc)
             # regular but variable income, without a recurring item: the Calendar estimates it from history
             d = m.replace(day=min(28, 12 + rnd.randint(-3, 3)))
             if d < today.replace(day=1):
@@ -250,8 +254,10 @@ def build(today=None):
                 if d <= today:
                     cents = rnd.randint(1500, 9000)
                     spent += cents
-                    _tx(conn, d, cents, "expense", card, cats[rnd.choice(["Shopping & gifts", "Restaurants & bars"])],
-                        rnd.choice([L("Online store"), L("Clothing"), L("Electronics"), L("Sushi bar"), L("Gift shop")]))
+                    name, desc = rnd.choice([("Shopping & gifts", L("Online store")), ("Shopping & gifts", L("Clothing")),
+                                             ("Shopping & gifts", L("Electronics")), ("Shopping & gifts", L("Gift shop")),
+                                             ("Restaurants & bars", L("Sushi bar"))])
+                    _tx(conn, d, cents, "expense", card, cats[name], desc)
             if spent and add_months(m, 1).replace(day=5) <= today:
                 _tx(conn, add_months(m, 1).replace(day=5), spent, "transfer", cc, desc=L("Credit card payment"), to=card)
             if m.month == 12 and m.replace(day=31) <= today:
