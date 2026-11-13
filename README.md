@@ -2,7 +2,7 @@
 
 # HomeCoin *by Starkark98*
 
-![Version](https://img.shields.io/badge/version-2.4.2-8b5cf6)
+![Version](https://img.shields.io/badge/version-2.4.3-8b5cf6)
 ![Python](https://img.shields.io/badge/Python-3.12%20%7C%203.13%20%7C%203.14-3776AB?logo=python&logoColor=white)
 ![Platform](https://img.shields.io/badge/platform-Windows-0078D6)
 ![Data](https://img.shields.io/badge/data-encrypted%2C%20on%20your%20PC-16a34a)
@@ -157,6 +157,7 @@ The guide follows the menu of the app: first the basics, then the pages of each 
 | **Top right** | 👁 hides all amounts (when someone is looking at your screen) · 🔒 locks HomeCoin · **⋯** light/dark theme, Settings, *Help* (this guide), *Support HomeCoin* (Ko-fi), *Close HomeCoin* · **＋ New transaction**, always there |
 | **Keyboard** | <kbd>N</kbd> adds a transaction, <kbd>Esc</kbd> closes windows and menus |
 
+- **Summary boxes.** At the top of most pages, up to four colored boxes with the key figures. The color always tells you what kind of money it is: **red** = money going out (expenses, costs, interest), **green** = money coming in (income, gains), **blue** = transfers, **yellow** = what is left (savings, margin, money still available), **violet** = balances and totals (net worth, account values, debt still to repay). Under each figure, short rows with its detail (for example *Income* and *From other spaces*); point at a box to see how it is calculated, and click a row with a link to see the transactions behind it.
 - **Click to dig in** (drill-down). Click a category, a bar of a chart or a cell of a report and you get the list of the transactions behind it.
 - **Warnings.** When something does not add up (a missing price, a date already passed, too little history for an average), HomeCoin tells you with a yellow ⚠️ or a grey ℹ️ note right where it matters.
 - **ℹ️ How it works.** Many pages have this line: click it for the explanation of how the page calculates its figures.
@@ -239,7 +240,7 @@ You can change the pages of a space at any time in Settings → Spaces.
 *The Dashboard in the dark theme (it follows Windows, or choose it in Settings).*
 
 **What you see**
-- **Total net worth**, **Income**, **Money out** (spending plus money given to other spaces) and **Savings** with the savings rate;
+- **Total net worth**, **Income** (with what came from other spaces, or the monthly average), **Money out** (spending plus money given to other spaces) and **Savings** with the savings rate;
 - **Expenses by category** (a doughnut chart) and **Income, money out and savings by month**;
 - **Balance over time**, your **budgets**, the **upcoming payments** of the recurring items and the **largest expenses** of the period.
 
@@ -313,9 +314,9 @@ The type decides how an account counts. Choose it carefully: changing it later b
 *Recurring: monthly totals at the top, one card per item, the next 60 days on the right.*
 
 **What you see**
-- At the top, the three kinds as a monthly amount: **fixed expenses**, **fixed income** (with the margin left each month) and **fixed transfers** (with those coming in from other spaces).
+- At the top, everything as a monthly amount (monthly equivalent: a yearly bill counts 1/12): **fixed expenses**, **fixed income** (with what comes in from other spaces), **transfers to other spaces** (with, apart, those between accounts of this space, such as card top-ups and investment plans) and the **monthly margin**: what is left each month after every fixed item, that is fixed income + transfers received − fixed expenses − transfers to other spaces, with its share of income and how much of it already goes into investment plans. Transfers between accounts of the same space do not lower the margin, because the money stays yours.
 - One card per item, grouped (investment plans, expenses, income, transfers): the amount and the next date, then a small grid with the monthly equivalent, the start and end dates and how many payments are **recorded** (real transactions linked to the item). Loans show the installment number and the remaining debt. At the bottom of each card: 📄 its transactions, 📎 link payments already recorded, ⏸ pause (point at an icon to see its name) and **✏️ Edit**.
-- On the right, **Next 60 days**: every due date coming up.
+- On the right, **Next 60 days**: every due date coming up, including the recurring transfers that another space sends to this one (marked *from another space*; the Dashboard lists the next ones too).
 
 **What you can do**
 - **＋ New recurring item**, starting from a ready-made model (mortgage, rent, furniture loan, car loan, bill, subscription, insurance, salary, automatic savings) or from scratch. **Frequency:** weekly, monthly, every 2 months, quarterly, every 6 months, yearly.
@@ -759,6 +760,8 @@ Your data is never part of an update, and an encrypted backup is saved first. Ho
 | **Money out** | spending plus money given to other spaces |
 | **Recurring item** | a payment that repeats, recorded by HomeCoin on its due dates ([Recurring payments](#recurring-payments)) |
 | **Due date** | the day a recurring payment or a loan installment is expected |
+| **Monthly equivalent** | a recurring amount brought to one month: a yearly bill counts 1/12, a weekly one about 4.3 times |
+| **Monthly margin** | what is left each month after every fixed item: fixed income + transfers received − fixed expenses − transfers to other spaces ([Recurring payments](#recurring-payments)) |
 | **Variable (expected) item** | a recurring payment whose amount or date changes; forecast with the median of the last six |
 | **Median** | the middle value of a list: half of the values are above it, half below; less affected by one unusual payment than the average |
 | **Cash-flow forecast** | the money you will have in your accounts after the coming payments ([Calendar](#calendar)) |
@@ -889,4 +892,4 @@ Any copy or modified version must keep the [LICENSE](LICENSE) file, including th
 
 ---
 
-*HomeCoin by **Starkark98** · v2.4.2 · see the [changelog](CHANGELOG.md)*
+*HomeCoin by **Starkark98** · v2.4.3 · see the [changelog](CHANGELOG.md)*

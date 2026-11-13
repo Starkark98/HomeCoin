@@ -332,6 +332,15 @@ function periodRange(key) {
 // ================================================================ drill-down to Transactions
 // Every element with data-tx (filters as JSON) leads to Transactions already filtered; charts use goTx().
 const goTx = (f) => { location.hash = '#/movimenti?' + qs(f); };
+// detail rows of a summary box, all in the same style: [label, value, link attributes?, tooltip?]. Labels are program
+// texts (callers escape anything typed by the user); empty rows are left out, and no rows = no detail at all
+const kRows = (...rows) => {
+  const r = rows.filter(Boolean);
+  return r.length ? `<div class="k-split">${r.map(([l, val, attrs, tip]) => {
+    const t = tip ? ` title="${esc(tip)}"` : '';
+    return attrs ? `<a ${attrs}${t}><span>${l}</span><b>${val}</b></a>` : `<span class="k-li"${t}><span>${l}</span><b>${val}</b></span>`;
+  }).join('')}</div>` : '';
+};
 const txLink = (f, title = T('View transactions')) => `data-tx="${esc(JSON.stringify(f))}" title="${esc(title)}"`;
 const monthBounds = (ym) => { const [y, m] = ym.split('-').map(Number); return { from: `${ym}-01`, to: isoLocal(new Date(y, m, 0)) }; };
 const searchKey = (desc) => (desc || '').replace(/\s*-\s*\d+\/\d+$/, '').trim();  // "Mortgage installment - 9/24" -> "Mortgage installment"
@@ -999,19 +1008,17 @@ async function renderDashboard(v) {
     </div>
     <div class="kpis">
       <div class="kpi g-indigo"><div class="k-label">🏦 ${d.account_id ? T('Account balance') : T('Total net worth')}</div>
-        <div class="k-value">${money(st.balance_now)}</div><div class="k-sub">${tn('{n} active account', '{n} active accounts', activeAccounts().length)}</div></div>
+        <div class="k-value">${money(st.balance_now)}</div>${kRows([`🏦 ${T('Active accounts')}`, activeAccounts().length, 'href="#/conti"'])}</div>
       <div class="kpi g-emerald"><div class="k-label">📥 ${T('Income')}</div><div class="k-value">${money(inTot)}</div>
-        ${fromOthers ? `<div class="k-split">
-          <a href="#/movimenti?${qs({ kind: 'income', from, to, ...(d.account_id ? { account_id: d.account_id } : {}) })}" title="${esc(T('Actual income: salaries, contributions, interest…'))}"><span>💼 ${T('Income')}</span><b>${money(st.income)}</b></a>
-          <a href="#/movimenti?${qs({ kind: 'transfer', from, to })}" title="${esc(T('Transfers received from accounts in other spaces: they come in here and count toward savings'))}"><span>↙ ${T('From other spaces')}</span><b>${money(fromOthers)}</b></a></div>`
-          : `<div class="k-sub">${tn('{n} source', '{n} sources', st.by_category.income.length)}</div>`}</div>
+        ${fromOthers ? kRows([`💼 ${T('Income')}`, money(st.income), `href="#/movimenti?${qs({ kind: 'income', from, to, ...(d.account_id ? { account_id: d.account_id } : {}) })}"`, T('Actual income: salaries, contributions, interest…')],
+          [`↙ ${T('From other spaces')}`, money(fromOthers), `href="#/movimenti?${qs({ kind: 'transfer', from, to })}"`, T('Transfers received from accounts in other spaces: they come in here and count toward savings')])
+          : kRows([`📅 ${T('Per month')}`, money0(inTot / st.months)])}</div>
       <div class="kpi g-rose"><div class="k-label">📤 ${T('Money out')}</div><div class="k-value">${money(outTot)}</div>
-        ${toOthers ? `<div class="k-split">
-          <a href="#/movimenti?${qs({ kind: 'expense', from, to, ...(d.account_id ? { account_id: d.account_id } : {}) })}" title="${esc(T('Actual expenses: spending categories, budgets and chart by category'))}"><span>🛒 ${T('Spending')}</span><b>${money(st.expense)}</b></a>
-          <a ${st.other_categories ? 'href="#/report" data-reptab="other"' : `href="#/movimenti?${qs({ kind: 'transfer', from, to })}"`} title="${esc(T('Contributions and transfers to other spaces (e.g. the household account): they leave from here but are not expenses'))}"><span>↗ ${T('To other spaces')}</span><b>${money(toOthers)}</b></a></div>`
-          : `<div class="k-sub">${T('avg {amount} / month', { amount: money0(outTot / st.months) })}</div>`}</div>
+        ${toOthers ? kRows([`🛒 ${T('Spending')}`, money(st.expense), `href="#/movimenti?${qs({ kind: 'expense', from, to, ...(d.account_id ? { account_id: d.account_id } : {}) })}"`, T('Actual expenses: spending categories, budgets and chart by category')],
+          [`↗ ${T('To other spaces')}`, money(toOthers), st.other_categories ? 'href="#/report" data-reptab="other"' : `href="#/movimenti?${qs({ kind: 'transfer', from, to })}"`, T('Contributions and transfers to other spaces (e.g. the household account): they leave from here but are not expenses')])
+          : kRows([`📅 ${T('Per month')}`, money0(outTot / st.months)])}</div>
       <div class="kpi g-amber"><div class="k-label">🐷 ${T('Savings')}</div><div class="k-value">${money(saved)}</div>
-        <div class="k-sub">${inflow ? `${T('savings rate')} ${pct(saved / inflow)}` : T('no income in the period')}</div></div>
+        ${kRows(inflow && [`📊 ${T('Savings rate')}`, pct(saved / inflow)])}</div>
     </div>
     <div class="grid-2">
       <div class="card"><div class="card-head"><h3>${T('Expenses by category')}</h3><span class="muted">${T('click for details')}</span></div>
@@ -1072,12 +1079,12 @@ async function renderDashboard(v) {
     data: {
       labels: months.map(fmtMonth),
       datasets: [
-        // income: two greens like the box (income darker, transfers received from other spaces lighter)
+        // same colors everywhere: income green, expenses red, transfers between spaces blue (received light, sent
+        // dark, each on its side), savings yellow
         { label: T('Income'), stack: 'in', data: months.map((m) => bm[m]?.income || 0), backgroundColor: '#059669', borderRadius: 8, maxBarThickness: 34 },
-        ...(fromOthers ? [{ label: T('From other spaces'), stack: 'in', data: months.map((m) => bm[m]?.from_others || 0), backgroundColor: '#6ee7b7', borderRadius: 8, maxBarThickness: 34 }] : []),
-        // money out: two reds like the box (expenses darker, other spaces lighter); savings orange like its box
+        ...(fromOthers ? [{ label: T('From other spaces'), stack: 'in', data: months.map((m) => bm[m]?.from_others || 0), backgroundColor: '#7dd3fc', borderRadius: 8, maxBarThickness: 34 }] : []),
         { label: T('Expenses'), stack: 'out', data: months.map((m) => bm[m]?.expense || 0), backgroundColor: '#e11d48', borderRadius: 8, maxBarThickness: 34 },
-        ...(toOthers ? [{ label: T('Other spaces'), stack: 'out', data: months.map((m) => bm[m]?.to_others || 0), backgroundColor: '#fb7185', borderRadius: 8, maxBarThickness: 34 }] : []),
+        ...(toOthers ? [{ label: T('Other spaces'), stack: 'out', data: months.map((m) => bm[m]?.to_others || 0), backgroundColor: '#0ea5e9', borderRadius: 8, maxBarThickness: 34 }] : []),
         { label: T('Savings'), stack: 'sav', data: months.map((m) => { const x = bm[m]; return x ? x.income + (x.from_others || 0) - x.expense - (x.to_others || 0) : 0; }),
           backgroundColor: '#f59e0b', borderRadius: 8, maxBarThickness: 34 },
       ],
@@ -1106,10 +1113,13 @@ async function renderDashboard(v) {
 function upcomingItem(u) {
   const dd = daysFrom(u.date);
   const when = dd === 0 ? T('today') : dd === 1 ? T('tomorrow') : tn('in {n} day', 'in {n} days', dd);
+  // transfers: where the money goes, and a sign when it crosses spaces (coming in from another space = +)
+  const pidOf = (id) => S.allAccounts.find((a) => a.id === id)?.portfolio_id;
+  const s = { ...u, portfolio_id: pidOf(u.account_id), to_portfolio_id: pidOf(u.to_account_id) };
   return `<div class="list-item clickable" ${txLink({ recurring_id: u.recurring_id }, T('View the transactions of this recurring item'))}>${dateChip(u.date)}
-    <div class="grow"><div class="title">${esc(u.name)} ${u.installment ? `<span class="tag">${T('installment {number}', { number: esc(u.installment) })}</span>` : ''}</div>
-    <div class="muted small">${when} · ${esc(u.account_name)}</div></div>
-    <b class="amount ${u.kind}">${signedAmount(u)}</b></div>`;
+    <div class="grow"><div class="title">${u.kind === 'transfer' ? '🔄 ' : ''}${esc(u.name)} ${u.installment ? `<span class="tag">${T('installment {number}', { number: esc(u.installment) })}</span>` : ''}</div>
+    <div class="muted small">${when} · ${esc(u.account_name)}${u.kind === 'transfer' && u.to_account_name ? ' → ' + esc(u.to_account_name) : ''}${u.incoming ? T(' · from another space') : ''}</div></div>
+    <b class="amount ${u.kind}">${signedAmount(s)}</b></div>`;
 }
 
 // ================================================================ transactions
@@ -1449,12 +1459,13 @@ async function renderConti(v) {
   // summary: cash for everyday use, investments, card debts, net worth
   const by = (g) => activeAccounts().filter((a) => accGroup(a.type) === g).reduce((s, a) => s + worth(a), 0);
   const cash = by('cash'), invest = by('invest'), credit = by('credit');
+  const count = (g) => activeAccounts().filter((a) => accGroup(a.type) === g).length;
   v.innerHTML = `
     <div class="kpis">
-      <div class="kpi g-sky"><div class="k-label">💧 ${T('Available money')}</div><div class="k-value">${money(cash)}</div><div class="k-sub">${T('current and savings accounts, cash, prepaid cards')}</div></div>
-      <div class="kpi g-emerald"><div class="k-label">📈 ${T('Investments')}</div><div class="k-value">${money(invest)}</div><div class="k-sub">${T('market value')}</div></div>
-      ${activeAccounts().some((a) => accGroup(a.type) === 'credit') ? `<div class="kpi g-rose"><div class="k-label">💳 ${T('Credit cards')}</div><div class="k-value">${money(credit)}</div><div class="k-sub">${T('balance of the cards (negative = to pay)')}</div></div>` : ''}
-      <div class="kpi g-indigo"><div class="k-label">💎 ${T('Total net worth')}</div><div class="k-value">${money(total)}</div><div class="k-sub">${tn('{n} active account', '{n} active accounts', activeAccounts().length)}</div></div>
+      <div class="kpi g-indigo" title="${esc(T('current and savings accounts, cash, prepaid cards'))}"><div class="k-label">💧 ${T('Available money')}</div><div class="k-value">${money(cash)}</div>${kRows([`🏦 ${T('Accounts')}`, count('cash')])}</div>
+      <div class="kpi g-indigo" title="${esc(T('market value'))}"><div class="k-label">📈 ${T('Investments')}</div><div class="k-value">${money(invest)}</div>${kRows([`🏦 ${T('Accounts')}`, count('invest')])}</div>
+      ${count('credit') ? `<div class="kpi g-rose" title="${esc(T('balance of the cards (negative = to pay)'))}"><div class="k-label">💳 ${T('Credit cards')}</div><div class="k-value">${money(credit)}</div>${kRows([`💳 ${T('Cards')}`, count('credit')])}</div>` : ''}
+      <div class="kpi g-indigo"><div class="k-label">💎 ${T('Total net worth')}</div><div class="k-value">${money(total)}</div>${kRows([`🏦 ${T('Active accounts')}`, activeAccounts().length])}</div>
     </div>
     <div class="toolbar">
       <span class="spacer"></span>
@@ -1617,14 +1628,18 @@ async function renderRicorrenti(v) {
   // accounts; those coming in from other spaces shown apart). Margin = what is left each month after all of them.
   const act = list.filter((r) => r.active);
   const sum = (f) => act.filter(f).reduce((s, r) => s + r.monthly_equivalent, 0);
-  const fixedOut = sum((r) => r.kind === 'expense');
-  const fixedIn = sum((r) => r.kind === 'income');
-  const trOut = sum((r) => r.kind === 'transfer' && !r.incoming);
-  const trIn = sum((r) => r.kind === 'transfer' && r.incoming);
-  // a transfer to an account of this same space moves money inside it: it does not change the margin
-  const trOutOther = sum((r) => r.kind === 'transfer' && !r.incoming && S.allAccounts.find((a) => a.id === r.to_account_id)?.portfolio_id !== S.pid);
-  const margin = fixedIn + trIn - fixedOut - trOutOther;
   const isPac = (r) => r.kind === 'transfer' && r.holding_id;
+  const fixedOut = sum((r) => r.kind === 'expense'), nOut = act.filter((r) => r.kind === 'expense').length;
+  const fixedIn = sum((r) => r.kind === 'income'), nIn = act.filter((r) => r.kind === 'income').length;
+  const trIn = sum((r) => r.kind === 'transfer' && r.incoming);
+  // a transfer to an account of this same space moves money inside it (card top-up, investment plan): it does not
+  // change the margin, so it is shown apart from the transfers that leave the space
+  const toOther = (r) => r.kind === 'transfer' && !r.incoming && S.allAccounts.find((a) => a.id === r.to_account_id)?.portfolio_id !== S.pid;
+  const trOutOther = sum(toOther), nOther = act.filter(toOther).length;
+  const trInside = sum((r) => r.kind === 'transfer' && !r.incoming && !toOther(r));
+  const pac = sum((r) => isPac(r) && !toOther(r));
+  // margin: what is left each month after every fixed item (income and transfers received − expenses − transfers out)
+  const margin = fixedIn + trIn - fixedOut - trOutOther;
   const groups = [
     [T('📈 Investment plans'), list.filter(isPac), T('Each contribution automatically buys units of the chosen security at the day\'s estimated price: then verify the actual price in Investments.')],
     [T('🏠 Mortgages & loans'), list.filter((r) => r.installments)],
@@ -1635,9 +1650,14 @@ async function renderRicorrenti(v) {
 
   v.innerHTML = `
     <div class="kpis">
-      <div class="kpi g-rose"><div class="k-label">📤 ${T('Fixed monthly expenses')}</div><div class="k-value">${money(fixedOut)}</div><div class="k-sub">${T('monthly equivalent')}</div></div>
-      <div class="kpi g-emerald"><div class="k-label">📥 ${T('Fixed monthly income')}</div><div class="k-value">${money(fixedIn)}</div><div class="k-sub">${T('margin')} ${money(margin)}</div></div>
-      <div class="kpi g-sky"><div class="k-label">🔄 ${T('Fixed monthly transfers')}</div><div class="k-value">${money(trOut)}</div><div class="k-sub">${T('coming in from other spaces {amount}', { amount: money(trIn) })}</div></div>
+      <div class="kpi g-rose" title="${esc(T('monthly equivalent'))}"><div class="k-label">📤 ${T('Fixed monthly expenses')}</div><div class="k-value">${money(fixedOut)}</div>
+        ${kRows([`🔁 ${T('Items')}`, nOut])}</div>
+      <div class="kpi g-emerald" title="${esc(T('monthly equivalent'))}"><div class="k-label">📥 ${T('Fixed monthly income')}</div><div class="k-value">${money(fixedIn + trIn)}</div>
+        ${trIn ? kRows([`💼 ${T('Income')}`, money(fixedIn)], [`↙ ${T('From other spaces')}`, money(trIn)]) : kRows([`🔁 ${T('Items')}`, nIn])}</div>
+      <div class="kpi g-sky" title="${esc(T('monthly equivalent'))}"><div class="k-label">🔄 ${T('Transfers to other spaces')}</div><div class="k-value">${money(trOutOther)}</div>
+        ${kRows([`🔁 ${T('Items')}`, nOther], trInside && [`↔ ${T('Inside this space')}`, money(trInside), '', T('Card top-ups, investment plans and other transfers between accounts of this space: the money stays in the space, so they do not reduce the margin')])}</div>
+      <div class="kpi g-amber" title="${esc(T('Fixed income and transfers received − fixed expenses − transfers to other spaces'))}"><div class="k-label">${margin < 0 ? '⚠️' : '✅'} ${T('Monthly margin')}</div><div class="k-value">${money(margin)}</div>
+        ${kRows(fixedIn + trIn > 0 && [`📊 ${T('Of income')}`, pct(margin / (fixedIn + trIn))], pac && [`📈 ${T('Into investment plans')}`, money(pac)])}</div>
     </div>
     <div class="toolbar"><span class="muted small" style="flex:1 1 260px">${T('Payments that fall due are recorded automatically as transactions.')}</span>
       <span class="btn-row"><button class="btn" id="r-run">⚡ ${T('Process due payments')}</button><button class="btn btn-primary" id="r-new">＋ ${T('New recurring item')}</button></span></div>
@@ -1710,22 +1730,22 @@ async function renderCalendario(v) {
       <div class="muted small">${esc(x.account_name || '')}${x.kind === 'transfer' ? ' → ' + esc(x.to_account_name || '') : ''}${x.incoming ? T(' · from another space') : ''}</div></div>
     <div class="right"><b class="${x.effect > 0 ? 'pos' : x.effect < 0 ? 'neg' : 'muted'}">${x.estimated ? '≈ ' : ''}${x.effect ? (x.effect > 0 ? '+' : '−') + money(Math.abs(x.effect)) : '↔ ' + money(x.amount)}</b>
       <div class="muted small">${T('balance {amount}', { amount: money0(x.after) })}</div></div></div>`;
-  const split = (a, b, la, lb) => (b ? `<div class="k-split"><span class="k-li"><span>✔ ${la}</span><b>${money0(a)}</b></span><span class="k-li"><span>≈ ${lb}</span><b>${money0(b)}</b></span></div>` : '');
   v.innerHTML = `
     <div class="toolbar"><select id="cal-months">${[['1', T('This month')], ['3', T('Next 3 months')], ['6', T('Next 6 months')], ['12', T('Next 12 months')]].map(([k, l]) => `<option value="${k}" ${k === S.calMonths ? 'selected' : ''}>${l}</option>`).join('')}</select>
       <details class="help" style="flex:1 1 300px"><summary>ℹ️ ${T('How it works')}</summary>
         <p>${T('Due dates of active recurring items (including transfers coming in from other spaces). Cash = only the day-to-day accounts (current, savings, cards, cash), where the payments go through; the Emergency fund also counts broker cash and money market ETFs.')}</p>
         ${plusEst || minusEst ? `<p>≈ ${T('<b>Estimated</b>, with the same method for income and expenses: variable recurring items (median of recent payments) and regular transactions without a recurring item, recognized from history (same payer or payee in at least {min} of the last {months} months, ignoring month and year in the description; median monthly amount and day). Occasional expenses are not forecast; among estimated income only significant amounts are included (at least {amount} and 5% of the largest, so small account interest is left out). To track an item better, create a "variable amount" recurring item in Recurring.', { min: d.regular_min, months: d.history_months, amount: money0(5000) })}</p>` : ''}</details></div>
     <div class="kpis">
-      <div class="kpi g-indigo"><div class="k-label">💧 ${T('Cash in accounts today')}</div><div class="k-value">${money0(d.start_liquidity)}</div>
-        <div class="k-sub" title="${esc(T('The emergency fund adds the uninvested broker cash and money market ETFs'))}">${T('day-to-day accounts, no broker')} · ${tn('{n} due', '{n} due', items.length)}</div></div>
+      <div class="kpi g-indigo" title="${esc(T('day-to-day accounts, no broker') + ' · ' + T('The emergency fund adds the uninvested broker cash and money market ETFs'))}"><div class="k-label">💧 ${T('Cash in accounts today')}</div><div class="k-value">${money0(d.start_liquidity)}</div>
+        ${kRows([`📅 ${T('Due dates')}`, items.length])}</div>
       <div class="kpi g-emerald"><div class="k-label">📥 ${T('Coming in')}</div><div class="k-value">+${money0(plus)}</div>
-        ${split(plusSure, plusEst, T('Confirmed (recurring items)'), T('Estimated (variable and regular)')) || `<div class="k-sub">${T('incoming payments and contributions')}</div>`}</div>
+        ${plusEst ? kRows([`✔ ${T('Confirmed')}`, money0(plusSure), '', T('Confirmed (recurring items)')], [`≈ ${T('Estimated')}`, money0(plusEst), '', T('Estimated (variable and regular)')])
+          : kRows([`📅 ${T('Due dates')}`, items.filter((x) => x.effect > 0).length])}</div>
       <div class="kpi g-rose"><div class="k-label">📤 ${T('Going out')}</div><div class="k-value">−${money0(-minus)}</div>
-        ${split(minusSure, minusEst, T('Confirmed (recurring items)'), T('Estimated (variable and regular)')) || `<div class="k-sub">${T('installments, bills, subscriptions, transfers')}</div>`}</div>
-      <div class="kpi ${bal < 0 ? 'g-rose' : 'g-amber'}"><div class="k-label">🔮 ${T('Projected cash on {date}', { date: esc(fmtDate(d.end)) })}</div><div class="k-value">${plusEst || minusEst ? '≈ ' : ''}${money0(bal)}</div>
-        ${plusEst || minusEst ? `<div class="k-split"><span class="k-li"><span>✔ ${T('Confirmed only')}</span><b>${money0(sure)}</b></span><span class="k-li"><span>≈ ${T('Total with estimates')}</span><b>${money0(bal)}</b></span></div>`
-          : `<div class="k-sub">${T('confirmed due dates only')}</div>`}</div>
+        ${minusEst ? kRows([`✔ ${T('Confirmed')}`, money0(minusSure), '', T('Confirmed (recurring items)')], [`≈ ${T('Estimated')}`, money0(minusEst), '', T('Estimated (variable and regular)')])
+          : kRows([`📅 ${T('Due dates')}`, items.filter((x) => x.effect < 0).length])}</div>
+      <div class="kpi g-amber"><div class="k-label">${bal < 0 ? '⚠️' : '🔮'} ${T('Projected cash on {date}', { date: esc(fmtDate(d.end)) })}</div><div class="k-value">${plusEst || minusEst ? '≈ ' : ''}${money0(bal)}</div>
+        ${kRows(plusEst || minusEst ? [`✔ ${T('Confirmed only')}`, money0(sure)] : null, [`Δ ${T('Difference')}`, (bal >= d.start_liquidity ? '+' : '−') + money0(Math.abs(bal - d.start_liquidity))])}</div>
     </div>
     ${months.map((m) => {
       const key = isoLocal(m).slice(0, 7), its = items.filter((x) => x.date.startsWith(key));
@@ -2202,11 +2222,13 @@ async function renderReport(v) {
     </div>
     <div class="kpis">
       <div class="kpi g-emerald"><div class="k-label">📥 ${T('Income ·')} ${esc(label)}</div><div class="k-value">${money(inflow)}</div>
-        ${tin ? `<div class="k-split"><a href="#/report" data-t="income"><span>💼 ${T('Income')}</span><b>${money(inc)}</b></a><a href="#/movimenti?${qs({ kind: 'transfer', from: data.from, to: data.to })}"><span>↙ ${T('From other spaces')}</span><b>${money(tin)}</b></a></div>` : ''}</div>
+        ${tin ? kRows([`💼 ${T('Income')}`, money(inc), 'href="#/report" data-t="income"'], [`↙ ${T('From other spaces')}`, money(tin), `href="#/movimenti?${qs({ kind: 'transfer', from: data.from, to: data.to })}"`])
+          : kRows([`📅 ${T('Per month')}`, money0(inflow / (data.months.length || 1))])}</div>
       <div class="kpi g-rose"><div class="k-label">📤 ${T('Money out ·')} ${esc(label)}</div><div class="k-value">${money(exp + other)}</div>
-        ${other ? `<div class="k-split"><a href="#/report" data-t="expense"><span>🛒 ${T('Spending')}</span><b>${money(exp)}</b></a><a href="#/report" data-t="other"><span>↗ ${T('To other spaces')}</span><b>${money(other)}</b></a></div>` : ''}</div>
-      <div class="kpi g-amber"><div class="k-label">🐷 ${T('Savings')}</div><div class="k-value">${money(saved)}</div><div class="k-sub">${inflow ? pct(saved / inflow) + T(' of income') : ''}</div></div>
-      <div class="kpi g-indigo"><div class="k-label">📊 ${T('Average monthly spending')}</div><div class="k-value">${money(exp / monthsWithData)}</div><div class="k-sub">${tn('over {n} month with expenses', 'over {n} months with expenses', monthsWithData)}</div></div>
+        ${other ? kRows([`🛒 ${T('Spending')}`, money(exp), 'href="#/report" data-t="expense"'], [`↗ ${T('To other spaces')}`, money(other), 'href="#/report" data-t="other"'])
+          : kRows([`📅 ${T('Per month')}`, money0((exp + other) / (data.months.length || 1))])}</div>
+      <div class="kpi g-amber"><div class="k-label">🐷 ${T('Savings')}</div><div class="k-value">${money(saved)}</div>${kRows(inflow && [`📊 ${T('Savings rate')}`, pct(saved / inflow)])}</div>
+      <div class="kpi g-rose"><div class="k-label">📊 ${T('Average monthly spending')}</div><div class="k-value">${money(exp / monthsWithData)}</div>${kRows([`📅 ${T('Months with expenses')}`, monthsWithData])}</div>
     </div>
     <div class="card" style="margin-bottom:18px">
       <div class="card-head"><div><h3>${{ expense: T('Expenses'), income: T('Income'), other: T('Contributions to other spaces') }[tab]} ${single ? T('by category') : T('by month and category')}</h3>
@@ -2567,12 +2589,13 @@ async function renderRipartizione(v) {
     box.innerHTML = `
       ${r.fair ? '' : `<div class="card sp-warn">⚠️ ${T('The <b>split equally</b> part exceeds someone\'s fair share: savings cannot be identical. Consider making some categories proportional.')}</div>`}
       <div class="kpis">
-        <div class="kpi g-indigo"><div class="k-label">🧾 ${{ expenses: T('Shared expenses per month'), deposits: T('Average contributions per month'), manual: T('Manual amounts per month') }[r.base]}</div><div class="k-value">${money(r.total)}</div>
-          <div class="k-sub">${r.base === 'manual' ? T('items entered by hand') : `${tn('{n}-month average', '{n}-month average', r.months)}${r.margin ? ` + ${T('{n}% unexpected', { n: r.margin })}` : ''} · ${esc(fmtDate(r.from))} → ${esc(fmtDate(r.to))}`}</div></div>
-        <div class="kpi g-emerald"><div class="k-label">🐷 ${T('Each person\'s savings rate')}</div><div class="k-value">${rate == null ? '—' : pct(rate)}</div>
-          <div class="k-sub">${r.fair ? T('the same for everyone') : T('not exactly the same')}</div></div>
-        <div class="kpi g-amber"><div class="k-label">½ ${T('Split equally')}</div><div class="k-value">${money(r.equal_total)}</div><div class="k-sub">${T('{amount} each', { amount: money(r.equal_total / (r.people.length || 1)) })}</div></div>
-        <div class="kpi g-rose"><div class="k-label">⚖️ ${T('Proportional')}</div><div class="k-value">${money(r.prop_total)}</div><div class="k-sub">${r.excluded_total ? T('excluded {amount}', { amount: money(r.excluded_total) }) : T('no excluded categories')}</div></div>
+        <div class="kpi ${r.base === 'deposits' ? 'g-sky' : 'g-rose'}"><div class="k-label">🧾 ${{ expenses: T('Shared expenses per month'), deposits: T('Average contributions per month'), manual: T('Manual amounts per month') }[r.base]}</div><div class="k-value">${money(r.total)}</div>
+          ${r.base === 'manual' ? kRows([`✏️ ${T('Items')}`, r.rows.length])
+            : kRows([`📅 ${T('Average of')}`, tn('{n} month', '{n} months', r.months), '', `${fmtDate(r.from)} → ${fmtDate(r.to)}`], r.margin && [`➕ ${T('Unexpected')}`, `${num(r.margin)}%`])}</div>
+        <div class="kpi g-amber" title="${esc(r.fair ? T('the same for everyone') : T('not exactly the same'))}"><div class="k-label">🐷 ${T('Each person\'s savings rate')}</div><div class="k-value">${rate == null ? '—' : pct(rate)}</div>
+          ${kRows([`👥 ${T('People')}`, r.people.length])}</div>
+        <div class="kpi g-indigo"><div class="k-label">½ ${T('Split equally')}</div><div class="k-value">${money(r.equal_total)}</div>${kRows([`👤 ${T('Each')}`, money(r.equal_total / (r.people.length || 1))])}</div>
+        <div class="kpi g-indigo"><div class="k-label">⚖️ ${T('Proportional')}</div><div class="k-value">${money(r.prop_total)}</div>${kRows([`🚫 ${T('Excluded')}`, money(r.excluded_total)])}</div>
       </div>
       <div class="sp-stack">
         <div class="card"><div class="card-head"><h3>💸 ${T('Proposed monthly contributions')}</h3><button class="btn btn-sm btn-primary" id="sp-apply">${T('Update recurring contributions')}</button></div>
@@ -3131,10 +3154,12 @@ async function renderBudget(v) {
       <select id="bd-avg" title="${esc(T('Average to compare against (full months)'))}">${[['3', tn('{n}-month average', '{n}-month average', 3)], ['6', tn('{n}-month average', '{n}-month average', 6)], ['12', tn('{n}-month average', '{n}-month average', 12)], ['all', T('Average of all')]].map(([k, l]) => `<option value="${k}" ${k === S.budgetAvg ? 'selected' : ''}>${l}</option>`).join('')}</select>
       <span class="muted small">${isCurrent ? T('current month: {percent} elapsed', { percent: pct(elapsed) }) : T('month closed')} · ${T('average calculated over {from} → {to}', { from: esc(fmtDate(d.avg_from)), to: esc(fmtDate(d.avg_to)) })}</span></div>
     <div class="kpis">
-      <div class="kpi g-indigo"><div class="k-label">🎯 ${T('Budget for the month')}</div><div class="k-value">${money0(totB)}</div><div class="k-sub">${tn('{n} category with a budget', '{n} categories with a budget', withB.length)}</div></div>
-      <div class="kpi g-rose"><div class="k-label">📤 ${T('Spent (budgeted categories)')}</div><div class="k-value">${money0(totS)}</div><div class="k-sub">${totB ? T('{percent} of budget', { percent: pct(totS / totB) }) : T('no budget set')}</div></div>
-      <div class="kpi g-emerald"><div class="k-label">🟢 ${T('Still available')}</div><div class="k-value">${money0(Math.max(0, totB - totS))}</div><div class="k-sub">${isCurrent ? tn('{n} day to the end of the month', '{n} days to the end of the month', new Date(y, m, 0).getDate() - new Date().getDate()) : ''}</div></div>
-      <div class="kpi g-amber"><div class="k-label">⚠️ ${T('Categories over budget')}</div><div class="k-value">${over.length}</div><div class="k-sub">${over.map((c) => esc(c.name)).join(', ') || T('none')}</div></div>
+      <div class="kpi g-indigo"><div class="k-label">🎯 ${T('Budget for the month')}</div><div class="k-value">${money0(totB)}</div>${kRows([`🏷️ ${T('Categories')}`, withB.length])}</div>
+      <div class="kpi g-rose"><div class="k-label">📤 ${T('Spent (budgeted categories)')}</div><div class="k-value">${money0(totS)}</div>${kRows(totB && [`📊 ${T('Of budget')}`, pct(totS / totB)])}</div>
+      <div class="kpi g-amber"><div class="k-label">🟢 ${T('Still available')}</div><div class="k-value">${money0(Math.max(0, totB - totS))}</div>
+        ${kRows(isCurrent && [`📅 ${T('Days left')}`, new Date(y, m, 0).getDate() - new Date().getDate()], isCurrent && totB > totS && [`👛 ${T('Per day')}`, money0((totB - totS) / Math.max(1, new Date(y, m, 0).getDate() - new Date().getDate() + 1))])}</div>
+      <div class="kpi ${over.length ? 'g-rose' : 'g-indigo'}" title="${esc(over.map((c) => c.name).join(', '))}"><div class="k-label">⚠️ ${T('Categories over budget')}</div><div class="k-value">${over.length}</div>
+        ${kRows([`🔺 ${T('Over by')}`, money0(over.reduce((s, c) => s + c.spent - c.budget, 0))])}</div>
     </div>
     <div class="card"><div class="card-head"><div><h3>${T('Budget per category')}</h3><p class="muted small" style="margin:3px 0 0">${T('Type the monthly limit next to the category: it saves by itself. "Ahead" = spending faster than the share of the month that has passed.')}</p></div></div>
       <div class="table-wrap"><table class="sp-table"><thead><tr><th>${T('Category')}</th><th>${T('Budget / month')}</th><th class="right">${T('Spent this month')}</th><th class="right">${esc(avgLabel)}</th><th>${T('Progress')}</th><th></th></tr></thead>
@@ -3157,12 +3182,13 @@ async function renderMutuo(v) {
     return;
   }
   const tot = (k) => plans.reduce((s, p) => s + p[k], 0);
+  const principal = tot('residual') + tot('capital_paid'), interest = tot('interest_paid') + tot('interest_left');
   v.innerHTML = `
     <div class="kpis">
-      <div class="kpi g-indigo"><div class="k-label">🏦 ${T('Total remaining debt')}</div><div class="k-value">${money0(tot('residual'))}</div><div class="k-sub">${T('principal still to repay')}</div></div>
-      <div class="kpi g-emerald"><div class="k-label">✅ ${T('Principal already repaid')}</div><div class="k-value">${money0(tot('capital_paid'))}</div><div class="k-sub">${tn('{n} loan', '{n} loans', plans.length)}</div></div>
-      <div class="kpi g-rose"><div class="k-label">💸 ${T('Interest paid')}</div><div class="k-value">${money0(tot('interest_paid'))}</div><div class="k-sub">${T('so far')}</div></div>
-      <div class="kpi g-amber"><div class="k-label">⏳ ${T('Interest remaining')}</div><div class="k-value">${money0(tot('interest_left'))}</div><div class="k-sub">${T('until the end of the schedules')}</div></div>
+      <div class="kpi g-indigo" title="${esc(T('principal still to repay'))}"><div class="k-label">🏦 ${T('Total remaining debt')}</div><div class="k-value">${money0(tot('residual'))}</div>${kRows([`🏠 ${T('Loans')}`, plans.length])}</div>
+      <div class="kpi g-amber"><div class="k-label">✅ ${T('Principal already repaid')}</div><div class="k-value">${money0(tot('capital_paid'))}</div>${kRows(principal && [`📊 ${T('Of the principal')}`, pct(tot('capital_paid') / principal)])}</div>
+      <div class="kpi g-rose"><div class="k-label">💸 ${T('Interest paid')}</div><div class="k-value">${money0(tot('interest_paid'))}</div>${kRows(interest && [`📊 ${T('Of the total interest')}`, pct(tot('interest_paid') / interest)])}</div>
+      <div class="kpi g-rose" title="${esc(T('until the end of the schedules'))}"><div class="k-label">⏳ ${T('Interest remaining')}</div><div class="k-value">${money0(tot('interest_left'))}</div>${kRows([`Σ ${T('Total interest')}`, money0(interest)])}</div>
     </div>
     ${plans.map((p, i) => `<div class="card mt-plan" style="margin-bottom:18px">
       <div class="card-head"><div><h3>${esc(p.name)}</h3><p class="muted small" style="margin:3px 0 0">${esc(p.account)} · ${tn('{amount} in {n} installment', '{amount} in {n} installments', p.installments, { amount: money0(p.principal) })} · ${T('rate {rate}', { rate: p.rate_known ? esc(p.rate_label) : `<span class="tag warn">${T('not specified: calculated at 0%')}</span>` })} · ${T('ends {date}', { date: esc(fmtDate(p.end_date)) })}${p.amortization === 'constant' ? `<br>${T('Constant principal: installments go down from {first} to {last}', { first: money0(p.first_installment), last: money0(p.last_installment) })}` : ''}</p></div>
@@ -3271,10 +3297,10 @@ async function renderObiettivi(v) {
   const monthly = goals.reduce((s, gl) => s + (gl.progress < 1 && gl.monthly_needed ? gl.monthly_needed : 0), 0);
   v.innerHTML = `
     ${goals.length ? `<div class="kpis">
-      <div class="kpi g-indigo"><div class="k-label">🏁 ${T('All goals')}</div><div class="k-value">${money0(target)}</div><div class="k-sub">${tn('{n} goal', '{n} goals', goals.length)}</div></div>
-      <div class="kpi g-emerald"><div class="k-label">🐷 ${T('Already set aside')}</div><div class="k-value">${money0(current)}</div><div class="k-sub">${T('{percent} of the total', { percent: pct(target ? current / target : 0) })}</div></div>
-      <div class="kpi g-amber"><div class="k-label">📅 ${T('To set aside each month')}</div><div class="k-value">${money0(monthly)}</div><div class="k-sub">${T('for the goals with a date')}</div></div>
-      <div class="kpi g-sky"><div class="k-label">✅ ${T('Goals reached')}</div><div class="k-value">${reached}</div><div class="k-sub">${T('{amount} still to go', { amount: money0(target - current) })}</div></div>
+      <div class="kpi g-indigo"><div class="k-label">🏁 ${T('All goals')}</div><div class="k-value">${money0(target)}</div>${kRows([`⏳ ${T('Still to go')}`, money0(Math.max(0, target - current))])}</div>
+      <div class="kpi g-amber"><div class="k-label">🐷 ${T('Already set aside')}</div><div class="k-value">${money0(current)}</div>${kRows([`📊 ${T('Of the total')}`, pct(target ? current / target : 0)])}</div>
+      <div class="kpi g-amber" title="${esc(T('for the goals with a date'))}"><div class="k-label">📅 ${T('To set aside each month')}</div><div class="k-value">${money0(monthly)}</div>${kRows([`🎯 ${T('Goals with a date')}`, goals.filter((gl) => gl.progress < 1 && gl.monthly_needed).length])}</div>
+      <div class="kpi g-indigo"><div class="k-label">✅ ${T('Goals reached')}</div><div class="k-value">${reached}</div>${kRows([`🏁 ${T('Goals')}`, goals.length])}</div>
     </div>` : ''}
     <div class="toolbar"><h3 style="margin:0">🏁 ${family ? T('Shared goals') : T('Savings goals')}</h3><span class="spacer"></span><button class="btn btn-primary" id="gl-new">＋ ${T('New goal')}</button></div>
     <div class="rec-grid">${goals.map((gl) => `<div class="card rec-card">
@@ -3355,10 +3381,10 @@ async function renderInvestimenti(v) {
   const unverified = d.pac_unverified || [];
   v.innerHTML = `
     <div class="kpis">
-      <div class="kpi g-indigo"><div class="k-label">📊 ${T('Current value')}</div><div class="k-value">${money0(d.total_value)}</div><div class="k-sub">${tn('{n} account', '{n} accounts', d.accounts.length)}</div></div>
-      <div class="kpi g-sky"><div class="k-label">💶 ${T('Net invested')}</div><div class="k-value">${money0(d.total_invested)}</div><div class="k-sub">${T('capital put in')}</div></div>
-      <div class="kpi ${d.total_gain >= 0 ? 'g-emerald' : 'g-rose'}"><div class="k-label">${d.total_gain >= 0 ? '📈' : '📉'} ${T('Gain')}</div><div class="k-value">${d.total_gain >= 0 ? '+' : ''}${money0(d.total_gain)}</div><div class="k-sub">${T('{percent} on invested', { percent: pctSigned(d.total_return) })}</div></div>
-      <div class="kpi g-amber"><div class="k-label">⏱️ ${T('Annual return')}</div><div class="k-value">${pctSigned(d.total_xirr)}</div><div class="k-sub">${T('XIRR, accounts for when you invested')}</div></div>
+      <div class="kpi g-indigo"><div class="k-label">📊 ${T('Current value')}</div><div class="k-value">${money0(d.total_value)}</div>${kRows([`🏦 ${T('Accounts')}`, d.accounts.length])}</div>
+      <div class="kpi g-indigo" title="${esc(T('capital put in'))}"><div class="k-label">💶 ${T('Net invested')}</div><div class="k-value">${money0(d.total_invested)}</div>${kRows([`📄 ${T('Securities')}`, d.accounts.reduce((s, a) => s + a.holdings.length, 0)])}</div>
+      <div class="kpi ${d.total_gain >= 0 ? 'g-emerald' : 'g-rose'}"><div class="k-label">${d.total_gain >= 0 ? '📈' : '📉'} ${T('Gain')}</div><div class="k-value">${d.total_gain >= 0 ? '+' : ''}${money0(d.total_gain)}</div>${kRows(d.total_return != null && [`📊 ${T('On invested')}`, pctSigned(d.total_return)])}</div>
+      <div class="kpi ${d.total_xirr == null ? 'g-indigo' : d.total_xirr >= 0 ? 'g-emerald' : 'g-rose'}" title="${esc(T('XIRR, accounts for when you invested'))}"><div class="k-label">⏱️ ${T('Annual return')}</div><div class="k-value">${pctSigned(d.total_xirr)}</div>${kRows([`🧮 ${T('Method')}`, 'XIRR'])}</div>
     </div>
     ${pending.length ? `<div class="card" style="margin-bottom:18px;border-color:var(--amber)"><div class="card-head"><h3>⏳ ${T('Investment plan purchases to complete')}</h3>
       <span class="muted small">${T('contribution made, but no known price to calculate the units')}</span></div>
@@ -3724,10 +3750,11 @@ async function renderRisparmio(v) {
     <div class="toolbar"><select id="sv-months">${[['6', T('Last 6 months')], ['12', T('Last 12 months')], ['24', T('Last 24 months')], ['36', T('Last 36 months')], ['all', T('All')]].map(([k, l]) => `<option value="${k}" ${k === String(S.savMonths) ? 'selected' : ''}>${l}</option>`).join('')}</select>
       <details class="help" style="flex:1 1 260px"><summary>ℹ️ ${T('How it works')}</summary><p>${T('Every month: income = spent + other spaces + saved (the month\'s surplus). Next to it, invested: purchases − sales of securities in investment accounts (money market ETFs are cash and do not count), even if paid with earlier savings · other spaces = transfers and contributions to other spaces.')}</p></details></div>
     <div class="kpis">
-      <div class="kpi g-emerald"><div class="k-label">🐷 ${T('Savings rate')}</div><div class="k-value">${t.rate == null ? '—' : pct(t.rate)}</div><div class="k-sub">${T('{amount} saved per month', { amount: money0(t.saved / n) })}</div></div>
-      <div class="kpi g-indigo"><div class="k-label">📈 ${T('Invested')}</div><div class="k-value">${money0(t.invested / n)}</div><div class="k-sub">${T('per month in securities ({percent} of income)', { percent: t.invest_rate == null ? '—' : pct(t.invest_rate) })}</div></div>
-      <div class="kpi g-rose"><div class="k-label">📤 ${T('Spent')}</div><div class="k-value">${money0(t.expense / n)}</div><div class="k-sub">${T('per month · other spaces {amount} per month', { amount: money0(t.to_others / n) })}</div></div>
-      <div class="kpi g-amber"><div class="k-label">💎 ${T('Net worth')}</div><div class="k-value">${money0(nw.now ? nw.now.net : 0)}</div><div class="k-sub">${T('cash + investments − debts')}</div></div>
+      <div class="kpi g-amber"><div class="k-label">🐷 ${T('Savings rate')}</div><div class="k-value">${t.rate == null ? '—' : pct(t.rate)}</div>${kRows([`📅 ${T('Saved per month')}`, money0(t.saved / n)])}</div>
+      <div class="kpi g-indigo" title="${esc(T('purchases − sales of securities'))}"><div class="k-label">📈 ${T('Invested per month')}</div><div class="k-value">${money0(t.invested / n)}</div>${kRows(t.invest_rate != null && [`📊 ${T('Of income')}`, pct(t.invest_rate)])}</div>
+      <div class="kpi g-rose"><div class="k-label">📤 ${T('Spent per month')}</div><div class="k-value">${money0(t.expense / n)}</div>${kRows(t.to_others && [`↗ ${T('To other spaces')}`, money0(t.to_others / n)])}</div>
+      <div class="kpi g-indigo" title="${esc(T('cash + investments − debts'))}"><div class="k-label">💎 ${T('Net worth')}</div><div class="k-value">${money0(nw.now ? nw.now.net : 0)}</div>
+        ${nw.now ? kRows([`💧 ${T('Cash')}`, money0(nw.now.liquidity)], [`📈 ${T('Investments')}`, money0(nw.now.investments)], nw.now.debts && [`💳 ${T('Debts')}`, '−' + money0(nw.now.debts)]) : ''}</div>
     </div>
     <div class="grid-2">
       <div class="card"><div class="card-head"><h3>${T('Where income goes')}</h3><span class="muted small">${T('line = income for the month')}</span></div><div class="chart-box"><canvas id="sv-bar"></canvas></div></div>
@@ -3749,8 +3776,8 @@ async function renderRisparmio(v) {
     data: { labels, datasets: [
       { type: 'line', label: T('Income'), data: rows.map((r) => r.income + r.from_others), borderColor: css('--text'), backgroundColor: css('--text'),
         borderWidth: 2, borderDash: [5, 4], pointRadius: 3, tension: 0, order: -1 },
-      // same colors as the dashboard: two reds for money out, orange for savings
-      bar(T('Spent'), 'expense', '#e11d48'), bar(T('Other spaces'), 'to_others', '#fb7185'), bar(T('Saved'), 'saved', '#f59e0b'),
+      // same colors as everywhere: red for spending, blue for transfers to other spaces, yellow for savings
+      bar(T('Spent'), 'expense', '#e11d48'), bar(T('Other spaces'), 'to_others', '#0ea5e9'), bar(T('Saved'), 'saved', '#f59e0b'),
       { ...bar(T('Invested in securities'), 'invested', '#7c3aed'), stack: 'inv' }] },
     options: { maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
       scales: { x: { stacked: true, grid: { display: false } }, y: { stacked: true, ticks: { callback: (x) => moneyK(x) } } },
@@ -3760,7 +3787,7 @@ async function renderRisparmio(v) {
   chart($('#sv-nw'), {
     type: 'line',
     data: { labels: nw.series.map((x) => fmtMonth(x.month)), datasets: [
-      { label: T('Net worth'), data: nw.series.map((x) => x.net), borderColor: '#f59e0b', backgroundColor: (ctx) => vGradient(ctx, '#f59e0b'), fill: true, borderWidth: 3, tension: .3, pointRadius: 3 },
+      { label: T('Net worth'), data: nw.series.map((x) => x.net), borderColor: '#6366f1', backgroundColor: (ctx) => vGradient(ctx, '#6366f1'), fill: true, borderWidth: 3, tension: .3, pointRadius: 3 },
       { label: T('Cash'), data: nw.series.map((x) => x.liquidity), borderColor: '#2fbf71', borderWidth: 2, pointRadius: 0, tension: .3 },
       { label: T('Investments'), data: nw.series.map((x) => x.investments), borderColor: '#7b52ab', borderWidth: 2, pointRadius: 0, tension: .3 },
       ...(nw.series.some((x) => x.debts) ? [{ label: T('Debts'), data: nw.series.map((x) => -x.debts), borderColor: '#e8364f', borderDash: [5, 4], borderWidth: 2, pointRadius: 0 }] : [])] },

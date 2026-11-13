@@ -28,7 +28,7 @@ from . import updater
 from . import util
 from .util import FREQUENCIES, add_months, months_between, parse_date, parse_number, rule_matches
 
-VERSION = "2.4.2"
+VERSION = "2.4.3"
 STATIC_DIR = dbm.BASE_DIR / "static"
 KINDS = ("expense", "income", "transfer")
 ACCOUNT_TYPES = ("corrente", "risparmio", "credito", "prepagata", "contanti", "investimenti", "altro")
@@ -360,8 +360,10 @@ def create_app(port):
             if vault.valid(request.cookies.get(COOKIE)):
                 return None
             # local import script with a temporary code: never for the security functions and updates, nor for
-            # taking the data out in bulk (backup, restore, unencrypted exports)
+            # taking the data out in bulk or putting it back (backups, restore, unencrypted exports; also the
+            # per-account comparison with a backup, which reads and restores from backup files)
             if not request.path.startswith(("/api/auth/", "/api/update", "/api/backup", "/api/restore", "/api/export/")) and \
+                    not request.path.endswith("/compare-backup") and \
                     vault.valid_import_token(request.headers.get("X-HomeCoin-Token")):
                 return None
             return jsonify(error=i18n.t("HomeCoin is locked: enter the password"), locked=True), 401
@@ -385,7 +387,7 @@ def create_app(port):
                     detail = i18n.tn("after {n} failed attempt", "after {n} failed attempts", vault.failed_before)
                     kind = "security"
             elif not request.cookies.get(COOKIE) or not vault.valid(request.cookies.get(COOKIE), touch=False):
-                detail = (detail + " · " if detail else "") + "from script with temporary code"
+                detail = (detail + " · " if detail else "") + i18n.t("from script with temporary code")
             p = g.get("portfolio")
             try:
                 conn = dbm.connect()
@@ -1021,7 +1023,8 @@ def create_app(port):
                              "(SELECT COUNT(*) FROM recurring WHERE category_id = ?)", (cid, cid)).fetchone()
         if (tx or rec) and request.args.get("force") != "1":  # the client asks for confirmation, showing what would be left uncategorized
             return jsonify(error=i18n.t("Category in use"), transactions=tx, recurring=rec), 409
-        note(c["name"] + (f" · {tx} transactions left uncategorized" if tx else ""))
+        note(c["name"] + (" · " + i18n.tn("{n} transaction left uncategorized", "{n} transactions left uncategorized", tx)
+                          if tx else ""))
         db.execute("DELETE FROM categories WHERE id = ? AND portfolio_id = ?", (cid, pf()))
         db.commit()
         return jsonify(ok=True)
@@ -1476,8 +1479,8 @@ def create_app(port):
         if o and any(t[k] != old[k] for k in ("date", "amount", "kind", "account_id", "to_account_id")):
             # the purchase stays linked (even with the new date) but its amounts must be corrected by hand
             db.execute("UPDATE trades SET external_id = ? WHERE id = ?", (f"pac:{old['recurring_id']}:{t['date']}", o["id"]))
-            warning = ("This deposit has an automatic investment plan purchase: update the trade in Investments "
-                       "as well (amount, date, units)")
+            warning = i18n.t("This deposit has an automatic investment plan purchase: update the trade in Investments "
+                             "as well (amount, date, units)")
         changes = [i18n.t("amount {old} → {new}", old=audit.eur(old["amount"]), new=audit.eur(t["amount"]))
                    if old["amount"] != t["amount"] else "",
                    i18n.t("date {old} → {new}", old=old["date"], new=t["date"]) if old["date"] != t["date"] else "",
@@ -1781,6 +1784,8 @@ def create_app(port):
         if moved:
             if nd < dt.date.today().isoformat():
                 raise ApiError(i18n.t("The next due date cannot be in the past"))
+            if nd > f"{dt.date.today().year + 10}-12-31":  # same limit as the first due date of a new item
+                raise ApiError(i18n.t("Recurring item date out of range: check the year"))
             n, d = old["generated"], dt.date.fromisoformat(nd)
             unit, step = util.FREQUENCIES[r["frequency"]]
             start = d - dt.timedelta(days=step * n) if unit == "d" else util.add_months(d, -step * n)
@@ -1874,6 +1879,8 @@ def create_app(port):
         b = body()
         r = dict(db.execute("SELECT * FROM recurring WHERE id = ?", (rid,)).fetchone())
         start = as_date(b.get("start_date"), "first due date", required=False)
+        if start and not "1990-01-01" <= start <= f"{dt.date.today().year + 10}-12-31":  # 2.4.3: a year like 0001 broke it
+            raise ApiError(i18n.t("Recurring item date out of range: check the year"))
         if b.get("dry_run"):
             g.audit_skip = True  # a preview changes nothing: not in the activity log
             return jsonify(link_preview(db, r, start or r["start_date"], *match_limits(b)))
@@ -2803,7 +2810,7 @@ def create_app(port):
                     db.execute("""INSERT INTO recurring(name, kind, amount, account_id, to_account_id, frequency, start_date,
                                   generated, active, notes) VALUES (?, 'transfer', ?, ?, ?, 'monthly', ?, 0, 1, ?)""",
                                (i18n.t("Contribution to {account}", account=acc_name), amount, src_id, account_id, when,
-                                "Created by the fair split calculator"))
+                                i18n.t("Created by the fair split calculator")))
                     created += 1
                 transfers.append(i18n.t("{name} (transfer from the space \"{space}\")", name=p["name"], space=space["name"]))
                 if rec:
@@ -2830,7 +2837,7 @@ def create_app(port):
                 db.execute("""INSERT INTO recurring(name, kind, amount, account_id, category_id, frequency, start_date,
                               generated, active, notes) VALUES (?, 'income', ?, ?, ?, 'monthly', ?, 0, 1, ?)""",
                            (i18n.t("Contribution {name}", name=p['name']), amount, account_id, cat["id"], start,
-                            "Created by the fair split calculator"))
+                            i18n.t("Created by the fair split calculator")))
                 created += 1
         db.commit()
         note(i18n.t("{updated} updated, {created} created", updated=updated, created=created)
@@ -2986,7 +2993,7 @@ def create_app(port):
         db = get_db()
         db.execute("""INSERT INTO valuations(account_id, date, value, source) VALUES (?, ?, ?, 'manual')
                       ON CONFLICT(account_id, date) DO UPDATE SET value = excluded.value, source = 'manual'""",
-                   (aid, as_date(b.get("date")), as_int(b.get("value"), "value", minimum=0)))
+                   (aid, tx_date(b.get("date")), as_int(b.get("value"), "value", minimum=0)))  # 2.4.3: plausible year
         db.commit()
         return jsonify(ok=True), 201
 
@@ -3300,7 +3307,7 @@ def create_app(port):
             for v in b.get("valuations") or []:
                 db.execute("""INSERT INTO valuations(account_id, date, value, source) VALUES (?, ?, ?, 'import')
                               ON CONFLICT(account_id, date) DO UPDATE SET value = excluded.value, source = 'import'""",
-                           (ref(acc, v.get("account"), "account"), as_date(v.get("date")), as_int(v.get("value"), "value", minimum=0)))
+                           (ref(acc, v.get("account"), "account"), tx_date(v.get("date")), as_int(v.get("value"), "value", minimum=0)))
                 created["valuations"] += 1
             for aid in set(acc.values()):
                 bad = tools.negative_position(db, aid)

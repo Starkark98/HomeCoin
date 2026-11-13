@@ -499,8 +499,11 @@ def backup_now(reason="auto", force=False):
         return None
     folder, _ = backup_dir()
     folder.mkdir(parents=True, exist_ok=True)
-    stamp = dt.datetime.now().strftime("%Y%m%d-%H%M%S")
-    target = folder / f"homecoin-{stamp}-{reason}.db"
+    now = dt.datetime.now()
+    target = folder / f"homecoin-{now:%Y%m%d-%H%M%S}-{reason}.db"
+    while target.exists():  # two backups for the same reason in the same second: never overwrite the earlier one
+        now += dt.timedelta(seconds=1)
+        target = folder / f"homecoin-{now:%Y%m%d-%H%M%S}-{reason}.db"
     src = connect()
     try:
         _export(src, target, _key)  # the copies are encrypted with the same key too

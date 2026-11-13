@@ -492,7 +492,10 @@ def xirr(flows):
         return sum(v / (1 + r) ** ((d - t0).days / 365.0) for d, v in flows)
 
     lo, hi = -0.99, 10.0
-    f_lo, f_hi = npv(lo), npv(hi)
+    try:  # flows spread over centuries (a date typed as year 9999): the powers underflow or overflow, no rate
+        f_lo, f_hi = npv(lo), npv(hi)
+    except (ZeroDivisionError, OverflowError):
+        return None
     if f_lo * f_hi > 0:
         return None
     for _ in range(200):

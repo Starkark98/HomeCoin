@@ -69,9 +69,10 @@ class _Redirects(urllib.request.HTTPRedirectHandler):
 _opener = urllib.request.build_opener(_Redirects)
 
 
-def _get(url, limit, accept="application/octet-stream", to_file=None, not_found="No published release found on GitHub"):
+def _get(url, limit, accept="application/octet-stream", to_file=None, not_found=None):
     """HTTPS GET of a GitHub address, at most `limit` bytes: the bytes, or the file written (with its SHA-256).
     `not_found`: the message when GitHub answers 404 (a missing release, or a file not attached to it)."""
+    not_found = not_found or i18n.t("No published release found on GitHub")
     u = urllib.parse.urlsplit(url)
     if u.scheme != "https" or u.hostname not in ALLOWED_HOSTS:
         raise UpdateError(i18n.t("Unexpected download address"))
@@ -183,8 +184,8 @@ def download(manifest, kind, assets=None):
     f = manifest["files"].get("installer" if kind == "installer" else "zip")
     if not f:
         raise UpdateError(i18n.t("The release has no file for this installation"))
-    missing = (f"{f['name']} is not attached to the release v{manifest['version']} on GitHub: "
-               "install this version by hand, or try again once the file has been added")
+    missing = i18n.t("{name} is not attached to the release v{version} on GitHub: install this version by hand, "
+                     "or try again once the file has been added", name=f["name"], version=manifest["version"])
     if assets is not None and f["name"] not in assets:
         raise UpdateError(missing)
     url = f"{DOWNLOAD_PREFIX}v{manifest['version']}/{f['name']}"

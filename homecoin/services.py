@@ -196,17 +196,23 @@ def recurring_view(r):
 
 
 def upcoming(db, days=60, today=None, portfolio_id=None):
+    """Due dates of the active recurring items. With a space: its own items plus the recurring transfers that other
+    spaces send to its accounts ("incoming", read-only there, as in GET /api/recurring)."""
     today = today or dt.date.today()
     horizon = today + dt.timedelta(days=days)
     out = []
     for r in db.execute(
         """SELECT r.*, c.name AS category_name, c.icon AS category_icon, c.color AS category_color,
-                  a.name AS account_name
+                  a.name AS account_name, ta.name AS to_account_name,
+                  (? IS NOT NULL AND a.portfolio_id != ?) AS incoming
            FROM recurring r JOIN accounts a ON a.id = r.account_id
+           LEFT JOIN accounts ta ON ta.id = r.to_account_id
            LEFT JOIN categories c ON c.id = r.category_id
-           WHERE r.active = 1 AND (? IS NULL OR a.portfolio_id = ?)""", (portfolio_id, portfolio_id)
+           WHERE r.active = 1 AND (? IS NULL OR a.portfolio_id = ? OR (r.kind = 'transfer' AND ta.portfolio_id = ?))""",
+        (portfolio_id, portfolio_id, portfolio_id, portfolio_id, portfolio_id)
     ).fetchall():
         r = dict(r)
+        extra = {"to_account_name": r["to_account_name"], "incoming": bool(r["incoming"])}
         if r.get("expected"):  # variable amount and date: forecast from recent payments
             from .forecast import expected_forecast
             for d, amount, late, nominal in expected_forecast(db, r, today, horizon):
@@ -214,7 +220,8 @@ def upcoming(db, days=60, today=None, portfolio_id=None):
                             "name": r["name"], "kind": r["kind"], "amount": amount, "account_name": r["account_name"],
                             "account_id": r["account_id"], "to_account_id": r["to_account_id"],
                             "category_name": r["category_name"], "category_icon": r["category_icon"],
-                            "category_color": r["category_color"], "installment": None, "estimated": True, "source": "expected"})
+                            "category_color": r["category_color"], "installment": None, "estimated": True, "source": "expected",
+                            **extra})
             continue
         start = parse_date(r["start_date"])
         n = r["generated"]
@@ -232,7 +239,7 @@ def upcoming(db, days=60, today=None, portfolio_id=None):
                 "account_id": r["account_id"], "to_account_id": r["to_account_id"],
                 "category_name": r["category_name"], "category_icon": r["category_icon"],
                 "category_color": r["category_color"],
-                "installment": f"{n + 1}/{r['installments']}" if r["installments"] else None,
+                "installment": f"{n + 1}/{r['installments']}" if r["installments"] else None, **extra,
             })
             n += 1
     out.sort(key=lambda x: x["date"])

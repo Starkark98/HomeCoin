@@ -74,12 +74,22 @@ def wrap(secret, dek):
     return {"kdf": "scrypt", **SCRYPT, "salt": b64(salt), "nonce": b64(nonce), "box": b64(box)}
 
 
+def _sane_kdf(w):
+    """scrypt parameters as HomeCoin writes them (also older, weaker ones): a damaged or crafted backup file must not
+    make the key derivation run for minutes."""
+    n, r, p = w.get("n"), w.get("r"), w.get("p")
+    return all(isinstance(x, int) and not isinstance(x, bool) for x in (n, r, p)) and \
+        2 ** 10 <= n <= 2 ** 20 and n & (n - 1) == 0 and 1 <= r <= 16 and 1 <= p <= 4
+
+
 def unwrap(secret, w):
-    """Decrypted DEK, or None if the secret is wrong."""
+    """Decrypted DEK, or None if the secret is wrong (or the wrapped key is damaged)."""
     try:
+        if not isinstance(w, dict) or not _sane_kdf(w):
+            return None
         kek = _kek(secret, unb64(w["salt"]), w)
         return AESGCM(kek).decrypt(unb64(w["nonce"]), unb64(w["box"]), AAD)
-    except (InvalidTag, KeyError, ValueError):
+    except (InvalidTag, KeyError, ValueError, TypeError, AttributeError):
         return None
 
 
@@ -92,7 +102,7 @@ def seal(dek, data):
 def unseal(dek, box):
     try:
         return AESGCM(dek).decrypt(unb64(box["nonce"]), unb64(box["data"]), b"homecoin-backup-v1")
-    except (InvalidTag, KeyError, ValueError):
+    except (InvalidTag, KeyError, ValueError, TypeError, AttributeError):  # damaged file: not a backup
         return None
 
 
@@ -174,7 +184,7 @@ def _my_sid():
     import re
     m = re.search(r"S-1-5-[\d-]+", _run(["whoami", "/user", "/fo", "csv", "/nh"]))
     if not m:
-        raise RuntimeError("Windows user not found")
+        raise RuntimeError(i18n.t("Windows user not found"))
     return m.group(0)
 
 
@@ -231,13 +241,13 @@ def restrict_data_dir(path=None):
         probe.write_bytes(b"ok")
         probe.unlink()
         if data_dir_access(d):
-            raise RuntimeError("other accounts can still open the folder")
+            raise RuntimeError(i18n.t("other accounts can still open the folder"))
     except Exception as exc:
         try:  # rollback: permissions inherited from the parent folder, as before
             _run(["icacls", str(d), "/reset", "/T", "/C", "/Q"], timeout=90)
         except Exception:
             pass
-        raise RuntimeError(f"{exc} — permissions restored as before") from exc
+        raise RuntimeError(i18n.t("{exc} — permissions restored as before", exc=exc)) from exc
     return data_dir_access(d)
 
 
@@ -486,6 +496,7 @@ class Vault:
     def dek_from_backup(self, wraps, secret):
         """DEK of a backup made with another password/installation."""
         self._throttle()
+        wraps = wraps if isinstance(wraps, dict) else {}
         for kind, s in (("password", _norm_password(secret)), ("recovery", norm_recovery(secret).encode())):
             if kind in wraps and (dek := unwrap(s, wraps[kind])):
                 return dek
