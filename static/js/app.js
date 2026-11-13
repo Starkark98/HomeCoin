@@ -159,8 +159,130 @@ const MONTHS = I18N.months || ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 
 const datePart = (pattern, y, m, d = '') => pattern.replace(/\{(d|j|mon|m|yy|y)\}/g, (_, k) => ({ d, j: String(+d), mon: MONTHS[m - 1], m, y, yy: y.slice(2) }[k]));
 const fmtDate = (iso) => (iso ? datePart(I18N.date_pattern || '{d} {mon} {y}', iso.slice(0, 4), +iso.slice(5, 7), iso.slice(8, 10)) : '');  // i18n-skip
 const fmtMonth = (ym) => { const [y, m] = ym.split('-'); return datePart(I18N.month_pattern || '{mon} {yy}', y, +m); };  // i18n-skip
+// ---------------------------------------------------------------- date fields
+// A native <input type="date"> is drawn in the browser's language, not in HomeCoin's (Edge and Chrome ignore the page
+// language): every one is turned into a text field in the interface's numeric format (13/11/2026, 13.11.2026,
+// 2026/11/13, 11/13/2026 with the dollar) and a small calendar with the interface's month and day names. The original
+// input stays, hidden, with its id and its ISO value: the code that reads or sets .value and its change listeners work
+// as before (setting .value updates the text too).
+function dateLocale() {
+  const lang = I18N.lang || 'en';
+  if (lang !== 'en') return lang;
+  const loc = (I18N.currencies?.[CUR]?.locale || 'en-GB');
+  return loc.startsWith('en') ? loc : 'en-GB';  // English: the order of the currency's country (US: month first)
+}
+function dateShape() {
+  let parts;
+  try { parts = new Intl.DateTimeFormat(dateLocale(), { year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date(2026, 10, 13)); }
+  catch { parts = [{ type: 'day' }, { type: 'literal', value: '/' }, { type: 'month' }, { type: 'literal', value: '/' }, { type: 'year' }]; }
+  const order = parts.filter((p) => ['day', 'month', 'year'].includes(p.type)).map((p) => p.type[0]).join('');  // "dmy", "ymd"…
+  const sep = (parts.find((p) => p.type === 'literal')?.value || '/').trim() || '/';
+  return { order, sep };
+}
+function fmtDateInput(iso) {
+  if (!iso) return '';
+  const { order, sep } = dateShape();
+  const v = { y: iso.slice(0, 4), m: iso.slice(5, 7), d: iso.slice(8, 10) };
+  return [...order].map((k) => v[k]).join(sep);
+}
+// what the user typed → ISO date ('' = empty, null = not a date); ISO itself is always accepted
+function parseDateInput(text) {
+  const s = String(text || '').trim();
+  if (!s) return '';
+  const nums = s.match(/\d+/g);
+  if (!nums || nums.length !== 3) return null;
+  const { order } = dateShape();
+  const v = {};
+  (nums[0].length === 4 ? 'ymd' : order).split('').forEach((k, i) => { v[k] = +nums[i]; });
+  if (v.y < 100) v.y += 2000;
+  const d = new Date(v.y, v.m - 1, v.d);
+  return d.getFullYear() === v.y && d.getMonth() === v.m - 1 && d.getDate() === v.d ? isoLocal(d) : null;
+}
+const NATIVE_VALUE = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
+function enhanceDate(inp) {
+  if (inp.dataset.df) return;
+  inp.dataset.df = '1';
+  const wrap = document.createElement('span');
+  wrap.className = 'date-field';
+  const text = document.createElement('input');
+  text.className = 'date-text';
+  text.inputMode = 'numeric';
+  text.autocomplete = 'off';
+  text.placeholder = fmtDateInput('2026-12-31').replace(/\d/g, '·');  // the shape of a date, e.g. ··/··/····
+  text.title = inp.title || '';
+  const pick = document.createElement('button');
+  pick.type = 'button';
+  pick.className = 'date-pick';
+  pick.textContent = '📅';
+  pick.title = T('Choose from the calendar');
+  inp.replaceWith(wrap);
+  wrap.append(text, pick, inp);
+  inp.hidden = true;
+  inp.tabIndex = -1;
+  const show = () => { text.value = fmtDateInput(NATIVE_VALUE.get.call(inp)); text.classList.remove('bad'); };
+  Object.defineProperty(inp, 'value', { configurable: true, get() { return NATIVE_VALUE.get.call(inp); }, set(x) { NATIVE_VALUE.set.call(inp, x); show(); } });
+  const commit = (iso) => {
+    if (iso === NATIVE_VALUE.get.call(inp)) return;
+    NATIVE_VALUE.set.call(inp, iso);
+    inp.dispatchEvent(new Event('input', { bubbles: true }));
+    inp.dispatchEvent(new Event('change', { bubbles: true }));
+  };
+  text.addEventListener('input', () => {
+    const iso = parseDateInput(text.value);
+    const ok = iso !== null && (!inp.min || !iso || iso >= inp.min);
+    text.classList.toggle('bad', !ok);
+    if (ok) commit(iso);
+  });
+  text.addEventListener('blur', () => { if (!text.classList.contains('bad')) show(); });
+  pick.addEventListener('click', (e) => { e.preventDefault(); datePopup(inp, wrap, commit); });
+  show();
+}
+// small calendar under the field: month and weekday names of the interface language, Monday first
+function datePopup(inp, anchor, commit) {
+  document.querySelector('.date-pop')?.remove();
+  const loc = dateLocale();
+  const cur = NATIVE_VALUE.get.call(inp) || todayIso();
+  let y = +cur.slice(0, 4), m = +cur.slice(5, 7) - 1;
+  const pop = document.createElement('div');
+  pop.className = 'date-pop';
+  const wd = [...Array(7)].map((_, i) => new Intl.DateTimeFormat(loc, { weekday: 'narrow' }).format(new Date(2026, 10, 9 + i)));  // a Monday
+  const draw = () => {
+    const first = new Date(y, m, 1), off = (first.getDay() + 6) % 7, days = new Date(y, m + 1, 0).getDate();
+    const title = new Intl.DateTimeFormat(loc, { month: 'long', year: 'numeric' }).format(first);
+    const cells = [...Array(off)].map(() => '<span></span>').concat([...Array(days)].map((_, i) => {
+      const iso = isoLocal(new Date(y, m, i + 1));
+      const off2 = inp.min && iso < inp.min;
+      return `<button type="button" data-iso="${iso}" class="${iso === NATIVE_VALUE.get.call(inp) ? 'on' : ''} ${iso === todayIso() ? 'today' : ''}" ${off2 ? 'disabled' : ''}>${i + 1}</button>`;
+    }));
+    pop.innerHTML = `<div class="dp-head"><button type="button" data-step="-1" title="${esc(T('Previous month'))}">‹</button><b>${esc(title)}</b><button type="button" data-step="1" title="${esc(T('Next month'))}">›</button></div>
+      <div class="dp-grid">${wd.map((w) => `<i>${esc(w)}</i>`).join('')}${cells.join('')}</div>
+      <div class="dp-foot"><button type="button" data-iso="${todayIso()}" ${inp.min && todayIso() < inp.min ? 'disabled' : ''}>${T('Today')}</button>${inp.required ? '' : `<button type="button" data-iso="">${T('Clear')}</button>`}</div>`;
+  };
+  draw();
+  pop.addEventListener('mousedown', (e) => e.preventDefault());  // keep the focus where it is
+  pop.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const b = e.target.closest('button');
+    if (!b || b.disabled) return;
+    if (b.dataset.step) { m += +b.dataset.step; if (m < 0) { m = 11; y--; } if (m > 11) { m = 0; y++; } draw(); return; }
+    if (b.dataset.iso != null) { commit(b.dataset.iso); inp.value = b.dataset.iso; close(); }
+  });
+  const r = anchor.getBoundingClientRect();
+  document.body.append(pop);
+  const top = r.bottom + pop.offsetHeight + 8 > innerHeight ? Math.max(8, r.top - pop.offsetHeight - 6) : r.bottom + 6;
+  Object.assign(pop.style, { top: `${top}px`, left: `${Math.min(r.left, innerWidth - pop.offsetWidth - 8)}px` });
+  const close = () => { pop.remove(); document.removeEventListener('mousedown', away, true); document.removeEventListener('keydown', esc_, true); };
+  const away = (e) => { if (!pop.contains(e.target) && !anchor.contains(e.target)) close(); };
+  const esc_ = (e) => { if (e.key === 'Escape') { e.stopPropagation(); close(); } };
+  document.addEventListener('mousedown', away, true);
+  document.addEventListener('keydown', esc_, true);
+}
+// every date input that appears (pages, windows) becomes a date field in the interface language
+new MutationObserver(() => document.querySelectorAll('input[type="date"]:not([data-df])').forEach(enhanceDate))
+  .observe(document.documentElement, { childList: true, subtree: true });
+
 // "15 minutes", "1 hour", "2 hours" in the interface language
-const durationLabel = (m) => (m < 60 ? tn('{n} minute', '{n} minutes', m) : tn('{n} hour', '{n} hours', m / 60));
+const durationLabel =(m) => (m < 60 ? tn('{n} minute', '{n} minutes', m) : tn('{n} hour', '{n} hours', m / 60));
 const daysFrom = (iso) => Math.round((new Date(iso + 'T00:00:00') - new Date(todayIso() + 'T00:00:00')) / 86400000);
 
 const KIND_LABEL = { expense: T('Expense'), income: T('Income'), transfer: T('Transfer') };
@@ -1543,6 +1665,7 @@ async function renderRicorrenti(v) {
     });
     if (b.dataset.r === 'edit') recurringModal(r);
     if (b.dataset.r === 'reconcile') { await reconcileModal(r.id); refresh(); }
+    if (b.dataset.r === 'link') { await linkModal(r); refresh(); }
     if (b.dataset.r === 'toggle') {
       try { await api(`/recurring/${r.id}`, { method: 'PUT', body: { ...r, active: !r.active } }); toast(r.active ? T('Recurring item paused') : T('Recurring item resumed'), 'info'); refresh(); } catch (err) { fail(err); }
     }
@@ -1621,7 +1744,7 @@ function recCard(r) {
   const progress = r.installments
     ? `<div class="top small"><span>${T('Installment <b>{paid}</b> of {total}', { paid: r.paid, total: r.installments })}</span><span class="muted">${pct(r.progress)}</span></div>
        <div class="bar"><i style="width:${(r.progress * 100).toFixed(1)}%"></i></div>`
-    : r.expected ? `<div class="top small"><span>≈ ${T('Variable amount and date')}${r.match_text ? ` · «${esc(r.match_text)}»` : ''}</span><span class="muted">${tn('{n} linked', '{n} linked', r.generated)}</span></div>`
+    : r.expected ? `<div class="small muted">≈ ${T('Variable amount and date')}${r.match_text ? ` · «${esc(r.match_text)}»` : ''} · ${tn('{n} linked', '{n} linked', r.recorded)}</div>`
     : '';  // ongoing item: how many were recorded is in the stats line
   const stats = r.expected
     ? stat(r.expected_source === 'fixed' ? T('Expected (set)') : r.expected_source === 'set' ? T('Expected (typical)') : tn('Expected (median of {n})', 'Expected (median of {n})', r.expected_count), money(r.expected_amount))
@@ -1629,7 +1752,7 @@ function recCard(r) {
     : r.installments
     ? stat(T('Remaining'), money(r.remaining_amount)) + stat(T('Last installment'), fmtDate(r.last_date)) + stat(T('Interest'), r.principal ? (r.interest > 0 ? money(r.interest) : T('0% rate')) : '—')
     : stat(T('Per month'), money(r.monthly_equivalent)) + stat(T('From'), fmtDate(r.start_date)) + stat(T('Until'), r.end_date ? fmtDate(r.end_date) : '—')
-      + stat(T('Recorded'), r.generated);
+      + stat(T('Recorded'), r.recorded);
   return `<div class="card rec-card ${r.active ? '' : 'paused'}">
     <div class="rec-head"><div class="cat-ico" style="--c:${esc(color)}">${esc(ico)}</div>
       <div class="grow" style="min-width:0"><div class="title ellipsis" title="${esc(r.name)}">${esc(r.name)}</div>
@@ -1642,11 +1765,16 @@ function recCard(r) {
     <div class="rec-stats">${stats}</div>
     ${r.incoming
     ? `<div class="rec-actions"><span class="tag" title="${esc(T('It can be changed only in the space that created it'))}">↘ ${T('From {space} · read only', { space: esc(r.from_space) })}</span>
-        <button class="btn btn-sm btn-ghost" data-r="tx" data-id="${r.id}">📄 ${T('Transactions')}</button></div></div>`
-    : `<div class="rec-actions">${r.expected && r.active ? `<button class="btn btn-sm btn-primary" data-r="arrived" data-id="${r.id}" title="${esc(T('A new transaction already filled in: correct the real amount and date, it is linked to this recurring item'))}">＋ ${T('Record the one that arrived')}</button>` : ''}
-      <button class="btn btn-sm btn-ghost" data-r="tx" data-id="${r.id}">📄 ${T('Transactions')}</button>
-      ${toOtherSpace(r) ? `<button class="btn btn-sm btn-ghost" data-r="reconcile" data-id="${r.id}" title="${esc(T('Find the same money recorded in other ways in both spaces'))}">🔗 ${T('Reconcile')}</button>` : ''}
-      <button class="btn btn-sm btn-ghost" data-r="toggle" data-id="${r.id}">${r.active ? T('⏸ Pause') : T('▶ Resume')}</button>
+        <span class="spacer"></span><button class="icon-btn sm" data-r="tx" data-id="${r.id}" title="${esc(T('Transactions'))}">📄</button></div></div>`
+    // one line in every language: the frequent tools as icons (name on hover), Edit with its label on the right;
+    // "Record the one that arrived" of a variable item gets its own line above
+    : `${r.expected && r.active ? `<button class="btn btn-sm btn-primary rec-arrived" data-r="arrived" data-id="${r.id}" title="${esc(T('A new transaction already filled in: correct the real amount and date, it is linked to this recurring item'))}">＋ ${T('Record the one that arrived')}</button>` : ''}
+      <div class="rec-actions">
+      <button class="icon-btn sm" data-r="tx" data-id="${r.id}" title="${esc(T('Transactions'))}">📄</button>
+      ${toOtherSpace(r) ? `<button class="icon-btn sm" data-r="reconcile" data-id="${r.id}" title="${esc(`${T('Reconcile')}: ${T('Find the same money recorded in other ways in both spaces')}`)}">🔗</button>`
+        : `<button class="icon-btn sm" data-r="link" data-id="${r.id}" title="${esc(`${T('Link')}: ${T('Link payments already recorded (before this item existed, by hand or imported)')}`)}">📎</button>`}
+      <button class="icon-btn sm" data-r="toggle" data-id="${r.id}" title="${esc(r.active ? T('⏸ Pause') : T('▶ Resume'))}">${r.active ? '⏸' : '▶'}</button>
+      <span class="spacer"></span>
       <button class="btn btn-sm" data-r="edit" data-id="${r.id}">✏️ ${T('Edit')}</button></div></div>`}`;
 }
 
@@ -1679,6 +1807,8 @@ function recurringModal(r = null) {
       <label class="field">${T('Amount per payment')} <input id="r-amount" inputmode="decimal" value="${moneyInput(x.amount)}" placeholder="0,00"></label>
       <label class="field">${T('Frequency')} <select id="r-freq">${Object.entries(FREQ).map(([k, l]) => `<option value="${k}" ${x.frequency === k ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
       <label class="field">${T('First due date')} <input id="r-start" type="date" value="${esc(x.start_date)}"></label>
+      ${r && !r.expected && r.next_date ? `<label class="field">${T('Next due date')} <input id="r-next" type="date" value="${esc(r.next_date)}" min="${todayIso()}">
+        <span class="muted small">${T('Change it to move this due date and all the following ones (e.g. from the 15th to the 18th); the payments already recorded stay as they are.')}</span></label>` : ''}
       <label class="field"><span id="r-acc-label">${T('Account')}</span><select id="r-account">${accountOptions(x.account_id)}</select></label>
       <div class="field full" id="r-where-wrap">${T('Where does the money go?')}
         <div class="seg" id="r-where"><button type="button" data-where="here">${T('To an account of this space')}</button><button type="button" data-where="other">${T('To another space')}</button></div>
@@ -1842,6 +1972,7 @@ function recurringModal(r = null) {
       spread: $('#r-spread', m).value.trim() || null, index_value: $('#r-ivalue', m).value.trim() || null,
       end_date: $('#r-end', m).value || null, notes: $('#r-notes', m).value, active: r ? !!r.active : true,
       post_past: !r && $('#r-past', m).checked,
+      next_date: r && $('#r-next', m)?.value && $('#r-next', m).value !== r.next_date ? $('#r-next', m).value : null,
       holding_id: kind === 'transfer' && !$('#r-pac-wrap', m).classList.contains('hidden') && $('#r-pac', m).value ? +$('#r-pac', m).value : null,
       expected: !$('#r-var-wrap', m).classList.contains('hidden') && $('#r-var', m).checked, match_text: $('#r-match', m).value.trim(),
       amount_fixed: $('#r-fixed', m).checked, amortization: constant ? 'constant' : 'french',
@@ -1854,6 +1985,8 @@ function recurringModal(r = null) {
       // a recurring transfer to another space: propose the same money already recorded in other ways (if any)
       const saved = { ...body, id: r ? r.id : res.id };
       if (toOtherSpace(saved)) await reconcileModal(saved.id, { quiet: true });
+      // a new item whose first due dates have already passed: propose the payments already recorded for them
+      else if (!r && !body.post_past && body.start_date <= todayIso()) await linkModal(saved, { quiet: true });
       refresh();
     } catch (e) { fail(e); }
   };
@@ -1861,7 +1994,7 @@ function recurringModal(r = null) {
     // variable amount: the linked transactions are the real ones (imported or entered), so they always stay
     const mm = openModal(T('Delete the recurring item?'), r.expected
       ? `<p>${T('You are about to delete <b>{name}</b>.', { name: esc(r.name) })} ${tn('The {n} linked transaction is a real one and <b>is kept</b>: it is only unlinked.',
-        'The {n} linked transactions are the real ones and <b>are kept</b>: they are only unlinked.', r.generated)}</p>
+        'The {n} linked transactions are the real ones and <b>are kept</b>: they are only unlinked.', r.recorded)}</p>
         <div class="modal-foot"><button class="btn" data-no>${T('Cancel')}</button><button class="btn btn-danger" data-keep>${T('Delete the recurring item')}</button></div>`
       : `<p>${T('You are about to delete <b>{name}</b>.', { name: esc(r.name) })} ${T('What should happen to the transactions already recorded?')}</p>
       <div class="modal-foot"><button class="btn" data-no>${T('Cancel')}</button><button class="btn" data-keep>${T('Keep the transactions')}</button>
@@ -2244,6 +2377,7 @@ async function renderRipartizione(v) {
     people: $$('.sp-person', v).map((row) => ({
       id: row.dataset.id ? +row.dataset.id : null, name: $('[data-f=name]', row).value.trim(),
       income: parseMoney($('[data-f=income]', row).value) || 0, keyword: $('[data-f=keyword]', row).value.trim(),
+      space_id: $('[data-f=space]', row).value ? +$('[data-f=space]', row).value : null,
     })).filter((p) => p.name),
     settings: {
       split_base: $('#sp-base').value, split_months: $('#sp-months').value, split_margin: $('#sp-margin').value || 0,
@@ -2268,10 +2402,25 @@ async function renderRipartizione(v) {
   const saveSoon = () => saveLater(cfg());
   const s = state.settings;
 
+  // the space whose name contains the person's name (or the other way round): proposed as theirs
+  const guessSpace = (name) => {
+    const n = (name || '').trim().toLowerCase();
+    if (n.length < 2) return null;
+    return state.spaces.find((sp) => { const s = sp.name.toLowerCase(); return s.includes(n) || n.includes(s); })?.id ?? null;
+  };
+  const spaceSelect = (p) => {
+    const taken = new Set(state.people.filter((x) => x.id !== p.id && x.space_id).map((x) => x.space_id));
+    const guess = p.space_id ? null : guessSpace(p.name);
+    const sel = p.space_id || guess;
+    return `<select data-f="space" class="${guess && !taken.has(guess) ? 'suggested' : ''}" title="${esc(T('Their own space in HomeCoin: every transfer from it counts as theirs'))}">
+      <option value="">${T('— none')}</option>
+      ${state.spaces.map((sp) => `<option value="${sp.id}" ${sel === sp.id && !(guess && taken.has(guess)) ? 'selected' : ''} ${taken.has(sp.id) ? 'disabled' : ''}>${esc(sp.icon)} ${esc(sp.name)}${guess === sp.id ? ` (${T('suggested from the name')})` : ''}</option>`).join('')}</select>`;
+  };
   const personRow = (p = {}) => `<div class="sp-person" data-id="${p.id ?? ''}">
       <input data-f="name" maxlength="40" placeholder="${esc(T('Name'))}" value="${esc(p.name ?? '')}">
       <input data-f="income" inputmode="decimal" placeholder="${esc(T('Net monthly income'))}" value="${p.income ? moneyInput(p.income) : ''}">
-      <input data-f="keyword" maxlength="40" placeholder="${esc(T('Word in contributions'))}" value="${esc(p.keyword ?? '')}" title="${esc(T('Word used to recognize this person\'s contributions (e.g. the name as it appears on bank transfers)'))}">
+      ${spaceSelect(p)}
+      <input data-f="keyword" maxlength="40" placeholder="${esc(p.name || T('Word in contributions'))}" value="${esc(p.keyword ?? '')}" title="${esc(T('Word that recognizes this person\'s contributions in the description of the incomes (e.g. the name as it appears on bank transfers). Empty = their name.'))}">
       <button class="icon-btn sm" data-del-person title="${esc(T('Remove'))}">✕</button></div>`;
 
   const manualRow = (it = {}) => `<div class="sp-mrow">
@@ -2292,8 +2441,9 @@ async function renderRipartizione(v) {
     </div>
     <div class="grid-3-2">
       <div class="card"><div class="card-head"><h3>👥 ${T('People and income')}</h3><button class="btn btn-sm" id="sp-add">＋ ${T('Person')}</button></div>
-        <div class="sp-head muted small"><span>${T('Name')}</span><span>${T('Net income / month')}</span><span>${T('Recognize contributions from')}</span><span></span></div>
-        <div id="sp-people">${(state.people.length ? state.people : [{}, {}]).map(personRow).join('')}</div></div>
+        <div class="sp-head muted small"><span>${T('Name')}</span><span>${T('Net income / month')}</span><span>${T('Their space')}</span><span>${T('Keyword')}</span><span></span></div>
+        <div id="sp-people">${(state.people.length ? state.people : [{}, {}]).map(personRow).join('')}</div>
+        <p class="muted small sp-help">${T('<b>With their own space</b> in HomeCoin, every transfer from that space counts as theirs: nothing else to set. <b>Without a space</b> (they pay from a bank that is not in HomeCoin), their incomes are recognized by the keyword in the description: their name if you leave it empty, so write it the way it appears on the bank transfers (e.g. "Anna" in "Transfer from ANNA ROSSI"). Check the result in <i>Contributions in the period</i> below, and correct any row by hand.')}</p></div>
       <div class="card"><div class="card-head"><h3>⚙️ ${T('Settings')}</h3></div>
         <div class="form-grid">
           <label class="field full">${T('Calculation basis')} <select id="sp-base">${Object.entries(BASE_LABEL).map(([k, l]) => `<option value="${k}" ${s.split_base === k ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
@@ -2341,9 +2491,57 @@ async function renderRipartizione(v) {
   }
   $('#sp-add').onclick = () => { $('#sp-people').insertAdjacentHTML('beforeend', personRow()); $('#sp-people .sp-person:last-child input').focus(); };
   $('#sp-people').addEventListener('input', saveSoon);
+  // a name typed with no space chosen: the space with that name is proposed (and can be changed)
+  $('#sp-people').addEventListener('focusout', (e) => {
+    const row = e.target.closest('.sp-person');
+    if (!row || e.target.dataset.f !== 'name' || $('[data-f=space]', row).value) return;
+    const g = guessSpace(e.target.value), sel = $('[data-f=space]', row);
+    if (g && !sel.querySelector(`option[value="${g}"]`)?.disabled) { sel.value = String(g); sel.classList.add('suggested'); saveSoon(); }
+  });
+  // spaces proposed from the names when the page opens are saved right away (the select shows them as suggested)
+  if ($$('#sp-people [data-f=space].suggested', v).some((s) => s.value)) saveSoon();
   $('#sp-people').addEventListener('click', (e) => { if (e.target.closest('[data-del-person]')) { e.target.closest('.sp-person').remove(); save(); } });
   ['#sp-months', '#sp-round'].forEach((id) => ($(id).onchange = () => save()));
   ['#sp-margin', '#sp-min'].forEach((id) => ($(id).oninput = saveSoon));
+
+  // the attribution check: every transfer from other spaces and every income of the space in the period, who it
+  // counts for and why; the user's choice is saved on the transaction and always wins
+  function contribCard(r) {
+    const rows = r.contributions || [];
+    if (!rows.length) return '';
+    const REASON = { manual: T('your choice'), off: T('your choice'), space: T('from their space'), keyword: T('keyword in the description'),
+      source: T('name of the source account'), none: '' };
+    const name = (id) => r.people.find((p) => p.id === id)?.name || '';
+    const order = (x) => (x.counted && !x.person_id ? 0 : x.counted ? 1 : 2);
+    const sorted = rows.slice().sort((a, b) => order(a) - order(b) || b.date.localeCompare(a.date));
+    const unassigned = rows.filter((x) => x.counted && !x.person_id).length, notCounted = rows.filter((x) => !x.counted).length;
+    const status = (x) => (x.counted ? (x.person_id ? `<b>${esc(name(x.person_id))}</b>` : `<span class="tag warn">${T('unassigned')}</span>`) : `<span class="muted">${T('not counted')}</span>`);
+    const choice = (x) => (!x.manual ? 'auto' : x.counted ? `p:${x.person_id}` : 'off');
+    return `<div class="card" style="margin-bottom:18px"><div class="card-head"><div><h3>🔎 ${T('Contributions in the period')}</h3>
+        <p class="muted small" style="margin:3px 0 0">${T('Every transfer from other spaces and every income of this space in the period, who it counts for and why. If a row is wrong, choose the right person: your choice is kept.')}</p></div>
+        <span class="muted small">${unassigned ? `<span class="tag warn">${tn('{n} unassigned', '{n} unassigned', unassigned)}</span> ` : ''}${notCounted ? tn('{n} income not counted', '{n} incomes not counted', notCounted) : ''}</span></div>
+      <div class="table-wrap sp-contrib"><table class="sp-table"><thead><tr><th>${T('Date')}</th><th>${T('Description')}</th><th>${T('Account')}</th><th class="right">${T('Amount')}</th><th>${T('Counts for')}</th><th>${T('Why')}</th></tr></thead>
+        <tbody>${sorted.map((x) => `<tr class="${x.counted && !x.person_id ? 'unassigned' : x.counted ? '' : 'not-counted'}">
+          <td class="small">${fmtDate(x.date)}</td>
+          <td>${x.kind === 'transfer' ? '🔄 ' : ''}${esc(x.description)}${x.from_space ? `<div class="muted small">${T('from {space}', { space: esc(x.from_space) })}</div>` : ''}</td>
+          <td class="small">${esc(x.account)}</td><td class="right">${money(x.amount)}</td>
+          <td><select data-contrib="${x.id}">
+            <option value="auto" ${choice(x) === 'auto' ? 'selected' : ''}>${T('Automatic')}</option>
+            ${r.people.map((p) => `<option value="p:${p.id}" ${choice(x) === `p:${p.id}` ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}
+            <option value="off" ${choice(x) === 'off' ? 'selected' : ''}>${T('Not a contribution')}</option></select>
+            <div class="small" style="margin-top:3px">${status(x)}</div></td>
+          <td class="small muted">${REASON[x.reason] || ''}</td></tr>`).join('')}</tbody></table></div></div>`;
+  }
+  $('#sp-result').addEventListener('change', async (e) => {
+    const sel = e.target.closest('[data-contrib]');
+    if (!sel) return;
+    const v2 = sel.value;
+    try {
+      state = await api('/split/attribution', { method: 'PUT', body: { transaction_id: +sel.dataset.contrib,
+        person_id: v2.startsWith('p:') ? +v2.slice(2) : null, off: v2 === 'off' } });
+      drawResult();
+    } catch (err) { fail(err); }
+  });
 
   function drawResult() {
     const r = state.result, people = r.people.filter((p) => p.income > 0);
@@ -2359,7 +2557,8 @@ async function renderRipartizione(v) {
     r.rows.forEach((x) => {
       const k = r.base === 'expenses' ? x.key : `${x.key}`;  // categories: summed across accounts; other bases: one row per item
       const c = (byCat[k] ||= { ...x, monthly: 0, quotas: r.people.map(() => 0), accounts: [] });
-      c.monthly += x.monthly; c.quotas = c.quotas.map((q, i) => q + x.quotas[i]); c.accounts.push(x.account);
+      c.monthly += x.monthly; c.quotas = c.quotas.map((q, i) => q + x.quotas[i]);
+      c.accounts.push(x.via ? T('{account} (spent with {via})', { account: x.account, via: x.via }) : x.account);
     });
     const cats = Object.values(byCat).sort((a, b) => b.monthly - a.monthly);
     const ruleOf = (id) => state.rules.find((x) => x.id === id)?.split ?? 'prop';
@@ -2391,8 +2590,8 @@ async function renderRipartizione(v) {
           </table></div>
           <p class="muted small" style="margin:10px 0 0">${tn('The actual amount paid is the period <b>total</b> ({from} → {to}) divided by {n} month: it includes «Contributions…» income and <b>transfers received from other spaces</b> (e.g. from the contributor\'s personal space).',
             'The actual amount paid is the period <b>total</b> ({from} → {to}) divided by {n} months: it includes «Contributions…» income and <b>transfers received from other spaces</b> (e.g. from the contributor\'s personal space).',
-            r.months, { from: esc(fmtDate(r.from)), to: esc(fmtDate(r.to)) })} ${T('Each contribution counts for one person only: the one whose keyword is in the description, otherwise the one matching the source space or account. Transactions excluded from reports do not count.')}</p>
-          ${r.unassigned_total ? `<p class="small" style="margin:8px 0 0"><span class="tag warn">⚠ ${T('{amount} of unassigned contributions', { amount: money0(r.unassigned_total) })}</span> ${T('no keyword matches: add it to the right person above (e.g. the name of their space or of the account they pay from).')}</p>` : ''}</div>
+            r.months, { from: esc(fmtDate(r.from)), to: esc(fmtDate(r.to)) })} ${T('Each contribution counts for one person only: your choice in the list below, else the person whose space it comes from, else the one whose keyword is in the description. Transactions excluded from reports do not count.')}</p>
+          ${r.unassigned_total ? `<p class="small" style="margin:8px 0 0"><span class="tag warn">⚠ ${T('{amount} of unassigned contributions', { amount: money0(r.unassigned_total) })}</span> ${T('choose who made them in the list below, or link the person to their space.')}</p>` : ''}</div>
         <div class="card"><div class="card-head"><h3>🤝 ${T('Share and savings')}</h3><span class="muted">${T('fair vs actual')}</span></div>
           <div class="sp-people-res">${r.people.map((p) => `<div class="sp-pres">
             <div class="top"><b>${esc(p.name)}</b><span class="muted small">${T('income {amount} / month', { amount: money0(p.income) })}</span></div>
@@ -2408,6 +2607,7 @@ async function renderRipartizione(v) {
             </div>
             <div class="muted small">${tn('Paid in the period: <b>{amount}</b> in {n} bank transfer', 'Paid in the period: <b>{amount}</b> in {n} bank transfers', p.paid_count, { amount: money0(p.paid_total) })} (÷ ${tn('{n} month', '{n} months', r.months)})</div></div>`).join('')}</div></div>
       </div>
+      ${contribCard(r)}
       <div class="card"><div class="card-head"><div><h3>${{ expenses: T('🏷️ Rules per category'), deposits: T('🤝 Breakdown of contributions'), manual: T('✏️ Manual items') }[r.base]}</h3>
         <p class="muted small" style="margin:3px 0 0">${{ expenses: T('Actual average monthly spending and each person\'s share. Click the name to see the transactions.'),
           deposits: T('Monthly average of contributions per account: the part covering expenses split equally is divided in half, the rest in proportion to income.'),
@@ -2431,10 +2631,11 @@ async function renderRipartizione(v) {
     }));
     $('#sp-apply').onclick = async () => {
       const list = r.deposits.filter((d) => d.rounded > 0 && d.person_id);
-      if (!(await confirmDialog(`${T('Set the recurring monthly contributions to the proposed amounts? ({list})', { list: list.map((d) => T('{person} into {account}: {amount}', { person: d.person, account: d.account, amount: money0(d.rounded) })).join(', ') })} ${T('Anyone who pays with a recurring transfer from their own space will have that transfer updated, without a new one being created here.')}`, { ok: T('Update'), danger: false, title: T('Update the contributions?') }))) return;
+      if (!(await confirmDialog(`${T('Set the recurring monthly contributions to the proposed amounts? ({list})', { list: list.map((d) => T('{person} into {account}: {amount}', { person: d.person, account: d.account, amount: money0(d.rounded) })).join(', ') })} ${T('Whoever has their own space pays with a recurring transfer from it: it is updated, or created from the account they usually pay from. Whoever has no space gets a recurring contribution income here.')}`, { ok: T('Update'), danger: false, title: T('Update the contributions?') }))) return;
       try {
         const res = await api('/split/apply', { method: 'POST', body: { deposits: list.map((d) => ({ account_id: d.account_id, person_id: d.person_id, amount: d.rounded })) } });
         toast(`${T('Recurring items updated:')} ${res.updated}${res.created ? ` · ${T('created')} ${res.created}` : ''}${res.transfers?.length ? ` · ${T('transfers updated in the contributor\'s space:')} ${res.transfers.join(', ')}` : ''}`);
+        (res.warnings || []).forEach((w) => toast(w, 'err'));
       } catch (e) { fail(e); }
     };
   }
@@ -2840,6 +3041,64 @@ async function reconcileModal(rid, { quiet = false } = {}) {
       try {
         await api(`/recurring/${rid}/reconcile`, { method: 'POST', body: { days, tolerance: tol, choices } });
         toast(T('Recurring transfer made coherent in both spaces')); done();
+      } catch (e) { fail(e); }
+    };
+    draw();
+  });
+}
+
+// Link transactions already recorded (before the item existed, by hand, imported) to a recurring item. Every row starts
+// unticked: the user decides; a real transaction replaces the automatic one of the same due date. quiet = opened right
+// after saving a new item: nothing is shown when there is nothing to link.
+async function linkModal(rec, { quiet = false } = {}) {
+  const on = new Set();
+  let days = 5, tol = 2, first = rec.start_date;
+  const num = (m, sel, max) => Math.min(max, Math.max(0, Number($(sel, m).value) || 0));
+  const load = () => api(`/recurring/${rec.id}/link`, { method: 'POST', body: { dry_run: true, days, tolerance: tol, start_date: first } });
+  let r;
+  try { r = await load(); } catch (e) { if (!quiet) fail(e); return; }
+  if (quiet && !r.rows.length) return;
+  return new Promise((resolve) => {
+    const m = openModal(T('Link transactions to "{name}"', { name: rec.name }), `
+      <p class="muted small" style="margin-top:0">${T('Transactions already recorded that look like the payments of this recurring item (similar amount, close date). Tick the ones that are: they are linked to it. Nothing changes until you confirm.')}</p>
+      <div class="form-grid">
+        <label class="field">${T('First due date')} <input id="lk-first" type="date" value="${esc(first)}"></label>
+        <label class="field">${T('Date difference allowed (days)')} <input id="lk-days" type="number" min="0" max="31" step="1" value="${days}"></label>
+        <label class="field">${T('Amount difference allowed (%)')} <input id="lk-tol" type="number" min="0" max="100" step="1" value="${tol}"></label>
+        <p class="muted small full" style="margin:0">${T('Moving the first due date earlier lets you link older payments: the due dates before today then count as paid.')}</p>
+      </div>
+      <div id="lk-out" class="card" style="margin-top:12px"></div>
+      <div class="modal-foot"><button class="btn" data-cancel>${T('Not now')}</button>
+        <button class="btn" id="lk-same">${T('Tick the ones with the same amount')}</button>
+        <button class="btn btn-primary" id="lk-go">${T('Link the ticked ones')}</button></div>`, { wide: true });
+    const done = () => { closeModal(); resolve(); };
+    $('[data-cancel]', m).onclick = done;
+    const draw = () => {
+      const rows = r.rows.map((x) => `<div class="ri ${on.has(x.id) ? '' : 'off'}"><span class="ri-date">${fmtDate(x.date)}</span><span class="ri-desc">${esc(x.description)}</span>
+        <span class="ri-amt ${x.different ? 'neg' : ''}">${money(x.amount)}</span>
+        <div class="ri-act"><label><input type="checkbox" data-id="${x.id}" ${on.has(x.id) ? 'checked' : ''}> ${T('Linked to this recurring item')}</label>
+          <span class="muted">${T('Due date')}: ${fmtDate(x.due)}${x.installment ? ` · ${T('installment {n}', { n: x.installment })}` : ''}</span></div>
+        ${x.replaces || x.different ? `<div class="ri-note">${x.replaces ? `<div class="small">♊ ${T('It replaces the automatic transaction of that due date ({amount})', { amount: money(x.replaces.amount) })}</div>` : ''}${x.different ? `<div class="small neg">≠ ${T('Different amount from the due date ({amount}): tick it only if it is the same payment', { amount: money(x.due_amount) })}</div>` : ''}</div>` : ''}</div>`).join('');
+      $('#lk-out', m).innerHTML = `<div class="small">${tn('{n} due date up to today', '{n} due dates up to today', r.dues)}${r.covered ? ` · ✅ ${tn('{n} already covered by a linked transaction', '{n} already covered by a linked transaction', r.covered)}` : ''}</div>`
+        + (rows ? `<div class="ri-list">${rows}</div>` : `<div class="muted small" style="margin-top:8px">${T('No transaction to link: nothing already recorded looks like these payments.')}</div>`);
+      $$('[data-id]', m).forEach((el) => (el.onchange = () => { el.checked ? on.add(+el.dataset.id) : on.delete(+el.dataset.id); draw(); }));
+      $('#lk-go', m).disabled = !on.size;
+      $('#lk-same', m).disabled = !r.rows.some((x) => !x.different && !on.has(x.id));
+    };
+    const refresh = async () => {
+      try { r = await load(); const ids = new Set(r.rows.map((x) => x.id)); [...on].forEach((id) => ids.has(id) || on.delete(id)); draw(); }
+      catch (e) { $('#lk-out', m).innerHTML = `<div class="small neg">${esc(e.message)}</div>`; }
+    };
+    $$('#lk-days, #lk-tol', m).forEach((el) => (el.onchange = () => { days = Math.round(num(m, '#lk-days', 31)); tol = num(m, '#lk-tol', 100); refresh(); }));
+    $('#lk-first', m).onchange = (e) => { if (e.target.value) { first = e.target.value; refresh(); } };
+    $('#lk-same', m).onclick = () => { r.rows.forEach((x) => x.different || on.add(x.id)); draw(); };
+    $('#lk-go', m).onclick = async () => {
+      if (!(await confirmDialog(T('Apply the changes? A backup of the database is saved first.'), { ok: T('Apply'), danger: false }))) { resolve(); return; }
+      try {
+        const pairs = r.rows.filter((x) => on.has(x.id)).map((x) => ({ transaction_id: x.id, due: x.due }));
+        const res = await api(`/recurring/${rec.id}/link`, { method: 'POST', body: { pairs, start_date: first !== rec.start_date ? first : null } });
+        toast(tn('{n} transaction linked', '{n} transactions linked', pairs.length) + (res.replaced ? ` · ${tn('{n} automatic one replaced', '{n} automatic ones replaced', res.replaced)}` : ''));
+        done();
       } catch (e) { fail(e); }
     };
     draw();

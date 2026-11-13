@@ -176,6 +176,9 @@ def build(today=None):
 
         # -------------------------------------------------------------- personal
         pers = dbm.create_portfolio(conn, "Marco", "personal", "#6366f1", "👤")
+        # fair split: Marco pays from his own space (his transfers are his), Anna from a bank outside HomeCoin (her
+        # incomes are recognized by her name)
+        conn.execute("UPDATE people SET space_id = ? WHERE portfolio_id = ? AND name = 'Marco'", (pers, fam))
         cc = _acc(conn, pers, L("Current account"), "corrente", "🏦", "#6366f1", 350000)
         dep = _acc(conn, pers, L("Deposit account"), "risparmio", "🐷", "#10b981", 800000)
         broker = _acc(conn, pers, L("Broker"), "investimenti", "📈", "#8b5cf6")

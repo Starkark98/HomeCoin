@@ -72,40 +72,113 @@ def keyword(p):
     return (p.get("keyword") or p["name"]).strip().lower()
 
 
-def contributions(db, account_id, people, d_from, d_to):
-    """Actual contributions to an account in the period, each attributed to ONE person only:
-    - income in "Contribution…" categories (e.g. the person's bank transfer to the joint account; the Italian
-      "Versament…" names of older databases are recognized too);
-    - transfers received from accounts of OTHER spaces (e.g. from the contributor's personal space).
-    Attribution: first the person's keyword in the description or notes; if none, the name of the source space
-    or account. Returns ({person index: [total, count, of which transfers]}, unassigned)."""
-    rows = db.execute(
-        """SELECT t.amount, t.kind, lower(t.description) AS d, lower(t.notes) AS n,
-                  lower(COALESCE(s.name, '')) AS src_acc, lower(COALESCE(sp.name, '')) AS src_pf
+def candidates(db, portfolio_id, d_from, d_to):
+    """The money that reached the accounts of the space in the period and may be someone's contribution:
+    - transfers from accounts of OTHER spaces (e.g. from a person's own space: one flow of money, seen in both);
+    - every income of the space; those in a "Contribution…" category are contributions by default (also the Italian
+      "Versament…" names of older databases), the others only when they are attributed to a person.
+    Transactions excluded from reports never count."""
+    return [dict(r) for r in db.execute(
+        """SELECT t.id, t.date, t.amount, t.kind, t.description, t.notes, t.person_id, t.split_off,
+                  dst.id AS account_id, dst.name AS account, dst.color AS account_color,
+                  (t.kind = 'income' AND (c.code = 'contributions' OR c.name LIKE 'Contribution%' OR c.name LIKE 'Versament%'))
+                    AS contribution_cat,
+                  s.portfolio_id AS src_space, COALESCE(sp.name, '') AS src_space_name, COALESCE(s.name, '') AS src_account
            FROM transactions t
+           JOIN accounts dst ON dst.id = CASE WHEN t.kind = 'transfer' THEN t.to_account_id ELSE t.account_id END
            LEFT JOIN categories c ON c.id = t.category_id
            LEFT JOIN accounts s ON s.id = t.account_id AND t.kind = 'transfer'
            LEFT JOIN portfolios sp ON sp.id = s.portfolio_id
-           JOIN accounts dst ON dst.id = ?
-           WHERE NOT t.excluded AND t.date BETWEEN ? AND ?
-             AND ((t.kind = 'income' AND t.account_id = dst.id AND (c.code = 'contributions' OR c.name LIKE 'Contribution%' OR c.name LIKE 'Versament%'))
-               OR (t.kind = 'transfer' AND t.to_account_id = dst.id AND s.portfolio_id != dst.portfolio_id))""",
-        (account_id, d_from, d_to)).fetchall()
+           WHERE dst.portfolio_id = ? AND NOT t.excluded AND t.date BETWEEN ? AND ?
+             AND (t.kind = 'income' OR (t.kind = 'transfer' AND s.portfolio_id != dst.portfolio_id))
+           ORDER BY t.date DESC, t.id DESC""", (portfolio_id, d_from, d_to))]
+
+
+def attribute(c, people):
+    """Whose contribution a candidate is: (person index or None, reason, counted).
+    1. the user's choice (`person_id`, or `split_off` = not a contribution);
+    2. a transfer from the space linked to a person: that person (no keyword needed);
+    3. the person's keyword (their name by default) in the description or notes;
+    4. a transfer whose source space or account has the keyword in its name (older setups).
+    A transfer from another space or a "Contribution…" income nobody matches is still a contribution, unassigned;
+    any other income nobody matches is not counted."""
+    if c["split_off"]:
+        return None, "off", False
+    if c["person_id"]:
+        idx = next((i for i, p in enumerate(people) if p.get("id") == c["person_id"]), None)
+        if idx is not None:
+            return idx, "manual", True
+    transfer = c["kind"] == "transfer"
+    if transfer:
+        idx = next((i for i, p in enumerate(people) if p.get("space_id") and p["space_id"] == c["src_space"]), None)
+        if idx is not None:
+            return idx, "space", True
+    text = f"{c['description'] or ''} {c['notes'] or ''}".lower()
     kws = [keyword(p) for p in people]
-    out, unassigned = {i: [0, 0, 0] for i in range(len(people))}, 0
+    idx = next((i for i, kw in enumerate(kws) if kw and kw in text), None)
+    if idx is not None:
+        return idx, "keyword", True
+    if transfer:
+        names = f"{c['src_space_name']} {c['src_account']}".lower()
+        idx = next((i for i, kw in enumerate(kws) if kw and kw in names), None)
+        if idx is not None:
+            return idx, "source", True
+    return None, "none", bool(transfer or c["contribution_cat"])
+
+
+def attributed(db, portfolio_id, people, d_from, d_to):
+    """Every candidate with its attribution: [{..., who, reason, counted}]."""
+    out = []
+    for c in candidates(db, portfolio_id, d_from, d_to):
+        who, reason, counted = attribute(c, people)
+        out.append({**c, "who": who, "reason": reason, "counted": counted})
+    return out
+
+
+def contributions(rows, account_id, n):
+    """Contributions to one account from the attributed candidates: ({person index: [total, count, of which by
+    transfer]}, unassigned total)."""
+    out, unassigned = {i: [0, 0, 0] for i in range(n)}, 0
     for r in rows:
-        text = f"{r['d'] or ''} {r['n'] or ''}"
-        who = next((i for i, kw in enumerate(kws) if kw and kw in text), None)
-        if who is None and r["kind"] == "transfer":
-            who = next((i for i, kw in enumerate(kws) if kw and (kw in r["src_pf"] or kw in r["src_acc"])), None)
-        if who is None:
+        if r["account_id"] != account_id or not r["counted"]:
+            continue
+        if r["who"] is None:
             unassigned += r["amount"]
             continue
-        out[who][0] += r["amount"]
-        out[who][1] += 1
+        out[r["who"]][0] += r["amount"]
+        out[r["who"]][1] += 1
         if r["kind"] == "transfer":
-            out[who][2] += r["amount"]
+            out[r["who"]][2] += r["amount"]
     return out, unassigned
+
+
+def fed_accounts(db, portfolio_id, rows, d_from, d_to):
+    """Accounts of the space that receive money only from other accounts of the same space (a grocery card topped up
+    from the joint account, cash from the cashpoint): nobody pays into them directly, so their expenses belong to the
+    accounts that feed them. {fed account: {feeding account: share}} (shares of the internal money received)."""
+    direct = {r["account_id"] for r in rows if r["counted"]}
+    inflow = {}
+    for src, dst, total in db.execute(
+            """SELECT t.account_id, t.to_account_id, SUM(t.amount) FROM transactions t
+               JOIN accounts a ON a.id = t.account_id JOIN accounts b ON b.id = t.to_account_id
+               WHERE t.kind = 'transfer' AND a.portfolio_id = ? AND b.portfolio_id = ? AND NOT t.excluded
+                 AND t.date BETWEEN ? AND ? GROUP BY t.account_id, t.to_account_id""",
+            (portfolio_id, portfolio_id, d_from, d_to)):
+        if dst not in direct and src != dst:
+            inflow.setdefault(dst, {})[src] = total
+    shares = {dst: {src: v / sum(srcs.values()) for src, v in srcs.items()} for dst, srcs in inflow.items()}
+    for _ in range(3):  # a chain (joint → card → cash): resolved to the accounts people pay into
+        changed = False
+        for dst, srcs in shares.items():
+            if any(s in shares for s in srcs):
+                new = {}
+                for s, f in srcs.items():
+                    for s2, f2 in (shares[s].items() if s in shares and s != dst else [(s, 1)]):
+                        new[s2] = new.get(s2, 0) + f * f2
+                shares[dst], changed = new, True
+        if not changed:
+            break
+    return shares
 
 
 def _num(value, default):
@@ -137,7 +210,24 @@ def expense_rows(db, portfolio_id, d_from, d_to, months):
     return rows
 
 
-def base_rows(db, base, settings, portfolio_id, d_from, d_to, months):
+def redirect(rows, fed, accounts):
+    """Expense rows of fed accounts moved to the accounts that feed them (in proportion to the money received), so the
+    proposal says how much to pay into the account people really pay into; `via` keeps where the money was spent."""
+    out = []
+    for r in rows:
+        srcs = fed.get(r["account_id"])
+        if not srcs:
+            out.append(r)
+            continue
+        for src, share in srcs.items():
+            if src not in accounts:
+                continue
+            out.append({**r, "account_id": src, "account": accounts[src]["name"], "account_color": accounts[src]["color"],
+                        "monthly": r["monthly"] * share, "via": r["account"]})
+    return out
+
+
+def base_rows(db, base, settings, portfolio_id, d_from, d_to, months, attr=None):
     """Rows (account, item, rule, monthly amount) to split according to the chosen basis."""
     accounts = {a["id"]: dict(a) for a in db.execute(
         "SELECT id, name, color FROM accounts WHERE portfolio_id = ? AND NOT archived", (portfolio_id,))}
@@ -147,16 +237,17 @@ def base_rows(db, base, settings, portfolio_id, d_from, d_to, months):
                  "icon": "✏️", "color": accounts[it["account_id"]]["color"], "rule": it["rule"],
                  "monthly": it["amount"], "key": f"m{i}"}
                 for i, it in enumerate(clean_manual(settings.get("split_manual"), set(accounts)))]
-    exp = expense_rows(db, portfolio_id, d_from, d_to, months)
+    attr = attr if attr is not None else attributed(db, portfolio_id, [], d_from, d_to)
+    exp = redirect(expense_rows(db, portfolio_id, d_from, d_to, months),
+                   fed_accounts(db, portfolio_id, attr, d_from, d_to), accounts)
     if base == "expenses":
         return exp
     # contributions: for each account, the average amount contributed is split; the part covering that account's
     # "split equally" expenses is divided equally, the rest in proportion to income
     rows = []
     for acc_id, acc in accounts.items():
-        # contributed = "Contribution…" income + transfers from other spaces (as in the actual contributions per person)
-        per, unassigned = contributions(db, acc_id, [], d_from, d_to)
-        dep = unassigned / months
+        # contributed = everything counted as a contribution to this account, whoever made it
+        dep = sum(r["amount"] for r in attr if r["account_id"] == acc_id and r["counted"]) / months
         if dep <= 0:
             continue
         eq = min(dep, sum(r["monthly"] for r in exp if r["account_id"] == acc_id and r["rule"] == "equal"))
@@ -184,7 +275,8 @@ def compute(db, people, settings, portfolio_id):
     base = settings.get("split_base") if settings.get("split_base") in BASES else "expenses"
     d_from, d_to = period(months)
 
-    rows = base_rows(db, base, settings, portfolio_id, d_from, d_to, months)
+    attr = attributed(db, portfolio_id, people, d_from, d_to)
+    rows = base_rows(db, base, settings, portfolio_id, d_from, d_to, months, attr)
     if base != "manual":  # the contingency margin applies to averages, not to amounts typed by hand
         for r in rows:
             r["monthly"] *= 1 + margin
@@ -203,19 +295,24 @@ def compute(db, people, settings, portfolio_id):
         else:
             r["quotas"] = [r["monthly"] * f for f in frac]
 
-    # monthly contributions per account and person, compared with the actual ones in the period
+    # monthly contributions per account and person, compared with the actual ones in the period; also the accounts
+    # with no proposal that received contributions (otherwise money paid there would be invisible)
     accounts = {}
     for r in used:
         acc = accounts.setdefault(r["account_id"], {"account_id": r["account_id"], "account": r["account"],
                                                     "color": r["account_color"], "exact": [0.0] * n})
         acc["exact"] = [a + q for a, q in zip(acc["exact"], r["quotas"])]
+    for r in attr:
+        if r["counted"] and r["account_id"] not in accounts:
+            accounts[r["account_id"]] = {"account_id": r["account_id"], "account": r["account"],
+                                         "color": r["account_color"], "exact": [0.0] * n}
     deposits = []
     unassigned_total = 0
     for acc in accounts.values():
         # actual contributions: TOTAL contributions in the period divided by the months of the period (not the average
-        # bank transfer), so skipped months or contributions split into several transfers weigh correctly; includes
-        # transfers from other spaces, each attributed to one person only
-        per, unassigned = contributions(db, acc["account_id"], people, d_from, d_to)
+        # bank transfer), so skipped months or contributions split into several transfers weigh correctly; each one
+        # attributed to one person only (see attribute)
+        per, unassigned = contributions(attr, acc["account_id"], n)
         unassigned_total += unassigned
         for i, p in enumerate(people):
             total_paid, count, via_transfer = per[i]
@@ -253,7 +350,14 @@ def compute(db, people, settings, portfolio_id):
         "excluded_total": round(sum(r["monthly"] for r in rows if r["rule"] == "none")),
         "fair": fair, "people": people_out, "deposits": deposits,
         "paid_total": all_paid, "paid_month": round(all_paid / months),
-        "unassigned_total": unassigned_total,  # contributions that cannot be attributed to anyone (missing keyword)
+        "unassigned_total": unassigned_total,  # contributions that cannot be attributed to anyone
         "rows": [{k: (round(v) if k in ("monthly",) else v) for k, v in r.items() if k != "total"}
                  | {"quotas": [round(q) for q in r["quotas"]]} for r in rows],
+        # the attribution check: every candidate, who it counts for and why (the user can change it)
+        "contributions": [{"id": r["id"], "date": r["date"], "amount": r["amount"], "kind": r["kind"],
+                           "description": r["description"], "account_id": r["account_id"], "account": r["account"],
+                           "from_space": r["src_space_name"] if r["kind"] == "transfer" else None,
+                           "person_id": people[r["who"]].get("id") if r["who"] is not None else None,
+                           "reason": r["reason"], "counted": r["counted"], "manual": bool(r["person_id"] or r["split_off"])}
+                          for r in attr],
     }

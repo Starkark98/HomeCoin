@@ -52,14 +52,16 @@ def next_occurrence(r):
     return d if _limit_ok(r, n, d) else None
 
 
-def count_past_occurrences(r, today=None):
-    """How many occurrences fall on or before today (used to treat past installments as 'already paid')."""
+def count_past_occurrences(r, today=None, include_today=True):
+    """How many occurrences fall before today (and on today, with include_today): used to treat past installments as
+    'already paid' when an item is created or its schedule changes. Those pass with include_today=False, so a due date
+    of today is recorded like any other instead of being skipped (2.4.2)."""
     today = today or dt.date.today()
     start = parse_date(r["start_date"])
     n = 0
     while n < MAX_GENERATE:
         d = occurrence(start, r["frequency"], n)
-        if d > today or not _limit_ok(r, n, d):
+        if (d > today if include_today else d >= today) or not _limit_ok(r, n, d):
             break
         n += 1
     return n
@@ -91,8 +93,8 @@ def _process_recurring(db, today=None):
             d = occurrence(start, r["frequency"], n)
             if d > today or not _limit_ok(r, n, d):
                 break
-            if db.execute("SELECT 1 FROM transactions WHERE recurring_id = ? AND date = ? AND source = 'recurring'",
-                          (r["id"], d.isoformat())).fetchone():  # already recorded: do not duplicate it
+            if db.execute("SELECT 1 FROM transactions WHERE recurring_id = ? AND date = ?",
+                          (r["id"], d.isoformat())).fetchone():  # already recorded or linked: do not duplicate it
                 n += 1
                 continue
             label = r["name"]

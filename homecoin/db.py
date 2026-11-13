@@ -25,7 +25,7 @@ def default_data_dir():
 DATA_DIR = default_data_dir()
 BACKUP_DIR = DATA_DIR / "backups"
 DB_PATH = DATA_DIR / "homecoin.db"
-SCHEMA_VERSION = 16
+SCHEMA_VERSION = 17
 KEEP_BACKUPS = 15
 
 SCHEMA = """
@@ -98,7 +98,10 @@ CREATE TABLE IF NOT EXISTS transactions (
     recurring_id  INTEGER REFERENCES recurring(id) ON DELETE SET NULL,
     source        TEXT NOT NULL DEFAULT 'manual',
     excluded      INTEGER NOT NULL DEFAULT 0,  -- 1 = excluded from reports and totals (still counts in the balance)
-    created_at    TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    created_at    TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    -- fair split, chosen by the user (v17): whose contribution this is (NULL = automatic), or not a contribution at all
+    person_id     INTEGER REFERENCES people(id) ON DELETE SET NULL,
+    split_off     INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS ix_tx_date ON transactions(date);
 CREATE INDEX IF NOT EXISTS ix_tx_account ON transactions(account_id);
@@ -118,7 +121,8 @@ CREATE TABLE IF NOT EXISTS people (
     name     TEXT NOT NULL,
     income   INTEGER NOT NULL DEFAULT 0,   -- net monthly income in cents
     keyword  TEXT NOT NULL DEFAULT '',     -- to recognize their contributions in descriptions
-    position INTEGER NOT NULL DEFAULT 0
+    position INTEGER NOT NULL DEFAULT 0,
+    space_id INTEGER REFERENCES portfolios(id) ON DELETE SET NULL  -- their own space: its transfers are theirs (v17)
 );
 
 CREATE TABLE IF NOT EXISTS settings (
@@ -674,6 +678,14 @@ def migrate(conn):
     if "code" not in {r[1] for r in conn.execute("PRAGMA table_info(categories)")}:  # v16: fixed codes (languages)
         conn.execute("ALTER TABLE categories ADD COLUMN code TEXT")
         assign_category_codes(conn)
+    # v17: fair split aligned with the spaces: each person's own space, and the attribution chosen by hand
+    if "space_id" not in {r[1] for r in conn.execute("PRAGMA table_info(people)")}:
+        conn.execute("ALTER TABLE people ADD COLUMN space_id INTEGER REFERENCES portfolios(id) ON DELETE SET NULL")
+    tx_cols = {r[1] for r in conn.execute("PRAGMA table_info(transactions)")}
+    if "person_id" not in tx_cols:
+        conn.execute("ALTER TABLE transactions ADD COLUMN person_id INTEGER REFERENCES people(id) ON DELETE SET NULL")
+    if "split_off" not in tx_cols:
+        conn.execute("ALTER TABLE transactions ADD COLUMN split_off INTEGER NOT NULL DEFAULT 0")
 
 
 def init_db():

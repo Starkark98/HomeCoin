@@ -2,7 +2,7 @@
 
 # HomeCoin *by Starkark98*
 
-![Version](https://img.shields.io/badge/version-2.4.1-8b5cf6)
+![Version](https://img.shields.io/badge/version-2.4.2-8b5cf6)
 ![Python](https://img.shields.io/badge/Python-3.12%20%7C%203.13%20%7C%203.14-3776AB?logo=python&logoColor=white)
 ![Platform](https://img.shields.io/badge/platform-Windows-0078D6)
 ![Data](https://img.shields.io/badge/data-encrypted%2C%20on%20your%20PC-16a34a)
@@ -172,7 +172,7 @@ The guide follows the menu of the app: first the basics, then the pages of each 
 ### Typing amounts and dates
 
 - **Amounts follow your currency.** With the euro, the comma is the decimal separator: `1.500` is one thousand five hundred and `12,50` is twelve and a half. Where the dot is the decimal separator (dollar, pound…), `1.5` is one and a half and `1,500` is one thousand five hundred. You can always type plain numbers like `1234.56`, and HomeCoin also understands amounts pasted with a symbol or a currency code.
-- **Dates** can be typed as `31/12/2026`, `2026-12-31` or picked from the calendar. HomeCoin refuses impossible years (a typo like 2062) to protect your data.
+- **Dates** are written in the order of your language: `31/12/2026` (Italian, French, Spanish…), `31.12.2026` (German, Polish), `31-12-2026` (Dutch), `2026/12/31` (Japanese, Chinese), `2026.12.31` (Korean); in English it follows your currency's country, so `12/31/2026` with the US dollar. Type them (the separator does not matter, and `2026-12-31` always works) or pick them with 📅 from a calendar that also speaks your language. A date that does not exist is outlined in red and is not saved. HomeCoin refuses impossible years (a typo like 2062) to protect your data.
 
 <details>
 <summary><b>The 27 currencies and how each one is written</b></summary>
@@ -314,12 +314,15 @@ The type decides how an account counts. Choose it carefully: changing it later b
 
 **What you see**
 - At the top, the three kinds as a monthly amount: **fixed expenses**, **fixed income** (with the margin left each month) and **fixed transfers** (with those coming in from other spaces).
-- One card per item, grouped (investment plans, expenses, income, transfers): the amount and the next date, then on one line the monthly equivalent, the start and end dates and how many payments were recorded. Loans show the installment number and the remaining debt.
+- One card per item, grouped (investment plans, expenses, income, transfers): the amount and the next date, then a small grid with the monthly equivalent, the start and end dates and how many payments are **recorded** (real transactions linked to the item). Loans show the installment number and the remaining debt. At the bottom of each card: 📄 its transactions, 📎 link payments already recorded, ⏸ pause (point at an icon to see its name) and **✏️ Edit**.
 - On the right, **Next 60 days**: every due date coming up.
 
 **What you can do**
 - **＋ New recurring item**, starting from a ready-made model (mortgage, rent, furniture loan, car loan, bill, subscription, insurance, salary, automatic savings) or from scratch. **Frequency:** weekly, monthly, every 2 months, quarterly, every 6 months, yearly.
 - **⏸ Pause** and **▶ Resume**, **📄 Transactions** (the ones it recorded), **✏️ Edit**. When you delete an item you choose whether to keep the transactions it recorded or delete them too.
+- **First due dates already passed.** When you create an item that started in the past, its past due dates count as paid but are not recorded (tick *Also record past due dates as transactions* if you want them); a due date of **today** is recorded like any other.
+- **📎 Link** the payments you had already recorded (by hand or from a bank statement, maybe before the item existed): HomeCoin proposes, for each due date up to today, the transaction of the same account with a similar amount and a close date, **unticked**. Tick the ones that are those payments: they are linked to the item, and a real transaction replaces the automatic one HomeCoin had recorded for the same due date. Move the **first due date** back to link older payments too. The same window opens by itself after you save a new item whose first due dates have already passed, if there is something to link. A backup is saved first.
+- **Next due date** (✏️ Edit): change it to move that due date and all the following ones, for example when a payment moves from the 15th to the 18th. The payments already recorded and the installment number stay as they are.
 - **⚡ Process due payments** records at once anything already due (HomeCoin also does it by itself when you sign in).
 
 **Special items**
@@ -484,13 +487,19 @@ An income with no matching transfer stays as it is. Tick it only if that money r
 *Fair split: what each person should pay in, compared with what they actually paid.*
 
 **What you can do**
-1. Add the people (**＋ Person**) with their net monthly income and the word that recognizes their contributions in the descriptions (usually their name).
+1. Add the people (**＋ Person**) with their net monthly income, and tell HomeCoin how their money arrives:
+   - **Their space:** if the person has their own space in this HomeCoin, choose it. Every transfer from that space to the household counts as theirs, whatever its description. When a space has the person's name, it is proposed by itself.
+   - **Keyword:** for someone with no space (they pay from a bank that is not in HomeCoin), their **incomes** in the household are recognized by this word in the description: their name if you leave it empty, so write it the way it appears on the bank transfers ("Anna" in "Transfer from ANNA ROSSI").
 2. In **Settings**, choose the **calculation basis**: actual expenses (average), contributions made so far (total ÷ months), or amounts you enter by hand (**⤵ Prefill from actual expenses** fills them from the averages per category). Then the averaging period, a margin for unexpected costs (%), the rounding of the contributions and a minimum contribution.
 3. For each category: split **in proportion**, **equally** (for example a joint mortgage, divided in half) or leave it **out** of the calculation.
 4. HomeCoin proposes the monthly contribution of each person to each account and compares it with what each person really paid; **Share and savings** shows, for each person, the share and the savings rate, fair against actual.
-5. **Update recurring contributions** changes the recurring transfers of each person in one click.
+5. **Contributions in the period** lists every transfer from other spaces and every income of the household in the period, who it counts for and why (*from their space*, *keyword in the description*, *your choice*). If a row is wrong, choose the right person, or *Not a contribution*: your choice is kept and always wins. Rows nobody matches are highlighted as *unassigned*.
+6. **Update recurring contributions** sets each person's monthly contribution in one click: for someone with their own space, the recurring transfer from that space (updated, or created from the account they usually pay from); for someone without, a recurring contribution income in the household.
 
-**Tip.** The actual amount paid counts the contributions recorded as income in the household and the transfers received from the people's personal spaces.
+**Tips**
+- Money moved inside the household (for example the joint account topping up a grocery card, or cash from the cashpoint) is nobody's contribution: the expenses paid with it are proposed on the account people really pay into, and the table shows "(spent with Grocery card)".
+- An income in a *Contributions…* category nobody matches still counts, as unassigned; any other income counts only when it carries a person's keyword or you assign it.
+- Transactions excluded from reports never count.
 
 ## Wealth
 
@@ -749,6 +758,7 @@ Your data is never part of an update, and an encrypted backup is saved first. Ho
 | **Savings rate** | the share of income you saved in a month: saved ÷ income ([Savings](#savings)) |
 | **Money out** | spending plus money given to other spaces |
 | **Recurring item** | a payment that repeats, recorded by HomeCoin on its due dates ([Recurring payments](#recurring-payments)) |
+| **Due date** | the day a recurring payment or a loan installment is expected |
 | **Variable (expected) item** | a recurring payment whose amount or date changes; forecast with the median of the last six |
 | **Median** | the middle value of a list: half of the values are above it, half below; less affected by one unusual payment than the average |
 | **Cash-flow forecast** | the money you will have in your accounts after the coming payments ([Calendar](#calendar)) |
@@ -879,4 +889,4 @@ Any copy or modified version must keep the [LICENSE](LICENSE) file, including th
 
 ---
 
-*HomeCoin by **Starkark98** · v2.4.1 · see the [changelog](CHANGELOG.md)*
+*HomeCoin by **Starkark98** · v2.4.2 · see the [changelog](CHANGELOG.md)*

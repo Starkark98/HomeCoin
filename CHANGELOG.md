@@ -2,6 +2,15 @@
 
 All notable changes to HomeCoin are listed here, newest first.
 
+## 2.4.2 — 2026-11-13
+
+- **Fair split follows the spaces.** Each person can be linked to their own space: every transfer from it counts as theirs, whatever its description (before, a transfer counted only if the person's word appeared in it, so someone paying from their space could look as if they had paid almost nothing). Someone with no space is recognized by their name or keyword in the household's incomes. New **Contributions in the period**: every transfer and income of the period with who it counts for and why, correctable row by row (the choice is kept). Contributions to accounts with no expenses of their own are counted too; expenses paid with money moved inside the household (a grocery card topped up from the joint account, cash) are proposed on the account people pay into. *Update recurring contributions* creates or updates the recurring transfer from the person's own space, or a recurring income for someone without a space.
+- **📎 Link transactions to a recurring item.** The payments already recorded (by hand, imported, from before the item existed) can be linked to it: for each due date up to today HomeCoin proposes the transaction of the same account with a similar amount and a close date, unticked; a real transaction replaces the automatic one of the same due date. The first due date can be moved back to link older payments. The window opens by itself after saving a new item whose first due dates have passed, when there is something to link.
+- **Next due date** in the recurring item's window: move that due date and the following ones (e.g. from the 15th to the 18th) without touching the payments recorded or the installment number.
+- **Dates in your language.** Date fields followed the language of the browser (often English, month first) instead of HomeCoin's: now they are written in the order of the interface language (in English, of the currency's country), can be typed with any separator and come with a calendar in the same language.
+- **Tidier recurring cards** in every language: the figures in a regular two-column grid, the tools on one line (📄 transactions, 📎 link, ⏸ pause as icons, Edit with its label), *Record the one that arrived* on its own line.
+- **Fixed: a new recurring item counted one payment that did not exist.** The number of payments recorded is now the number of real transactions linked to the item; a due date of today, when an item is created or resumed, is recorded like any other instead of being skipped.
+
 ## 2.4.1 — 2026-11-12
 
 - **A new user guide.** Every page is described the same way (what it is for, what you see, what you can do, tips) with its own screenshot: 22 in all, in the order of the menu. New *Your first five minutes*, a table of the account types and how each one counts, a glossary, and the long technical parts (currencies, loan indexes, conversions, reconciliation, import formats) in boxes that open with a click.

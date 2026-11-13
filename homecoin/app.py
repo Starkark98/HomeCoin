@@ -28,7 +28,7 @@ from . import updater
 from . import util
 from .util import FREQUENCIES, add_months, months_between, parse_date, parse_number, rule_matches
 
-VERSION = "2.4.1"
+VERSION = "2.4.2"
 STATIC_DIR = dbm.BASE_DIR / "static"
 KINDS = ("expense", "income", "transfer")
 ACCOUNT_TYPES = ("corrente", "risparmio", "credito", "prepagata", "contanti", "investimenti", "altro")
@@ -1730,6 +1730,12 @@ def create_app(port):
                          next_date=nxt[0][3].isoformat() if nxt else None,
                          late_since=nxt[0][3].isoformat() if nxt and nxt[0][2] else None,
                          generated=db.execute("SELECT COUNT(*) FROM transactions WHERE recurring_id = ?", (r["id"],)).fetchone()[0])
+        # how many real transactions each item has (recorded or linked): "generated" is the position in the schedule, which
+        # also counts the past due dates treated as paid when the item was created, with no transaction behind them
+        linked = dict(db.execute("SELECT recurring_id, COUNT(*) FROM transactions WHERE recurring_id IS NOT NULL "
+                                 "GROUP BY recurring_id").fetchall())
+        for r in out:
+            r["recorded"] = linked.get(r["id"], 0)
         unverified = {}  # investment plan purchases with an estimated price for more than 30 days, per recurring item
         for u in tools.pac_unverified(db, pf()):
             unverified[u["recurring_id"]] = unverified.get(u["recurring_id"], 0) + 1
@@ -1748,7 +1754,7 @@ def create_app(port):
         r = recurring_from_body(b)
         own_account(r["account_id"])
         not_archived(r["account_id"], r["to_account_id"])
-        r["generated"] = 0 if b.get("post_past") else count_past_occurrences(r)
+        r["generated"] = 0 if b.get("post_past") else count_past_occurrences(r, include_today=False)
         r["pac_since"] = dt.date.today().isoformat() if r["holding_id"] else None  # automatic purchases from today onward
         r["amount"] = tools.scheduled_amount(r, r["generated"])  # constant principal: the next installment
         db = get_db()
@@ -1767,12 +1773,26 @@ def create_app(port):
         old = db.execute("SELECT * FROM recurring WHERE id = ?", (rid,)).fetchone()
         r["pac_since"] = (old["pac_since"] if old["holding_id"] == r["holding_id"] and old["pac_since"] else
                           dt.date.today().isoformat()) if r["holding_id"] else None
-        if (r["start_date"] != old["start_date"] or r["frequency"] != old["frequency"] or r["end_date"] != old["end_date"]
+        # next_date: the next due date and all the following ones move (e.g. from the 15th to the 18th). The schedule is
+        # moved so that its next position falls on that day: payments already recorded, installment number and the
+        # count of what is paid stay as they are (2.4.2)
+        nd = as_date(body().get("next_date"), "next due date", required=False)
+        moved = bool(nd) and not r["expected"] and bool(r["active"]) and bool(old["active"])
+        if moved:
+            if nd < dt.date.today().isoformat():
+                raise ApiError(i18n.t("The next due date cannot be in the past"))
+            n, d = old["generated"], dt.date.fromisoformat(nd)
+            unit, step = util.FREQUENCIES[r["frequency"]]
+            start = d - dt.timedelta(days=step * n) if unit == "d" else util.add_months(d, -step * n)
+            if util.occurrence(start, r["frequency"], n) != d:  # a 29th-31st that the first month does not have
+                raise ApiError(i18n.t("This day does not exist in every month of the schedule: choose a day up to the 28th"))
+            r["start_date"], r["generated"] = start.isoformat(), n
+        elif (r["start_date"] != old["start_date"] or r["frequency"] != old["frequency"] or r["end_date"] != old["end_date"]
                 or (r["active"] and not old["active"]) or r["expected"] != old["expected"]):
             # new schedule, resuming after a pause, end moved, switch to/from variable amount: the due dates already
             # recorded stay and it restarts from today, without duplicating them or catching up on past ones in bulk
             # (for those there is "link transactions")
-            r["generated"] = count_past_occurrences(r)
+            r["generated"] = count_past_occurrences(r, include_today=False)
         r["amount"] = tools.scheduled_amount(r, r.get("generated", old["generated"]))  # constant principal: next installment
         db.execute(f"UPDATE recurring SET {', '.join(f'{k}=?' for k in r)} WHERE id=?", (*r.values(), rid))
         db.commit()
@@ -1796,29 +1816,106 @@ def create_app(port):
         db.commit()
         return jsonify(ok=True)
 
+    def due_dates(r, start, today):
+        """Due dates of a recurring item from `start` up to today: [{n, date, amount}] (constant principal: its own amount)."""
+        plan = tools.loan_plan(r) if r.get("amortization") == "constant" and r["principal"] and r["installments"] else None
+        first, out = dt.date.fromisoformat(start), []
+        for k in range(2000):  # at most ~40 years weekly
+            d = util.occurrence(first, r["frequency"], k)
+            if d > today or (r["installments"] and k >= r["installments"]) or (r["end_date"] and d.isoformat() > r["end_date"]):
+                break
+            out.append({"n": k, "date": d.isoformat(), "amount": tools.scheduled_amount(r, k, plan) if plan else r["amount"]})
+        return out
+
+    def link_preview(db, r, start, days, tol):
+        """For every due date from `start` to today, the most likely transaction already recorded for it: same account,
+        same kind (a transfer: also the same destination), not linked to any recurring item, same money (similar amount,
+        close date, best overall pairing). Due dates already covered by a real transaction of the item are left out; the
+        automatic transaction the item recorded for a due date is shown as the one the real transaction replaces.
+        Every row starts unticked: the user decides."""
+        today = dt.date.today()
+        dues = due_dates(r, start, today)
+        mine = [dict(x) for x in db.execute(
+            "SELECT id, date, amount, source FROM transactions WHERE recurring_id = ?", (r["id"],))]
+        real = [t for t in mine if t["source"] != "recurring"]
+        covered = {dues[i]["date"] for i, _ in util.best_pairs(dues, real, lambda d, t: same_money(d, t, days, 100))}
+        open_dues = [d for d in dues if d["date"] not in covered]
+        lo = (dt.date.fromisoformat(start) - dt.timedelta(days=days)).isoformat()
+        hi = (today + dt.timedelta(days=days)).isoformat()
+        cands = [dict(x) for x in db.execute(
+            """SELECT id, date, amount, description FROM transactions
+               WHERE recurring_id IS NULL AND kind = ? AND account_id = ? AND (? != 'transfer' OR to_account_id = ?)
+                 AND date BETWEEN ? AND ?""", (r["kind"], r["account_id"], r["kind"], r["to_account_id"], lo, hi))]
+        auto = {}
+        for t in mine:
+            if t["source"] == "recurring":
+                auto.setdefault(t["date"], t)
+        rows = []
+        for i, j in util.best_pairs(open_dues, cands, lambda d, t: same_money(d, t, days, tol)):
+            due, t = open_dues[i], cands[j]
+            a = auto.get(due["date"])
+            rows.append({"due": due["date"], "installment": due["n"] + 1 if r["installments"] else None, "id": t["id"],
+                         "date": t["date"], "amount": t["amount"], "description": t["description"],
+                         "due_amount": due["amount"], "different": far_apart(t["amount"], due["amount"]),
+                         "replaces": {"id": a["id"], "amount": a["amount"]} if a else None})
+        rows.sort(key=lambda x: x["due"])
+        return {"name": r["name"], "start_date": r["start_date"], "first": start, "dues": len(dues),
+                "covered": len(covered), "rows": rows, "days": days, "tolerance": tol}
+
     @app.post("/api/recurring/<int:rid>/link")
     def recurring_link(rid):
-        """Links transactions already recorded to a recurring item (e.g. deposits made before creating it). With start_date
-        it moves the start back: past due dates count as paid and no transaction is generated again."""
+        """Links transactions already recorded to a recurring item (payments made before it existed, entered by hand or
+        imported). dry_run: the proposal of link_preview, from `start_date` (default: the item's start). Applying:
+        `pairs` [{transaction_id, due}] (or `transaction_ids` without a due date) are linked; the automatic transaction
+        the item had recorded for that due date is deleted, because the real one replaces it (backup first). With
+        start_date the first due date moves: the due dates before today count as paid and none is generated again."""
         db = get_db()
         own_recurring(rid)
         b = body()
-        ids = id_list(b.get("transaction_ids"), "transaction")
+        r = dict(db.execute("SELECT * FROM recurring WHERE id = ?", (rid,)).fetchone())
+        start = as_date(b.get("start_date"), "first due date", required=False)
+        if b.get("dry_run"):
+            g.audit_skip = True  # a preview changes nothing: not in the activity log
+            return jsonify(link_preview(db, r, start or r["start_date"], *match_limits(b)))
+        pairs = b.get("pairs") or []
+        if not isinstance(pairs, list) or not all(isinstance(p, dict) for p in pairs):
+            raise ApiError(i18n.t("Invalid request"))
+        dues = {as_int(p.get("transaction_id"), "transaction"): as_date(p.get("due"), "due date") for p in pairs}
+        ids = list(dict.fromkeys(id_list(b.get("transaction_ids"), "transaction") + list(dues)))
         for tid in ids:
-            row = db.execute("SELECT account_id FROM transactions WHERE id = ?", (tid,)).fetchone()
+            row = db.execute("SELECT account_id, recurring_id FROM transactions WHERE id = ?", (tid,)).fetchone()
             if not row or portfolio_of("accounts", row[0]) != pf():
                 raise ApiError(i18n.t("Transaction not found in this space: {tid}", tid=tid))
-        start = as_date(b.get("start_date"), "first due date", required=False)
+            if row[1] not in (None, rid):
+                raise ApiError(i18n.t("A transaction is already linked to another recurring item"))
+        if dues:
+            dbm.backup_now("pre-reconcile")
         if start:
             db.execute("UPDATE recurring SET start_date = ? WHERE id = ?", (start, rid))
         if ids:
             db.execute(f"UPDATE transactions SET recurring_id = ? WHERE id IN ({','.join('?' * len(ids))})", (rid, *ids))
+        replaced = []  # the automatic transaction of a due date now covered by the real one
+        for tid, due in dues.items():
+            replaced += [x[0] for x in db.execute("""SELECT id FROM transactions WHERE recurring_id = ? AND date = ?
+                                                     AND source = 'recurring' AND id != ?""", (rid, due, tid))]
+        if replaced:
+            drop_pac_trades(db, replaced)
+            db.execute(f"DELETE FROM transactions WHERE id IN ({','.join('?' * len(replaced))})", replaced)
         r = dict(db.execute("SELECT * FROM recurring WHERE id = ?", (rid,)).fetchone())
-        db.execute("UPDATE recurring SET generated = ? WHERE id = ?", (count_past_occurrences(r), rid))
+        gen = count_past_occurrences(r, include_today=False)
+        sched = {d["date"]: d["n"] for d in due_dates(r, r["start_date"], max(
+            [dt.date.today()] + [dt.date.fromisoformat(d) for d in dues.values()]))}
+        for due in dues.values():  # a due date of today (or later) paired with a real transaction is paid too
+            if due in sched:
+                gen = max(gen, sched[due] + 1)
+        db.execute("UPDATE recurring SET generated = ? WHERE id = ?", (gen, rid))
         db.commit()
         process_recurring(db)
         linked = db.execute("SELECT COUNT(*) FROM transactions WHERE recurring_id = ?", (rid,)).fetchone()[0]
-        return jsonify(ok=True, linked=linked, **recurring_view(db.execute("SELECT * FROM recurring WHERE id = ?", (rid,)).fetchone()))
+        note(f"{r['name']} · " + i18n.tn("{n} transaction", "{n} transactions", len(ids))
+             + (" · " + i18n.tn("{n} automatic one replaced", "{n} automatic ones replaced", len(replaced)) if replaced else ""))
+        return jsonify(ok=True, linked=linked, replaced=len(replaced),
+                       **recurring_view(db.execute("SELECT * FROM recurring WHERE id = ?", (rid,)).fetchone()))
 
     @app.post("/api/recurring/<int:rid>/reconcile")
     def recurring_reconcile(rid):
@@ -2576,7 +2673,10 @@ def create_app(port):
             "SELECT id, name, icon, color, split FROM categories WHERE kind = 'expense' AND portfolio_id = ? ORDER BY name", (p,))]
         accounts = [dict(r) for r in db.execute(
             "SELECT id, name, color FROM accounts WHERE portfolio_id = ? AND NOT archived ORDER BY id", (p,))]
-        return {"people": people, "settings": settings, "rules": rules, "accounts": accounts,
+        # the other spaces, to link each person to their own one
+        spaces = [dict(r) for r in db.execute(
+            "SELECT id, name, icon, type FROM portfolios WHERE id != ? AND NOT archived ORDER BY position, id", (p,))]
+        return {"people": people, "settings": settings, "rules": rules, "accounts": accounts, "spaces": spaces,
                 "result": splitm.compute(db, people, settings, p)}
 
     @app.get("/api/split")
@@ -2594,18 +2694,26 @@ def create_app(port):
         if isinstance(people, list):
             if len(people) > 10:
                 raise ApiError(i18n.t("At most 10 people"))
-            keep = []
+            keep, linked = [], set()
             for pos, p in enumerate(people):
                 name = as_text(as_dict(p, "person").get("name"), 40)
                 if not name:
                     raise ApiError(i18n.t("Each person must have a name"))
-                vals = (name, as_int(p.get("income") or 0, "income", minimum=0), as_text(p.get("keyword"), 40), pos)
+                # their own space (another space of this HomeCoin): every transfer from it counts as theirs
+                space = as_int(p.get("space_id"), "space", required=False)
+                if space is not None:
+                    if space == cur_pf or not db.execute("SELECT 1 FROM portfolios WHERE id = ?", (space,)).fetchone():
+                        raise ApiError(i18n.t("Space not found"))
+                    if space in linked:
+                        raise ApiError(i18n.t("Two people cannot have the same space"))
+                    linked.add(space)
+                vals = (name, as_int(p.get("income") or 0, "income", minimum=0), as_text(p.get("keyword"), 40), pos, space)
                 person_id = as_int(p.get("id"), "id", required=False)
                 if person_id and portfolio_of("people", person_id) == cur_pf:
-                    db.execute("UPDATE people SET name=?, income=?, keyword=?, position=? WHERE id=?", (*vals, person_id))
+                    db.execute("UPDATE people SET name=?, income=?, keyword=?, position=?, space_id=? WHERE id=?", (*vals, person_id))
                 else:
-                    person_id = db.execute("INSERT INTO people(name, income, keyword, position, portfolio_id) VALUES (?,?,?,?,?)",
-                                           (*vals, cur_pf)).lastrowid
+                    person_id = db.execute("INSERT INTO people(name, income, keyword, position, space_id, portfolio_id) "
+                                           "VALUES (?,?,?,?,?,?)", (*vals, cur_pf)).lastrowid
                 keep.append(person_id)
             marks = ",".join("?" * len(keep)) or "NULL"
             db.execute(f"DELETE FROM people WHERE portfolio_id = ? AND id NOT IN ({marks})", (cur_pf, *keep))
@@ -2651,7 +2759,7 @@ def create_app(port):
         # Italian "Versament…") for categories created by hand
         cat = db.execute("SELECT id FROM categories WHERE kind='income' AND (code = 'contributions' OR name LIKE 'Contribution%' "
                          "OR name LIKE 'Versament%') AND portfolio_id = ? ORDER BY code IS NULL, id", (cur_pf,)).fetchone()
-        updated, created, transfers = 0, 0, []
+        updated, created, transfers, warnings = 0, 0, [], []
         start = add_months(dt.date.today().replace(day=1), 1).replace(day=15).isoformat()
         deposits = b.get("deposits") or []
         if not isinstance(deposits, list) or not all(isinstance(d, dict) for d in deposits):
@@ -2663,17 +2771,52 @@ def create_app(port):
             if not p or portfolio_of("accounts", account_id) != cur_pf:
                 raise ApiError(i18n.t("Person or account not found"))
             kw = (p["keyword"] or p["name"]).strip()
-            # someone who contributes with a recurring transfer from their own space: THAT transfer is updated (otherwise
-            # an extra income here would double the balance of the joint account)
+            rec = db.execute("""SELECT id, name FROM recurring WHERE kind='income' AND account_id=? AND active=1
+                                AND (name LIKE ? OR name LIKE ?) ORDER BY id LIMIT 1""",
+                             (account_id, f"%{kw}%", f"%{p['name']}%")).fetchone()
+            space = db.execute("SELECT id, name FROM portfolios WHERE id = ?", (p["space_id"],)).fetchone() \
+                if p["space_id"] else None
+            if space:
+                # a person with their own space pays in with a recurring transfer from it: one flow of money, seen in
+                # both spaces (an income here as well would record it twice)
+                gc = db.execute("""SELECT r.id FROM recurring r JOIN accounts s ON s.id = r.account_id
+                                   WHERE r.kind = 'transfer' AND r.to_account_id = ? AND r.active = 1 AND s.portfolio_id = ?
+                                   ORDER BY r.id LIMIT 1""", (account_id, space["id"])).fetchone()
+                if gc:
+                    db.execute("UPDATE recurring SET amount=? WHERE id=?", (amount, gc["id"]))
+                    updated += 1
+                else:
+                    # from the account they usually pay from, else their current account, else their first account
+                    src = db.execute("""SELECT t.account_id, MAX(t.date) AS last FROM transactions t
+                                        JOIN accounts s ON s.id = t.account_id
+                                        WHERE t.kind = 'transfer' AND t.to_account_id = ? AND s.portfolio_id = ? AND NOT s.archived
+                                        GROUP BY t.account_id ORDER BY COUNT(*) DESC, last DESC LIMIT 1""",
+                                     (account_id, space["id"])).fetchone()
+                    src_id = src["account_id"] if src else (db.execute(
+                        """SELECT id FROM accounts WHERE portfolio_id = ? AND NOT archived AND type != 'investimenti'
+                           ORDER BY type != 'corrente', id LIMIT 1""", (space["id"],)).fetchone() or [None])[0]
+                    if not src_id:
+                        raise ApiError(i18n.t("The space \"{space}\" of {name} has no account to pay from", space=space["name"], name=p["name"]))
+                    day = int(src["last"][8:10]) if src else 1  # from next month, on the day they usually pay
+                    when = add_months(dt.date.today().replace(day=1), 1).replace(day=min(day, 28)).isoformat()
+                    acc_name = db.execute("SELECT name FROM accounts WHERE id = ?", (account_id,)).fetchone()[0]
+                    db.execute("""INSERT INTO recurring(name, kind, amount, account_id, to_account_id, frequency, start_date,
+                                  generated, active, notes) VALUES (?, 'transfer', ?, ?, ?, 'monthly', ?, 0, 1, ?)""",
+                               (i18n.t("Contribution to {account}", account=acc_name), amount, src_id, account_id, when,
+                                "Created by the fair split calculator"))
+                    created += 1
+                transfers.append(i18n.t("{name} (transfer from the space \"{space}\")", name=p["name"], space=space["name"]))
+                if rec:
+                    warnings.append(i18n.t("{name} also has the recurring income \"{item}\" in this space: the same money would be recorded twice. Use 🔗 Reconcile on the transfer, or remove it.", name=p["name"], item=rec["name"]))
+                continue
+            # no space linked: a recurring transfer from another space with their keyword in its name, its account or its
+            # space (set up before the link existed) is updated, so the money is never recorded twice
             gc = db.execute("""SELECT r.id, sp.name AS pf_name FROM recurring r JOIN accounts s ON s.id = r.account_id
                                JOIN portfolios sp ON sp.id = s.portfolio_id
                                WHERE r.kind = 'transfer' AND r.to_account_id = ? AND r.active = 1 AND s.portfolio_id != ?
                                AND (lower(r.name) LIKE lower(?) OR lower(s.name) LIKE lower(?) OR lower(sp.name) LIKE lower(?))
                                ORDER BY r.id LIMIT 1""",
                             (account_id, cur_pf, f"%{kw}%", f"%{kw}%", f"%{kw}%")).fetchone()
-            rec = db.execute("""SELECT id FROM recurring WHERE kind='income' AND account_id=? AND active=1
-                                AND (name LIKE ? OR name LIKE ?) ORDER BY id LIMIT 1""",
-                             (account_id, f"%{kw}%", f"%{p['name']}%")).fetchone()
             if gc:
                 db.execute("UPDATE recurring SET amount=? WHERE id=?", (amount, gc["id"]))
                 transfers.append(i18n.t("{name} (transfer from the space \"{space}\")", name=p["name"], space=gc["pf_name"]))
@@ -2692,7 +2835,31 @@ def create_app(port):
         db.commit()
         note(i18n.t("{updated} updated, {created} created", updated=updated, created=created)
              + (" · " + i18n.t("transfers: {list}", list=", ".join(transfers)) if transfers else ""))
-        return jsonify(updated=updated, created=created, transfers=transfers)
+        return jsonify(updated=updated, created=created, transfers=transfers, warnings=warnings)
+
+    @app.put("/api/split/attribution")
+    def split_attribution():
+        """The user's choice for one transaction that reached the space: whose contribution it is (`person_id`), not a
+        contribution at all (`off`), or back to automatic (neither)."""
+        family_only()
+        b = body()
+        db = get_db()
+        cur_pf = pf()
+        tid = as_int(b.get("transaction_id"), "transaction")
+        t = db.execute("""SELECT a.portfolio_id FROM transactions t JOIN accounts a
+                          ON a.id = CASE WHEN t.kind = 'transfer' THEN t.to_account_id ELSE t.account_id END
+                          WHERE t.id = ? AND t.kind IN ('income', 'transfer')""", (tid,)).fetchone()
+        if not t or t[0] != cur_pf:
+            raise ApiError(i18n.t("Transaction not found in this space: {tid}", tid=tid))
+        person = as_int(b.get("person_id"), "person", required=False)
+        if person is not None and not db.execute("SELECT 1 FROM people WHERE id = ? AND portfolio_id = ?",
+                                                 (person, cur_pf)).fetchone():
+            raise ApiError(i18n.t("Person or account not found"))
+        off = 1 if b.get("off") is True else 0
+        db.execute("UPDATE transactions SET person_id = ?, split_off = ? WHERE id = ?", (None if off else person, off, tid))
+        db.commit()
+        g.audit_skip = True  # a detail of the calculation, not a change of the data people look for in the log
+        return jsonify(split_state())
 
     # ------------------------------------------------- analysis tools
 
