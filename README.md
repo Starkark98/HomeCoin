@@ -2,7 +2,7 @@
 
 # HomeCoin *by Starkark98*
 
-![Version](https://img.shields.io/badge/version-2.4.4-8b5cf6)
+![Version](https://img.shields.io/badge/version-2.5.0-8b5cf6)
 ![Python](https://img.shields.io/badge/Python-3.12%20%7C%203.13%20%7C%203.14-3776AB?logo=python&logoColor=white)
 ![Platform](https://img.shields.io/badge/platform-Windows-0078D6)
 ![Data](https://img.shields.io/badge/data-encrypted%2C%20on%20your%20PC-16a34a)
@@ -48,7 +48,7 @@ Starkark98
 - *The basics:* [How HomeCoin is organized](#how-homecoin-is-organized) · [Language and currency](#language-and-currency) · [Typing amounts and dates](#typing-amounts-and-dates) · [Spaces](#spaces) · [Dashboard](#dashboard)
 - *Everyday:* [Transactions](#transactions) · [Accounts](#accounts) · [Recurring payments](#recurring-payments) · [Calendar](#calendar) · [Reports](#reports)
 - *Planning:* [Budgets](#budgets) · [Goals](#goals) · [Emergency fund](#emergency-fund) · [Mortgage and loans](#mortgage-and-loans) · [Fair split](#fair-split)
-- *Wealth:* [Investments](#investments) (with [Rebalancing](#rebalancing)) · [Savings](#savings)
+- *Wealth:* [Investments](#investments) · [Portfolio analysis](#portfolio-analysis) (composition, diversification, [rebalancing](#rebalancing), costs, projection, comparison) · [Savings](#savings)
 - *Tools:* [Importing bank statements](#importing-bank-statements) · [Categories and rules](#categories-and-rules) · [Activity log](#activity-log) · [Settings](#settings)
 
 **Your data**
@@ -70,7 +70,7 @@ Starkark98
 - **Does the boring work for you.** It imports bank statements, records recurring payments when they are due and suggests categories from what you did before.
 - **Looks ahead.** A calendar of the payments coming up and how much cash you will have left (cash-flow forecast); budgets that warn you before you overspend.
 - **Helps you plan.** Savings goals with the amount to put aside each month, an emergency fund check, a mortgage amortization schedule with early-repayment simulation, a fair way to share household costs.
-- **Follows your investments.** Value, gains, return, asset allocation and a rebalancing calculator that tells you what to buy or sell to get back to your target.
+- **Follows your investments.** Value, gains, return and asset allocation; what your funds are really made of (countries, sectors, currencies, the companies inside them and how much two funds overlap), a rebalancing calculator, costs, income, a projection and a comparison with an index.
 - **Keeps your data yours.** It runs on your PC only, the data is encrypted, and nobody (not even the author) can open it without your password.
 - **Speaks your language.** Deutsch, English, Español, Français, Italiano, Nederlands, Polski, Português (Brasil), 日本語 (Japanese), 繁體中文 (Traditional Chinese) or 한국어 (Korean), with the number format of your currency.
 
@@ -93,7 +93,7 @@ Every page is shown with a screenshot in the [Guide](#guide) below. All screensh
 
 HomeCoin is installed for your Windows user only, in `%LOCALAPPDATA%\Programs\HomeCoin`. It needs no administrator rights and does not touch the rest of the system.
 
-- **Opening and closing.** Open HomeCoin from the Start menu or the desktop shortcut: it opens in your browser and runs in the background without a window. To stop it, use **⋯ → Close HomeCoin** (top right). If you click the shortcut while it is already running, it simply opens the page again.
+- **Opening and closing.** Open HomeCoin from the Start menu or the desktop shortcut: it opens in your browser and runs in the background without a window. To stop it, use **⋯ → Close HomeCoin** (top right): the page that follows has **▶ Reopen HomeCoin**, which starts it again (the browser may ask once whether to open HomeCoin: allow it). If you click the shortcut while it is already running, it simply opens the page again.
 - **Uninstalling** removes the program and **keeps your data**, telling you where it is.
 
 ### With the ZIP (if you prefer to use your own Python)
@@ -151,7 +151,7 @@ The guide follows the menu of the app: first the basics, then the pages of each 
 
 | Where | What |
 |---|---|
-| **Left menu** | the pages, grouped by what you do: **Everyday** (Transactions, Accounts, Recurring, Calendar, Reports), **Planning** (Budgets, Goals, Emergency fund, Mortgage, Fair split), **Wealth** (Investments, Savings), **Tools** (Import, Categories, Activity log, Settings) |
+| **Left menu** | the pages, grouped by what you do: **Everyday** (Transactions, Accounts, Recurring, Calendar, Reports), **Planning** (Budgets, Goals, Emergency fund, Mortgage, Fair split), **Wealth** (Investments, Portfolio analysis, Savings), **Tools** (Import, Categories, Activity log, Settings) |
 | **Top left** | the space you are in, and the switch to the others |
 | **Bottom left** | the version of HomeCoin you are using |
 | **Top right** | 👁 hides all amounts (when someone is looking at your screen) · 🔒 locks HomeCoin · **⋯** light/dark theme, Settings, *Help* (this guide), *Support HomeCoin* (Ko-fi), *Close HomeCoin* · **＋ New transaction**, always there |
@@ -517,7 +517,7 @@ An income with no matching transfer stays as it is. Tick it only if that money r
 - One section per account, with its securities: quantity, **average cost** (weighted average purchase price), price, value, **unrealized gain** (on what you still hold) and **realized gains** (from what you sold).
 
 **What you can do.** There are two ways to follow an account, and you can mix them:
-- **With securities and trades.** **＋ Security** with its **ticker**, the code it is quoted under on Yahoo Finance (for example `VWCE.DE` or `SWDA.MI`), and its asset class. **＋ Trade** records buys, sells, dividends, interest, fees, capital returns and splits.
+- **With securities and trades.** **＋ Security** with its **ticker**, the code it is quoted under on Yahoo Finance (for example `VWCE.DE` or `SWDA.MI`), and its asset class. Optional, for [Portfolio analysis](#portfolio-analysis): the **ISIN** (the 12-character code on the broker statement or the fund's factsheet), whether it is a **fund or ETF** or a **single stock** (filled in from Yahoo when it can), and the **TER**, the yearly ongoing charges of a fund in % (on its factsheet or KID). **＋ Trade** records buys, sells, dividends, interest, fees, capital returns and splits.
 - **With valuations.** For an account you only know the total of (for example a pension fund), **＋ Manual value** from time to time.
 
 **🌐 Update prices** downloads the latest prices from Yahoo Finance, converted into your currency; it sends only the tickers, nothing else.
@@ -527,12 +527,55 @@ An income with no matching transfer stays as it is. Tick it only if that money r
 - **Money market funds** are parked cash: buying or selling them does not count as invested, and they count toward the emergency fund.
 - HomeCoin warns you about **investment plan prices to verify** (automatic purchases still at an estimated price after 30 days: **✏️ Verify** with the price from the broker statement) and about **cash idle** on the broker for 30 days or more (often a purchase you have not recorded).
 
-### Rebalancing
+### Portfolio analysis
 
-**What it is for.** Over time some investments grow faster than others and your portfolio drifts away from the mix you chose. **Rebalancing** brings it back. Open it in Investments → 🧭 Rebalancing.
+**What it is for.** What your investments are really made of, how well they are spread, and the tools investment platforms offer: where your money is in the world, in which areas, countries, sectors and currencies, which companies you own through your funds, how diversified you are compared with the world market and how your securities move together; then rebalancing, costs, a projection and a comparison with an index. It comes with the Investments page (Settings → Spaces). Everything here is a calculation: it never records anything.
 
-![Rebalancing](docs/images/15-rebalancing.png)
-*Rebalancing with new money only: what to buy to move back towards the targets, with a note when the money is not enough.*
+![Portfolio analysis](docs/images/15-portfolio-analysis.png)
+*Portfolio analysis → Composition: the world map of your countries, then areas, countries, markets, currencies and sectors, looking inside the funds (look-through).*
+
+**Accounts analyzed.** At the top, one choice for every tab: tick the investment accounts to analyze (all by default; **All** brings them back). The portfolio is judged as a whole, because accounts are only containers; with fewer accounts you look at one part of it, for example the accounts of one goal. The choice is remembered for the space.
+
+**What you see.** Six tabs. Every weight is shown with two decimals (a company at 0.42% is never rounded to 0%), with a symbol next to it: the **flag** of each country, an icon for each area, market, sector and asset class, the **symbol** of each currency.
+- **🧭 Composition.** Four summary boxes (value analyzed, main area, main country, main currency), then a **world map** of the countries you invest in: the darker the country, the larger its weight; point at one for its weight and value. Below, your investments by **geographic area** (five areas, each one whole: North America, Latin America, Europe, Middle East and Africa, Asia-Pacific), **country**, **developed and emerging markets**, **currency**, **sector** (the 11 GICS sectors, of the shares only), **asset class** and **security**; with two or more accounts, **By account** (value, weight, main asset class, number of securities and the diversification score of each account on its own); the **20 largest underlying securities** (the same company held through several funds is added up; weight = share of the whole value analyzed). A security without a price yet is listed too. Weights are of the part whose data is known (shown under each list); **What is not known** lists the rest and why, and lets you type a missing ISIN right there.
+- **🧩 Diversification.** A **score from 1 to 10** with its level (8–10 high, 5–7 medium, 1–4 low), calculated on the measures used by fund managers, index providers and regulators and shown criterion by criterion, each with its value, the points it gets and when it gets full points: the **effective number of companies** (from the Herfindahl-Hirschman index), the **UCITS 5/10/40 rule** on the largest companies, the **weight of the 10 largest**, the **similarity to the world** equity market by country, the **effective number of sectors**, the **asset classes** you hold and the **average correlation** of your securities. A criterion that cannot be measured yet (for example the correlation without 12 months of prices) is left out and the score is calculated on the others. Then how much of the **world market** your countries cover, your areas and your developed/emerging split **against the world market** (bars side by side), the **overlap between funds** (100% = they hold the same securities with the same weights: high overlap means less diversification than it seems) and the **correlation matrix** of your securities: how they moved together month by month, from +1 (always together: they do not protect each other) through 0 (unrelated) to −1 (opposite), in colors from red to blue, with the average.
+- **⚖️ Rebalancing:** see [below](#rebalancing).
+- **💸 Costs.** The **TER** (ongoing charges) of each fund, typed **right in the table** (it is saved by itself), the **average TER** weighted by value and what the funds cost you **per year** and per month in money; funds without a TER are flagged.
+- **🔮 Projection.** How much the portfolio could be worth with a regular contribution: you choose the **amount** and **how often** (every month, every 3 or 6 months, every year, or never), the years and three scenarios (prudent, middle, optimistic return, all editable). With an inflation rate, the values and the money put in are both in today's money. A calculator: returns are not guaranteed.
+- **📊 Comparison.** Your investments against an index or ETF of your choice (for example `VWCE.DE`), month by month: total and yearly return, and the **largest fall** from a peak (maximum drawdown). Your return is **time-weighted**: money you add or take out does not count as performance.
+
+**What you can do**
+- **Compositions from the issuers** (off until you allow it): HomeCoin downloads what is inside each fund from the public files of its issuer (**iShares, Vanguard, Xtrackers, Amundi, SPDR, Invesco**), sending only the **ISIN**; the result is saved, encrypted, with its date. **⟳ Update compositions** does it again when you want (funds change their holdings over time; a composition older than four months is flagged). For **single stocks** the country comes from the ISIN and the sector from Yahoo Finance.
+- Type the **TER** in Costs and a missing **ISIN** in *What is not known*, or both in [Investments](#investments) (✏️ on the security).
+- For the correlation matrix, use **🌐 Update prices** in Investments: it needs at least 12 months of prices for each security.
+
+**Tips**
+- Funds of other issuers (for example UBS) are listed as *not published by a supported issuer*: their securities still count by asset class and value.
+- **Synthetic (swap) funds** publish the basket they hold as collateral, not the index they follow: HomeCoin warns you, because their countries and sectors are not their real exposure.
+- Invesco does not publish countries and sectors (only the securities and their currency), Vanguard not the currency of each security: HomeCoin estimates it from the country and tells you so.
+- Diversification is measured on the **shares** (stocks and equity funds), as the platforms do: bonds, money market, commodities and cash are in the asset classes. The world market weights are approximate (developed and emerging markets, free float) and dated on the page.
+- The broker cash counts in your currency, with no country.
+
+<details><summary>How the diversification score is calculated</summary>
+
+Ten points, from measures that are standard in the industry; all are calculated on the shares whose composition is known, except the asset classes and the correlation.
+
+| Criterion | What it measures | Points |
+|---|---|---|
+| Effective number of companies | 1 ÷ the Herfindahl-Hirschman index (HHI, the sum of the squared weights): how many equal companies would give the same concentration | 2 from 75, 1 from 25 |
+| UCITS 5/10/40 rule | the European limit for funds: no company above 10%, those above 5% together at most 40% | 1 if both limits are met |
+| Weight of the 10 largest | the concentration ratio of the 10 largest companies | 1 up to 30% |
+| Similarity to the world | your countries against the world equity market: the sum, country by country, of the smaller of the two weights | 2 from 70%, 1 from 45% |
+| Effective number of sectors | the same HHI measure on the 11 GICS sectors (the world market is about 7) | 2 from 6, 1 from 4 |
+| Asset classes | classes with at least 10% of the investments (broker cash and accounts valued as a whole left out) | 1 from 2 classes |
+| Average correlation | the average correlation of the monthly returns of your securities | 1 up to 0.50 |
+
+Score = points ÷ points that could be measured × 10, rounded, at least 1. A world index fund alone scores 9 (it is a single asset class; the correlation needs at least two securities); with a bond fund next to it, 10. A few single stocks score low.
+</details>
+
+#### Rebalancing
+
+**What it is for.** Over time some investments grow faster than others and your portfolio drifts away from the mix you chose. **Rebalancing** brings it back. Open it in Portfolio analysis → ⚖️ Rebalancing.
 
 **What you can do**
 - Set the **target allocation**: the weight in % of each asset class, or of each security. **Use current weights** starts from today's mix.
@@ -729,7 +772,7 @@ Your data is never part of an update, and an encrypted backup is saved first. Ho
 
 **In short:** your data stays on your PC, encrypted, and opens only with your password. HomeCoin has no account, no tracking, no ads and no cloud.
 
-- **It does not go online,** except for two optional things: *Update prices* (sends only the tickers of your securities to Yahoo Finance) and the update check (asks GitHub for the latest version). *Help* and *Support* open GitHub and Ko-fi in a new tab only when you click them.
+- **It does not go online,** except for three optional things: *Update prices* and the comparison with an index (send only tickers to Yahoo Finance), *Update compositions* in Portfolio analysis (off until you allow it; sends only the ISIN of each fund to its issuer: iShares, Vanguard, Xtrackers, Amundi, SPDR or Invesco) and the update check (asks GitHub for the latest version). *Help* and *Support* open GitHub and Ko-fi in a new tab only when you click them.
 - **Only your PC can reach it.** HomeCoin listens on `127.0.0.1` (the loopback address), which other computers cannot reach, and refuses requests coming from other websites.
 - **Encrypted data** (encryption at rest). The database and every backup are encrypted with AES-256. The key that unlocks them is itself locked by your password and by your recovery key (through a deliberately slow key derivation, scrypt, that makes guessing passwords very expensive), and stays in memory only while HomeCoin is unlocked.
 - **Locked by default.** When HomeCoin starts, nothing can be read until you enter the password; it locks again after inactivity.
@@ -743,7 +786,7 @@ Your data is never part of an update, and an encrypted backup is saved first. Ho
 - **Backups:** `.hcbackup` files are encrypted with the data key (AES-256-GCM) and carry that key only in its password-protected form, so a backup is as safe as your password is strong.
 - **Web protections:** Host header check (DNS rebinding), writes require a custom header and a local Origin (CSRF), requests marked `Sec-Fetch-Site: cross-site` refused, HttpOnly + SameSite=Strict session cookie, one active session, strict Content-Security-Policy, no iframes, a Permissions-Policy that denies camera, microphone, location, payments and devices, no server name or version disclosed.
 - **Temporary import code:** for your own local import scripts (Settings → Security → Advanced); it can never use security functions, backups, restores, exports or updates, and it is revoked when HomeCoin locks.
-- **Libraries:** installed only from ready-made packages at exact versions, each checked against its SHA-256 (`requirements.lock`), and checked for known vulnerabilities before every release. Chart.js is bundled; no CDN.
+- **Libraries:** installed only from ready-made packages at exact versions, each checked against its SHA-256 (`requirements.lock`), and checked for known vulnerabilities before every release. Chart.js, the flags (flag-icons) and the world map (world-atlas, from Natural Earth) are bundled; no CDN.
 - **Updates:** a manifest listing each file's size and SHA-256, signed with Ed25519; the private key never leaves the author's PC.
 - **Custom data folder:** set the environment variable `HOMECOIN_DATA_DIR`.
 
@@ -782,6 +825,20 @@ Your data is never part of an update, and an encrypted backup is saved first. Ho
 | **XIRR** | the annual return that takes into account when each sum went in or out (money-weighted return) |
 | **Asset allocation** | how your investments are split among stocks, bonds, money market, commodities, cash |
 | **Drift** | how far a weight is from its target, in percentage points ([Rebalancing](#rebalancing)) |
+| **ISIN** | the 12-character international code of a security (e.g. IE00BK5BQT80), on broker statements and factsheets |
+| **Look-through** | looking inside the funds you own, to see the companies, countries and sectors you are really exposed to ([Portfolio analysis](#portfolio-analysis)) |
+| **Overlap** | how much two funds hold the same securities with the same weights: 100% = identical |
+| **Geographic area** | a whole part of the world (North America, Latin America, Europe, Middle East and Africa, Asia-Pacific): countries are listed apart |
+| **Developed / emerging markets** | countries with a mature economy and financial market (US, Europe, Japan…) / growing economies (China, India, Brazil…), as the index providers classify them |
+| **Diversification** | spreading money over many companies, countries and sectors, so that no single one can hurt much |
+| **Effective number of companies** | how many companies with the same weight would give the same concentration: 1 ÷ the Herfindahl-Hirschman index (HHI, the sum of the squared weights) |
+| **UCITS 5/10/40 rule** | the European limit for funds: at most 10% in one company, and the companies above 5% together at most 40% |
+| **World market coverage / similarity** | the share of the world equity market made by the countries you hold / how close your country mix is to the world's (100% = the same) |
+| **Correlation** | how two securities moved together, from +1 (always together) through 0 (unrelated) to −1 (opposite): low correlation protects better (Pearson correlation of monthly returns) |
+| **TER** | total expense ratio: the yearly ongoing charges of a fund, in % of what you have in it |
+| **Synthetic (swap) fund** | a fund that follows its index through a swap contract: what it holds is collateral, not the index |
+| **Time-weighted return** | the return of the investments themselves, leaving out the money you add or take out (used to compare with an index) |
+| **Maximum drawdown** | the largest fall from a peak before a new high: how bad the worst period was |
 | **Money market fund** | a very low-risk fund used as parked cash; HomeCoin counts it as cash |
 | **Recovery key** | the second key to your data, for when you forget the password |
 | **Encrypted backup (`.hcbackup`)** | a copy of all your data that opens only in HomeCoin with your password or recovery key |
@@ -882,7 +939,7 @@ HomeCoin is provided **"as is", without warranty of any kind**, as stated in the
 
 ## License
 
-Copyright (c) 2026 Starkark98. Released under the **MIT License with the [Commons Clause](https://commonsclause.com/)**: see [LICENSE](LICENSE) for the full text. The bundled Chart.js library keeps its own MIT license.
+Copyright (c) 2026 Starkark98. Released under the **MIT License with the [Commons Clause](https://commonsclause.com/)**: see [LICENSE](LICENSE) for the full text. The bundled Chart.js library and flag-icons keep their own MIT licenses; the world map comes from world-atlas (ISC) and Natural Earth (public domain).
 
 In plain words (the LICENSE file is what legally applies):
 
@@ -898,4 +955,4 @@ Any copy or modified version must keep the [LICENSE](LICENSE) file, including th
 
 ---
 
-*HomeCoin by **Starkark98** · v2.4.4 · see the [changelog](CHANGELOG.md)*
+*HomeCoin by **Starkark98** · v2.5.0 · see the [changelog](CHANGELOG.md)*

@@ -25,7 +25,7 @@ def default_data_dir():
 DATA_DIR = default_data_dir()
 BACKUP_DIR = DATA_DIR / "backups"
 DB_PATH = DATA_DIR / "homecoin.db"
-SCHEMA_VERSION = 17
+SCHEMA_VERSION = 18
 KEEP_BACKUPS = 15
 
 SCHEMA = """
@@ -165,7 +165,21 @@ CREATE TABLE IF NOT EXISTS holdings (
     currency    TEXT,
     price_eur   REAL,
     price_date  TEXT,
-    isin        TEXT
+    isin        TEXT,
+    ter         REAL,  -- yearly ongoing charges in % (v18, typed by the user: issuers do not publish it in a file)
+    instrument  TEXT   -- 'fund' or 'stock' (v18, from Yahoo's instrument type or the user's choice); NULL = not known yet
+);
+-- what is inside a fund (v18): its holdings read from the issuer's public file (source 'issuer'), or a single stock
+-- described by its ISIN and Yahoo's sector (source 'stock'). Keyed by ISIN: shared by every holding with that ISIN
+CREATE TABLE IF NOT EXISTS fund_data (
+    isin       TEXT PRIMARY KEY,
+    source     TEXT NOT NULL,
+    issuer     TEXT NOT NULL DEFAULT '',
+    fund_name  TEXT NOT NULL DEFAULT '',
+    currency   TEXT NOT NULL DEFAULT '',
+    as_of      TEXT NOT NULL DEFAULT '',
+    fetched_at TEXT NOT NULL,
+    holdings   TEXT NOT NULL DEFAULT '[]'
 );
 -- trades on securities: if a security has any, its quantity is computed from them; amount = effect on the account's
 -- cash in cents (buy negative, sell positive, fees included)
@@ -689,6 +703,12 @@ def migrate(conn):
         conn.execute("ALTER TABLE transactions ADD COLUMN person_id INTEGER REFERENCES people(id) ON DELETE SET NULL")
     if "split_off" not in tx_cols:
         conn.execute("ALTER TABLE transactions ADD COLUMN split_off INTEGER NOT NULL DEFAULT 0")
+    # v18: portfolio tools (costs and what is inside each fund); the fund_data table comes from SCHEMA
+    h_cols = {r[1] for r in conn.execute("PRAGMA table_info(holdings)")}
+    if "ter" not in h_cols:
+        conn.execute("ALTER TABLE holdings ADD COLUMN ter REAL")
+    if "instrument" not in h_cols:
+        conn.execute("ALTER TABLE holdings ADD COLUMN instrument TEXT")
 
 
 def init_db():

@@ -3,11 +3,13 @@
 Works with a console (HomeCoin.cmd) or without one (pythonw.exe, used by the installer's shortcuts): without a console,
 messages that need attention are shown in a Windows message box. --background: no browser (start with Windows)."""
 import argparse
+import os
 import socket
 import sys
 import threading
 import time
 import webbrowser
+from pathlib import Path
 
 from waitress import serve
 
@@ -31,9 +33,43 @@ def port_in_use(port):
         return s.connect_ex(("127.0.0.1", port)) == 0
 
 
+def register_link(port):
+    """homecoin:// for the current user (Windows, no administrator): the "Reopen HomeCoin" button of the page shown
+    after closing HomeCoin starts it again. The command is fixed and never receives the link's text (no %1): a page can
+    only start HomeCoin, locked as always, nothing else. Rewritten at every start, so it follows the install in use
+    (installer, ZIP or a moved folder). Not in the demo; a failure here never stops HomeCoin."""
+    if sys.platform != "win32" or os.environ.get("HOMECOIN_DEMO"):
+        return
+    try:
+        import winreg
+        exe = Path(sys.executable)
+        exe = exe.with_name("pythonw.exe") if exe.with_name("pythonw.exe").exists() else exe  # no console window
+        script = Path(__file__).resolve()
+        command = f'"{exe}" "{script}" --no-browser' + (f" --port {port}" if port != 8765 else "")
+        icon = script.parent / "icon" / "HomeCoin.ico"
+        base = r"Software\Classes\homecoin"
+        for sub, name, value in (("", "", "URL:HomeCoin"), ("", "URL Protocol", ""), (r"\DefaultIcon", "", f'"{icon}"'),
+                                 (r"\shell\open\command", "", command)):
+            with winreg.CreateKey(winreg.HKEY_CURRENT_USER, base + sub) as k:
+                winreg.SetValueEx(k, name, 0, winreg.REG_SZ, value)
+    except OSError:
+        pass
+
+
+def port_number(text):
+    """--port: a whole number in the range of ordinary (non-system) ports, else a clear message instead of a crash."""
+    try:
+        n = int(text)
+    except ValueError:
+        n = 0
+    if not 1024 <= n <= 65535:
+        raise argparse.ArgumentTypeError(f"{text!r} is not a port between 1024 and 65535")
+    return n
+
+
 def main():
     p = argparse.ArgumentParser(description="HomeCoin - household finance manager")
-    p.add_argument("--port", type=int, default=8765)
+    p.add_argument("--port", type=port_number, default=8765, help="local port (1024-65535, default 8765)")
     p.add_argument("--no-browser", action="store_true", help="do not open the browser at startup")
     p.add_argument("--background", action="store_true", help="start locked without opening the browser (start with Windows)")
     p.add_argument("--wait-port", action="store_true", help=argparse.SUPPRESS)  # after an update: the old process is exiting
@@ -64,8 +100,9 @@ def main():
     elif moved:
         tell(f"\n  ℹ️  An old data folder is still in {moved['old']} and is not used (data in {moved['new']}).")
     db.DATA_DIR.mkdir(parents=True, exist_ok=True)  # the database opens only after unlocking with the password
+    register_link(args.port)
     app = create_app(args.port)
-    tell(f"\n  🪙  HomeCoin {VERSION} · by Starkark98\n  ➜  {url}\n  Encrypted data in: {db.DATA_DIR}\n"
+    tell(f"\n  🪙  HomeCoin v{VERSION} · by Starkark98\n  ➜  {url}\n  Encrypted data in: {db.DATA_DIR}\n"
          "  Close this window (or press Ctrl+C, or use Close HomeCoin in the app) to stop the server.\n")
     if browser:
         threading.Timer(1.0, webbrowser.open, [url]).start()

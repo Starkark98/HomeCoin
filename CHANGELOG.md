@@ -2,6 +2,21 @@
 
 All notable changes to HomeCoin are listed here, newest first.
 
+## 2.5.0 — 2026-11-16
+
+- **New page: Portfolio analysis** (Wealth menu, with the Investments tab). What your investments are really made of, how well they are spread and the tools investment platforms offer, in six tabs. Every weight has two decimals and a symbol: country flags, icons for areas, markets, sectors and asset classes, currency symbols.
+  - **Composition:** a world map of your countries (darker = larger weight, details on hover), then five geographic areas (each one whole: North America, Latin America, Europe, Middle East and Africa, Asia-Pacific), countries, developed and emerging markets, currencies, sectors (the 11 GICS sectors, of the shares), asset classes and securities, looking inside each fund (look-through); the 20 largest underlying securities; securities without a price are listed in *What is not known*. Weights are of the part whose data is known, and *What is not known* lists the rest and why (a missing ISIN can be typed there).
+  - **Diversification:** a score from 1 to 10 with its level, on the standard measures of the industry, explained criterion by criterion (effective number of companies from the Herfindahl-Hirschman index, UCITS 5/10/40 rule, weight of the 10 largest, similarity to the world equity market, effective number of sectors, asset classes, average correlation; a criterion not measurable yet is left out, never counted as zero); world market covered by your countries; areas and developed/emerging markets against the world market; overlap between funds; colored correlation matrix of your securities (monthly returns).
+  - **Rebalancing:** the calculator moved here from Investments.
+  - **Costs:** the TER of each fund typed right in the table, average TER weighted by value and the yearly cost in money; funds without a TER are flagged.
+  - **Projection:** contribution amount and frequency (monthly, every 3 or 6 months, yearly, none), three editable scenarios, values and money put in also in today's money.
+  - **Comparison:** your investments against an index or ETF month by month, with total and yearly return and the largest fall; your return is time-weighted.
+- **Compositions from the issuers (optional, off until you allow it).** HomeCoin downloads what is inside your funds from the public files of iShares, Vanguard, Xtrackers, Amundi, SPDR and Invesco, sending only the ISIN; the result is saved encrypted with its date. Single stocks: country from the ISIN, sector from Yahoo Finance. Synthetic (swap) funds, old compositions and estimated currencies are flagged; funds of other issuers are reported as not available. This is a third, optional online connection: the guide, *Privacy and security* and SECURITY.md say exactly what is sent.
+- **ISIN, kind (fund or single stock) and TER** in the window of each security.
+- **Accounts analyzed:** one choice of investment accounts at the top of Portfolio analysis, for every tab (rebalancing included); *By account* compares the accounts chosen.
+- **Reopen HomeCoin** from the page shown after closing it: a `homecoin://` link registered for your Windows user (no administrator) by the installer and at every start; it only starts HomeCoin, locked as always, and receives nothing from the page.
+- **Launcher:** the console shows the version as everywhere else (*HomeCoin v2.5.0*), and `--port` accepts only ports from 1024 to 65535 with a clear message instead of an error.
+
 ## 2.4.4 — 2026-11-16
 
 - **The activity log records every setting.** Added: the automatic update check, the Emergency fund target, the Fair split settings (people, calculation basis, split rules), the rebalancing targets saved, budgets, rules created or deleted, goals created or edited, valuations recorded. Nothing is written when a save changes nothing, and a setting adjusted several times in a row (a budget typed in steps, the Fair split figures) is one row, from the first value to the last. *HomeCoin closed* and *HomeCoin updated* are now translated like the other actions. The guide lists what is recorded and what is deliberately left out.

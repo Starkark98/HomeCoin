@@ -563,8 +563,9 @@ def opening_date(db, account):
     return min(d for d in dates if d) if any(dates) else dt.date.today().isoformat()
 
 
-def investments(db, pid, months=24):
-    accs = [a for a in pf_accounts(db, pid) if a["type"] == INVEST]
+def investments(db, pid, months=24, account_ids=None):
+    """Investment accounts of the space (all, or only `account_ids`: Portfolio analysis on a part of the portfolio)."""
+    accs = [a for a in pf_accounts(db, pid) if a["type"] == INVEST and (account_ids is None or a["id"] in account_ids)]
     mv = market_values(db, pid)
     out, all_flows, total_value, total_in = [], [], 0, 0
     alloc = {}

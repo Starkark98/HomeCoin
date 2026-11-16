@@ -40,6 +40,61 @@ def _tx(conn, date, amount, kind, account, category=None, desc="", to=None, note
                  (date.isoformat(), amount, kind, account, to, category, desc, notes, excluded, source))
 
 
+def _demo_compositions(conn, codes, today):
+    """Made-up ISINs, TERs and compositions for the sample securities (the demo never goes online): enough to show
+    every view of Portfolio analysis, including what is not known (no TER on the money market fund, gold without
+    country and sector)."""
+    from . import funds
+    co = [  # fictional companies: (name, country, sector, currency, weight %)
+        ("Sample Chips Corp", "US", "Information Technology", "USD", 6.1), ("Example Software Inc", "US", "Information Technology", "USD", 5.4),
+        ("Demo Search Co", "US", "Communication Services", "USD", 3.8), ("Placeholder Retail Inc", "US", "Consumer Discretionary", "USD", 3.2),
+        ("Model Bank Corp", "US", "Financials", "USD", 2.9), ("Fictional Pharma Inc", "US", "Health Care", "USD", 2.6),
+        ("Mock Energy Co", "US", "Energy", "USD", 1.9), ("Sample Industrials Inc", "US", "Industrials", "USD", 1.8),
+        ("Dummy Foods Corp", "US", "Consumer Staples", "USD", 1.5), ("Test Utilities Co", "US", "Utilities", "USD", 1.1),
+        ("Example Insurance plc", "GB", "Financials", "GBP", 1.4), ("Sample Mining plc", "GB", "Materials", "GBP", 1.0),
+        ("Beispiel Autowerke AG", "DE", "Consumer Discretionary", "EUR", 1.2), ("Exemple Luxe SA", "FR", "Consumer Discretionary", "EUR", 1.3),
+        ("Esempio Energia SpA", "IT", "Utilities", "EUR", 0.7), ("Voorbeeld Chips NV", "NL", "Information Technology", "EUR", 1.1),
+        ("Muster Pharma AG", "CH", "Health Care", "CHF", 1.2), ("Sample Motors KK", "JP", "Consumer Discretionary", "JPY", 1.5),
+        ("Example Electronics KK", "JP", "Information Technology", "JPY", 1.2), ("Demo Semiconductors Ltd", "TW", "Information Technology", "TWD", 1.4),
+        ("Model Holdings Ltd", "HK", "Financials", "HKD", 0.6), ("Sample Resources Ltd", "AU", "Materials", "AUD", 0.8),
+        ("Placeholder Tech Ltd", "CN", "Communication Services", "HKD", 0.9), ("Example Bank of Canada", "CA", "Financials", "CAD", 0.9),
+        ("Demo Realty Trust", "US", "Real Estate", "USD", 0.9)]
+    isin = lambda first11: first11 + funds.isin_check_digit(first11)  # noqa: E731 - made-up ISIN with a valid check digit
+    world = [{"name": n, "isin": isin(f"{c}DEMO{i:05d}"), "weight": round(w * 0.8, 2), "country": c, "sector": s,
+              "currency": cur, "asset": "Equity"} for i, (n, c, s, cur, w) in enumerate(co)]
+    # the long tail of a world index: 300 small made-up companies, countries in proportion to the world market and
+    # sectors in proportion to the usual world mix (so the demo's diversification looks like a real world fund)
+    rnd = random.Random(25)
+    sectors = {"Information Technology": 26, "Financials": 17, "Industrials": 11, "Consumer Discretionary": 10,
+               "Health Care": 9, "Communication Services": 8, "Consumer Staples": 6, "Energy": 4, "Materials": 4,
+               "Utilities": 3, "Real Estate": 2}
+    rest = 100 - sum(r["weight"] for r in world)
+    tail = [1 / (k + 10) for k in range(300)]
+    for k, share in enumerate(tail):
+        c = rnd.choices(list(funds.WORLD), weights=list(funds.WORLD.values()))[0]
+        world.append({"name": f"Demo Company {k + 1:03d}", "isin": isin(f"{c}DEMO{100 + k:05d}"),
+                      "weight": round(rest * share / sum(tail), 4), "country": c,
+                      "sector": rnd.choices(list(sectors), weights=list(sectors.values()))[0],
+                      "currency": funds.CURRENCY_OF.get(c, "USD"), "asset": "Equity"})
+    bonds = [{"name": n, "isin": "", "weight": w, "country": c, "sector": "", "currency": cur, "asset": "Fixed Income"}
+             for n, c, cur, w in (("Sample Treasury 2032", "US", "USD", 38), ("Example Bund 2031", "DE", "EUR", 16),
+                                  ("Demo OAT 2033", "FR", "EUR", 12), ("Sample BTP 2030", "IT", "EUR", 10),
+                                  ("Example Gilt 2034", "GB", "GBP", 9), ("Demo JGB 2035", "JP", "JPY", 15))]
+    cash = [{"name": L("Overnight deposits (sample)"), "isin": "", "weight": 100.0, "country": "", "sector": "Cash and other",
+             "currency": "EUR", "asset": "Cash"}]
+    gold = [{"name": L("Gold bullion (sample)"), "isin": "", "weight": 100.0, "country": "", "sector": "", "currency": "USD",
+             "asset": "Commodity"}]
+    now = dt.datetime.combine(today, dt.time(9, 0)).isoformat(timespec="seconds")
+    for (hid, code), rows, ter, issuer in zip(codes.items(), (world, bonds, cash, gold), (0.20, 0.10, None, 0.12),
+                                              ("Sample Funds", "Sample Funds", "Sample Funds", "")):
+        code_isin = isin("IE00" + code[:7])
+        conn.execute("UPDATE holdings SET isin = ?, ter = ?, instrument = 'fund' WHERE id = ?", (code_isin, ter, hid))
+        if issuer:
+            conn.execute("""INSERT OR REPLACE INTO fund_data(isin, source, issuer, fund_name, currency, as_of, fetched_at, holdings)
+                            VALUES (?, 'issuer', ?, ?, 'EUR', ?, ?, ?)""",
+                         (code_isin, issuer, code, (today - dt.timedelta(days=5)).isoformat(), now, json.dumps(rows)))
+
+
 def _holding(conn, account, ticker, name, cls):
     return conn.execute("INSERT INTO holdings(account_id, ticker, name, asset_class) VALUES (?,?,?,?)",
                         (account, ticker, name, cls)).lastrowid
@@ -197,6 +252,7 @@ def build(today=None):
         for h in price:
             conn.execute("UPDATE holdings SET price_eur = ?, price = ?, currency = 'EUR', price_date = ? WHERE id = ?",
                          (round(price[h], 2), round(price[h], 2), today.isoformat(), h))
+        _demo_compositions(conn, {etf: "DEMOWORLD", bond: "DEMOBONDS", mm: "DEMOCASHX", gold: "DEMOGOLDX"}, today)
         _rec(conn, name=L("Salary"), kind="income", amount=210000, account_id=cc, category_id=_cat(conn, pers, "Salary"),
              start_date=start.replace(day=27).isoformat())
         _rec(conn, name=L("Contribution to household account"), kind="transfer", amount=108000, account_id=cc, to_account_id=comune,

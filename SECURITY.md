@@ -6,7 +6,7 @@ Only the **latest release** of HomeCoin receives fixes. Please update before rep
 
 | Version | Supported |
 |---|---|
-| 2.4.x (latest) | Yes |
+| 2.5.x (latest) | Yes |
 | Older versions | No: update from Settings → Updates or install the latest release |
 
 ## Reporting a vulnerability
@@ -27,6 +27,6 @@ HomeCoin is maintained in spare time, so handling is **best effort**. The aim is
 
 ## Scope
 
-Examples of relevant reports: access to the data without the password or the recovery key, weaknesses in the encryption of the database, the keystore or the backups, script code injected through data entered or imported (for example a crafted description or CSV file), requests accepted from other websites or other computers (CSRF, DNS rebinding), the temporary import code reaching functions it should not, an update installed without a valid signature, or data sent anywhere other than the tickers used for price updates and the update check on GitHub.
+Examples of relevant reports: access to the data without the password or the recovery key, weaknesses in the encryption of the database, the keystore or the backups, script code injected through data entered or imported (for example a crafted description or CSV file), requests accepted from other websites or other computers (CSRF, DNS rebinding), the temporary import code reaching functions it should not, an update installed without a valid signature, a web page able to do more through the `homecoin://` link than start HomeCoin (locked), or data sent anywhere other than the tickers used for price updates and the index comparison, the ISINs sent to the fund issuers when the download of fund compositions is switched on, and the update check on GitHub.
 
 Out of scope: attacks that require control of the user's Windows account while HomeCoin is unlocked (for example malware reading the browser's memory), weak passwords chosen by the user despite the warnings, and the loss of both the password and the recovery key.

@@ -4,6 +4,7 @@ import datetime as dt
 import io
 import json
 import os
+import re
 import secrets
 import threading
 import time
@@ -22,13 +23,15 @@ from . import security
 from .db import get_db
 from .services import (Categorizer, account_balances, count_past_occurrences, process_recurring,
                        recurring_view, upcoming)
+from . import funds
+from . import portfolio
 from . import split as splitm
 from . import tools
 from . import updater
 from . import util
 from .util import FREQUENCIES, add_months, months_between, parse_date, parse_number, rule_matches
 
-VERSION = "2.4.4"
+VERSION = "2.5.0"
 STATIC_DIR = dbm.BASE_DIR / "static"
 KINDS = ("expense", "income", "transfer")
 ACCOUNT_TYPES = ("corrente", "risparmio", "credito", "prepagata", "contanti", "investimenti", "altro")
@@ -36,7 +39,7 @@ ACCOUNT_TYPES = ("corrente", "risparmio", "credito", "prepagata", "contanti", "i
 ACCOUNT_TYPE_LABELS = {"corrente": "current account", "risparmio": "savings account", "credito": "credit card",
                        "prepagata": "prepaid card", "contanti": "cash", "investimenti": "investment account", "altro": "other"}
 TABLES = ("portfolios", "accounts", "categories", "recurring", "transactions", "rules", "people", "settings",
-          "goals", "valuations", "holdings", "trades", "price_history")
+          "goals", "valuations", "holdings", "trades", "price_history", "fund_data")
 CORE_TABLES = TABLES[1:6]  # required in a backup; the others may be missing from backups of older versions
 PORTFOLIO_TYPES = ("family", "personal")
 DUP_DAYS = 3  # tolerance in days for recognizing a transaction that already exists during import
@@ -3095,10 +3098,38 @@ def create_app(port):
         personal_only()
         own_invest_account(aid)
         db = get_db()
+        b = body()
         cur = db.execute("INSERT INTO holdings(account_id, ticker, name, quantity, asset_class) VALUES (?,?,?,?,?)",
-                         (aid, *holding_from_body(body())))
+                         (aid, *holding_from_body(b)))
+        set_holding_details(db, cur.lastrowid, b)
         db.commit()
         return jsonify(id=cur.lastrowid), 201
+
+    def set_holding_details(db, hid, b):
+        """ISIN, TER (% per year) and kind of instrument (fund or single stock), when sent (2.5.0): what the portfolio
+        tools need to look inside a security and to compute its costs."""
+        if "isin" in b:
+            isin = as_text(b.get("isin"), 20).upper().replace(" ", "")
+            if isin and not funds.valid_isin(isin):
+                raise ApiError(i18n.t("Invalid ISIN: check the 12 characters"))
+            db.execute("UPDATE holdings SET isin = ? WHERE id = ?", (isin or None, hid))
+        if "ter" in b:
+            ter = b.get("ter")
+            if ter in (None, ""):
+                ter = None
+            else:
+                try:
+                    ter = float(str(ter).replace(",", ".").replace("%", ""))
+                except ValueError:
+                    raise ApiError(i18n.t("Invalid TER"))
+                if isinstance(b.get("ter"), bool) or not 0 <= ter <= 5 or ter != ter:
+                    raise ApiError(i18n.t("The TER must be between 0 and 5% per year"))
+            db.execute("UPDATE holdings SET ter = ? WHERE id = ?", (ter, hid))
+        if "instrument" in b:
+            kind = b.get("instrument") or None
+            if kind not in (None, "fund", "stock"):
+                raise ApiError(i18n.t("Invalid value"))
+            db.execute("UPDATE holdings SET instrument = ? WHERE id = ?", (kind, hid))
 
     @app.put("/api/holdings/<int:hid>")
     def holding_update(hid):
@@ -3107,11 +3138,14 @@ def create_app(port):
         if not r:
             raise ApiError(i18n.t("Security not found"), 404)
         own_account(r[0])
-        vals = holding_from_body(body())
+        b = body()
+        vals = holding_from_body(b)
         if vals[0] != r["ticker"]:  # a different instrument: current and historical prices of the old ticker no longer apply
             db.execute("DELETE FROM price_history WHERE holding_id = ?", (hid,))
-            db.execute("UPDATE holdings SET price = NULL, currency = NULL, price_eur = NULL, price_date = NULL WHERE id = ?", (hid,))
+            db.execute("UPDATE holdings SET price = NULL, currency = NULL, price_eur = NULL, price_date = NULL, "
+                       "instrument = NULL WHERE id = ?", (hid,))
         db.execute("UPDATE holdings SET ticker=?, name=?, quantity=?, asset_class=? WHERE id=?", (*vals, hid))
+        set_holding_details(db, hid, b)
         tools.sync_holdings(db, r[0])  # with trades, the quantity stays the calculated one
         db.commit()
         return jsonify(ok=True)
@@ -3492,6 +3526,106 @@ def create_app(port):
         months = tools.months_arg(get_db(), pf(), request.args.get("months"), 12)
         db = get_db()
         return jsonify(savings=tools.savings(db, pf(), months), net_worth=tools.net_worth(db, pf(), months))
+
+    # ------------------------------------------------- portfolio analysis (2.5.0, see portfolio.py and funds.py)
+
+    def pt_accounts():
+        """?accounts=1,2: the investment accounts chosen in Portfolio analysis (none = all of the space; ids of other
+        spaces simply match nothing)."""
+        raw = request.args.get("accounts") or ""
+        return {as_int(x, "account") for x in raw.split(",")[:200] if x.strip()} or None
+
+    @app.get("/api/portfolio/accounts")
+    def portfolio_accounts():
+        """The investment accounts of the space, for the account bar of Portfolio analysis."""
+        personal_only()
+        inv = tools.investments(get_db(), pf(), months=1)
+        return jsonify(accounts=[{"id": a["id"], "name": a["name"], "icon": a["icon"], "value": a["value"]} for a in inv["accounts"]])
+
+    @app.get("/api/portfolio/composition")
+    def portfolio_composition():
+        personal_only()
+        ids, db = pt_accounts(), get_db()
+        out = portfolio.composition(db, pf(), ids)
+        out["by_account"] = portfolio.by_account(db, pf(), ids) if request.args.get("by_account") == "1" else []
+        return jsonify(out)
+
+    @app.put("/api/portfolio/online")
+    def portfolio_online():
+        """Download of fund compositions from the issuers (global, off by default): only the ISIN is sent."""
+        on = body().get("on")
+        if not isinstance(on, bool):
+            raise ApiError(i18n.t("Invalid value"))
+        db = get_db()
+        if portfolio.setting_online(db) == on:
+            g.audit_skip = True
+        note(i18n.t("on") if on else i18n.t("off"))
+        save_setting(db, "fund_data_online", "1" if on else "0")
+        db.commit()
+        return jsonify(ok=True, online=on)
+
+    @app.post("/api/portfolio/refresh")
+    def portfolio_refresh():
+        """Downloads the compositions of the space's securities (funds from their issuer, stocks from ISIN + Yahoo)."""
+        personal_only()
+        if DEMO:
+            raise ApiError(i18n.t("In the demo version the compositions are made up: online updates are disabled"))
+        try:
+            report = portfolio.refresh(get_db(), pf())
+        except ValueError as exc:
+            raise ApiError(str(exc), 409)
+        ok = sum(1 for r in report if r["status"] == "ok")
+        note(i18n.tn("{n} security updated", "{n} securities updated", ok) + (
+            " · " + i18n.tn("{n} not available", "{n} not available", len(report) - ok) if len(report) > ok else ""))
+        if not report:
+            g.audit_skip = True
+        return jsonify(report=report)
+
+    @app.get("/api/portfolio/costs")
+    def portfolio_costs():
+        personal_only()
+        return jsonify(portfolio.costs(get_db(), pf(), pt_accounts()))
+
+    @app.get("/api/portfolio/correlation")
+    def portfolio_correlation():
+        personal_only()
+        months = min(max(as_int(request.args.get("months") or 36, "months", minimum=12), 12), 120)
+        return jsonify(portfolio.correlation(get_db(), pf(), months, account_ids=pt_accounts()))
+
+    @app.put("/api/holdings/<int:hid>/details")
+    def holding_details(hid):
+        """ISIN, TER or kind of one security, typed straight in Portfolio analysis (costs, what is not known)."""
+        db = get_db()
+        r = db.execute("SELECT h.account_id, h.name, h.ticker, h.ter, h.isin FROM holdings h WHERE h.id = ?", (hid,)).fetchone()
+        if not r:
+            raise ApiError(i18n.t("Security not found"), 404)
+        own_account(r["account_id"])
+        b = body()
+        set_holding_details(db, hid, b)
+        new = db.execute("SELECT ter, isin FROM holdings WHERE id = ?", (hid,)).fetchone()
+        if (new["ter"], new["isin"]) == (r["ter"], r["isin"]):
+            g.audit_skip = True
+        fmt = lambda t: "—" if t is None else f"{util.fmt_decimal(t)}%"  # noqa: E731
+        note(f"{r['name'] or r['ticker']} · " + (f"TER {fmt(r['ter'])} → {fmt(new['ter'])}" if new["ter"] != r["ter"]
+                                                  else f"ISIN {new['isin'] or '—'}"))
+        g.audit_merge = f"{r['name'] or r['ticker']} · "
+        db.commit()
+        return jsonify(ok=True)
+
+    @app.get("/api/portfolio/benchmark")
+    def portfolio_benchmark():
+        """The portfolio against an index or ETF chosen by the user (Yahoo month-end prices: only the ticker is sent)."""
+        personal_only()
+        ticker = as_text(request.args.get("ticker"), 30).upper()
+        if not ticker or not re.fullmatch(r"[A-Z0-9][A-Z0-9.\-=^]{0,29}", ticker):
+            raise ApiError(i18n.t("Enter the ticker of the index or ETF to compare with (e.g. VWCE.DE)"))
+        months = min(max(as_int(request.args.get("months") or 36, "months", minimum=12), 12), 120)
+        if DEMO:
+            raise ApiError(i18n.t("In the demo version prices are made up: online updates are disabled"))
+        try:
+            return jsonify(portfolio.benchmark(get_db(), pf(), ticker, months, pt_accounts()))
+        except ValueError as exc:
+            raise ApiError(str(exc), 502)
 
     # ----------------------------------------------------------- export
 

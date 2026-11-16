@@ -594,13 +594,28 @@ async function lockNow() {
 }
 // started without a window (installer shortcut): this is how the server is stopped. The shortcut starts it again
 async function quitApp() {
-  if (!(await confirmDialog(T('HomeCoin will lock and stop. To open it again, use the HomeCoin shortcut (Start menu or desktop).'),
+  if (!(await confirmDialog(T('HomeCoin will lock and stop. To open it again, use Reopen HomeCoin on the page that follows, or its shortcut (Start menu or desktop).'),
     { ok: T('⏻ Close HomeCoin'), danger: false, title: T('Close HomeCoin') }))) return;
   try { await api('/auth/quit', { method: 'POST' }); } catch { /* the server may already be gone */ }
   document.body.classList.add('locked');
   wipeView();
   $('#lock-body').innerHTML = `<div class="lock-body"><h2>${T('HomeCoin is closed 👋')}</h2>
-    <p class="muted small">${T('Your data is locked and encrypted. You can close this tab. To open HomeCoin again, use its shortcut in the Start menu or on the desktop.')}</p></div>`;
+    <p class="muted small">${T('Your data is locked and encrypted. You can close this tab, or open HomeCoin again from here.')}</p>
+    <div class="actions"><button class="btn btn-primary" id="reopen">▶ ${T('Reopen HomeCoin')}</button></div>
+    <p class="muted small" id="reopen-note">${T('The browser may ask once whether to open HomeCoin: allow it. If nothing happens, use the HomeCoin shortcut in the Start menu or on the desktop.')}</p></div>`;
+  $('#reopen').onclick = reopenApp;
+}
+// homecoin:// (registered by run.py and the installer) only starts HomeCoin; the page waits for it and reloads
+async function reopenApp() {
+  const b = $('#reopen');
+  b.disabled = true; b.textContent = `⏳ ${T('Starting HomeCoin…')}`;
+  location.href = 'homecoin://open';
+  for (let i = 0; i < 60; i++) {
+    await new Promise((r) => setTimeout(r, 1000));
+    try { if ((await fetch('/api/auth/status', { cache: 'no-store' })).ok) { location.reload(); return; } } catch { /* not up yet */ }
+  }
+  b.disabled = false; b.textContent = `▶ ${T('Reopen HomeCoin')}`;
+  $('#reopen-note').textContent = T('HomeCoin did not start: use its shortcut in the Start menu or on the desktop.');
 }
 // auto-lock: same timeout as the server; using the page postpones the lock even without requests
 ['mousemove', 'keydown', 'click', 'scroll', 'touchstart'].forEach((ev) => document.addEventListener(ev, () => {
@@ -655,7 +670,9 @@ const DEFAULT_FEATURES = {
 };
 const CORE_TABS = [['📊', T('Dashboard')], ['💸', T('Transactions')], ['🏦', T('Accounts')], ['🔁', T('Recurring')], ['📥', T('Import')], ['🏷️', T('Categories')],
   ['📑', T('Reports')], ['📜', T('Activity log')], ['⚙️', T('Settings')]];
-const featureOn = (k, p = S.portfolio) => !FEATURES[k] || (p?.features || DEFAULT_FEATURES[p?.type] || []).includes(k);
+// pages that belong to an optional tab: Portfolio analysis comes with Investments
+const FEATURE_OF = { portafoglio: 'investimenti' };
+const featureOn = (k, p = S.portfolio) => { k = FEATURE_OF[k] || k; return !FEATURES[k] || (p?.features || DEFAULT_FEATURES[p?.type] || []).includes(k); };
 const PF_TYPES = { family: [T('Household'), T('Family'), '🏠'], personal: [T('Personal'), T('Personal'), '👤'] };  // label, default name, icon
 // guide to choosing the space type: the type decides the initial categories, the suggested tabs and some calculations
 const PF_GUIDE = {
@@ -936,6 +953,7 @@ const ROUTES = {
   budget: [T('Budgets'), T('Monthly spending limits per category'), renderBudget],
   mutuo: [T('Mortgage & loans'), T('Amortization schedule, interest and early repayment simulation'), renderMutuo],
   investimenti: [T('Investments'), T('Value, contributions and return of the investment accounts'), renderInvestimenti],
+  portafoglio: [T('Portfolio analysis'), T('What your investments are made of, how diversified they are, rebalancing, costs, projection and comparison'), renderPortafoglio],
   risparmio: [T('Savings'), T('Savings rate and net worth'), renderRisparmio],
   obiettivi: [T('Goals'), T('Savings targets and how much to set aside each month'), renderObiettivi],
   emergenza: [T('Emergency fund'), T('How many months of expenses your reserve covers'), renderEmergenza],
@@ -3406,9 +3424,9 @@ async function renderInvestimenti(v) {
         <div class="legend" style="margin-top:10px">${d.allocation.map((x) => `<div class="legend-item"><span class="dot" style="background:${ASSET_COLORS[x.name] || '#8b8fa8'}"></span><span>${esc(assetLabel(x.name))}<span class="pct">${pct(x.value / d.allocation.reduce((s, y) => s + y.value, 0))}</span></span><b class="num">${money0(x.value)}</b></div>`).join('')}</div>`
         : `<div class="empty">${T('Add securities to see the allocation')}</div>`}</div>
     </div>
-    <details class="card rb-card" id="rb" ${S.rbOpen ? 'open' : ''}><summary class="card-head"><div><h3>🧭 ${T('Rebalancing')}</h3>
-      <p class="muted small" style="margin:3px 0 0">${T('Target allocation, drift and what to buy or sell to get back to it. A calculator: it records nothing.')}</p></div>
-      <span class="rb-status muted small"></span></summary><div class="rb-body"><div class="loading">${T('Loading…')}</div></div></details>
+    <a class="card clickable-card pt-link" href="#/portafoglio"><div class="card-head"><div><h3>🧭 ${T('Portfolio analysis')}</h3>
+      <p class="muted small" style="margin:3px 0 0">${T('Areas, countries on a world map, sectors and currencies of your funds, diversification and correlation, rebalancing, costs, projection and comparison with an index.')}</p></div>
+      <span class="btn btn-sm">${T('Open')} →</span></div></a>
     ${d.accounts.map((a) => `<div class="card" style="margin-bottom:18px">
       <div class="card-head"><div><h3>${esc(a.icon)} ${esc(a.name)}</h3><p class="muted small" style="margin:3px 0 0">${a.has_trades ? T('value = cash + securities (from trades)') : a.value_date ? T('value as of {date}', { date: esc(fmtDate(a.value_date)) }) : `<span class="tag warn">${T('no valuation: showing the book balance')}</span>`}</p>
         ${a.idle ? `<p class="small" style="margin:6px 0 0"><span class="tag warn">💤 ${tn('{amount} of cash idle for {n} day', '{amount} of cash idle for {n} days', a.idle.days, { amount: money(a.idle.cash) })}</span> <span class="muted">${T('if you have already invested it, record the purchase with "＋ Trade"')}</span></p>` : ''}</div>
@@ -3425,9 +3443,6 @@ async function renderInvestimenti(v) {
     </div>`).join('')}`;
 
   $('#iv-new').onclick = () => accountModal(null, { type: 'investimenti', icon: '📈', name: '' });
-  const rb = $('#rb');
-  rb.addEventListener('toggle', () => { S.rbOpen = rb.open; if (rb.open && !rb.dataset.ready) { rb.dataset.ready = '1'; rebalanceCard(rb); } });
-  if (rb.open) { rb.dataset.ready = '1'; rebalanceCard(rb); }
   $('#iv-months').onchange = (e) => { S.invMonths = e.target.value; route(); };
   if ($('#iv-refresh')) $('#iv-refresh').onclick = async (e) => {
     e.target.disabled = true; e.target.textContent = T('⏳ Updating…');
@@ -3479,8 +3494,11 @@ const qtyFmt = (q) => num(q, 6);
 function calcNotes(notes) {
   return notes?.length ? `<ul class="calc-notes">${notes.map((w) => `<li class="${w.level === 'warn' ? 'warn' : 'info'}">${w.level === 'warn' ? '⚠️' : 'ℹ️'} ${esc(w.text)}</li>`).join('')}</ul>` : '';
 }
-async function rebalanceCard(det) {
+// opts.accounts (Portfolio analysis): the accounts chosen in the page's account bar (null = all); the card then shows
+// no account choice of its own
+async function rebalanceCard(det, opts = {}) {
   const box = $('.rb-body', det);
+  const fixedAccounts = 'accounts' in opts;
   let cfg, res;
   const pct1 = (x) => `${num(x, 1)}%`;
   const calc = async (save = false) => {
@@ -3516,7 +3534,7 @@ async function rebalanceCard(det) {
     const focus = snapFocus(box);
     box.innerHTML = `<div class="rb-controls">
         <div class="seg" id="rb-mode">${[['class', T('By asset class')], ['security', T('By security')]].map(([k, l]) => `<button data-m="${k}" class="${cfg.mode === k ? 'on' : ''}">${l}</button>`).join('')}</div>
-        <div class="rb-accs">${res.accounts.map((a) => `<label class="check"><input type="checkbox" data-acc="${a.id}" ${!chosen || chosen.has(a.id) ? 'checked' : ''}> ${esc(a.icon)} ${esc(a.name)} <span class="muted small">${esc(money0(a.value))}</span></label>`).join('')}</div>
+        <div class="rb-accs ${fixedAccounts ? 'hidden' : ''}">${res.accounts.map((a) => `<label class="check"><input type="checkbox" data-acc="${a.id}" ${!chosen || chosen.has(a.id) ? 'checked' : ''}> ${esc(a.icon)} ${esc(a.name)} <span class="muted small">${esc(money0(a.value))}</span></label>`).join('')}</div>
       </div>
       <div class="rb-controls">
         <label class="field">${T('Drift threshold (points)')} <input id="rb-abs" inputmode="decimal" value="${cfg.drift_abs ?? ''}" placeholder="off" title="${esc(T('Rebalance when a weight is this many percentage points away from its target'))}"></label>
@@ -3579,7 +3597,10 @@ async function rebalanceCard(det) {
   };
   try {
     ({ config: cfg, result: res } = await api('/investments/rebalance'));
-    draw();
+    const key = (x) => (x == null ? 'all' : [...x].sort((a, b) => a - b).join(','));
+    if (fixedAccounts && key(cfg.accounts) !== key(opts.accounts)) {
+      cfg.accounts = opts.accounts; await calc();
+    } else draw();
   } catch (e) { box.innerHTML = `<div class="empty">${esc(e.message || e)}</div>`; }
 }
 const signedMoney0 = (c) => (c >= 0 ? '+' : '') + money0(c);
@@ -3702,6 +3723,10 @@ function holdingModal(accountId, h = null) {
       <label class="field full">${T('Description')} <input id="hd-name" maxlength="80" value="${esc(x.name)}" placeholder="${esc(T('E.g. Vanguard FTSE All-World'))}"></label>
       <label class="field">${T('Class')} <select id="hd-class">${ASSET_CLASSES.map((c) => `<option value="${esc(c)}" ${c === x.asset_class ? 'selected' : ''}>${esc(assetLabel(c))}</option>`).join('')}</select></label>
       <p class="muted small full" id="hd-hint" style="margin:0">${CLASS_HELP[x.asset_class] || ''}</p>
+      <label class="field">ISIN <input id="hd-isin" maxlength="14" value="${esc(x.isin || '')}" placeholder="IE00BK5BQT80" title="${esc(T('12 characters: on the broker statement or the fund\'s factsheet. Needed to look inside funds (Portfolio analysis).'))}"></label>
+      <label class="field">${T('Kind')} <select id="hd-kind"><option value="">${T('Automatic')}</option>
+        <option value="fund" ${x.instrument === 'fund' ? 'selected' : ''}>${T('Fund or ETF')}</option><option value="stock" ${x.instrument === 'stock' ? 'selected' : ''}>${T('Single stock')}</option></select></label>
+      <label class="field">${T('TER (% per year)')} <input id="hd-ter" inputmode="decimal" value="${x.ter == null ? '' : decInput(x.ter)}" placeholder="${decInput(0.22)}" title="${esc(T('Ongoing charges of the fund, from its factsheet (KID). Empty for single stocks.'))}"></label>
     </div>
     <div class="modal-foot">${h ? `<button class="btn btn-ghost left neg" id="hd-del">🗑 ${T('Delete')}</button>` : ''}
       <button class="btn" data-cancel>${T('Cancel')}</button><button class="btn btn-primary" id="hd-save">${T('Save')}</button></div>`);
@@ -3721,13 +3746,15 @@ function holdingModal(accountId, h = null) {
       if (fixed) $('#hd-ticker', m).value = r.ticker;
       if (!$('#hd-name', m).value.trim() || !h) $('#hd-name', m).value = r.name || $('#hd-name', m).value;
       $('#hd-class', m).value = r.asset_class;
+      if (!$('#hd-kind', m).value) $('#hd-kind', m).value = r.type === 'EQUITY' ? 'stock' : ['ETF', 'MUTUALFUND'].includes(r.type) ? 'fund' : '';
       hint(`✨ ${T('Found:')} <b>${esc(r.name || r.ticker)}</b> (${esc(r.type || 'security')}${r.price != null ? ' · ' + esc(unitPrice(r.price, r.currency)) : r.currency ? ', ' + esc(r.currency) : ''}) · ${T('suggested class <b>{class}</b>, editable', { class: esc(assetLabel(r.asset_class)) })}`
         + (fixed ? `<br>🔎 ${T('Code completed to <b>{ticker}</b>: it is the symbol Yahoo Finance quotes it under', { ticker: esc(r.ticker) })}` : ''));
     } catch (e) { hint(`⚠️ ${esc(e.message)}: ${T('fill in name and class by hand')}`); }
   };
   $('#hd-save', m).onclick = async () => {
     if (pending) await pending;
-    const body = { ticker: $('#hd-ticker', m).value, quantity: parseQty($('#hd-qty', m).value), name: $('#hd-name', m).value, asset_class: $('#hd-class', m).value };
+    const body = { ticker: $('#hd-ticker', m).value, quantity: parseQty($('#hd-qty', m).value), name: $('#hd-name', m).value, asset_class: $('#hd-class', m).value,
+      isin: $('#hd-isin', m).value, ter: $('#hd-ter', m).value, instrument: $('#hd-kind', m).value || null };
     if (h && body.ticker.trim().toUpperCase() !== h.ticker && !(await confirmDialog(
       `${T('Change the ticker from {old} to {new}?', { old: h.ticker, new: body.ticker.trim().toUpperCase() })} ${T('The trades stay, but the current and historical prices of {ticker} are deleted: then use "Update prices". Do this only if it is the same instrument (e.g. another exchange) or to fix a mistake.', { ticker: h.ticker })}`,
       { ok: T('Change ticker'), title: T('⚠️ Ticker change') }))) return;
@@ -3737,6 +3764,377 @@ function holdingModal(accountId, h = null) {
     if (!(await confirmDialog(T('Delete {name}?', { name: h.ticker }), { ok: T('Delete') }))) return;
     try { await api(`/holdings/${h.id}`, { method: 'DELETE' }); closeModal(); route(); } catch (e) { fail(e); }
   };
+}
+
+// ================================================================ portfolio analysis (2.5.0)
+// composition (look-through: regions, countries with a world map, sectors, currencies, underlying securities),
+// diversification (measures, comparison with the world market, overlap, correlation matrix), rebalancing, costs,
+// projection and comparison with an index. Everything here is a calculation: nothing is recorded.
+const PT_TABS = [['composition', '🧭', T('Composition')], ['diversification', '🧩', T('Diversification')], ['rebalance', '⚖️', T('Rebalancing')],
+  ['costs', '💸', T('Costs')], ['projection', '🔮', T('Projection')], ['benchmark', '📊', T('Comparison')]];
+const SECTOR_INFO = { 'Information Technology': ['💻', T('Information technology')], Financials: ['🏦', T('Financials')], 'Health Care': ['🩺', T('Health care')],
+  'Consumer Discretionary': ['🛍️', T('Consumer discretionary')], 'Consumer Staples': ['🛒', T('Consumer staples')], Industrials: ['🏭', T('Industrials')],
+  'Communication Services': ['📡', T('Communication services')], Energy: ['⛽', T('Energy')], Materials: ['⛏️', T('Materials')], Utilities: ['💡', T('Utilities')],
+  'Real Estate': ['🏢', T('Real estate')] };
+const REGION_INFO = { 'North America': ['🌎', T('North America')], 'Latin America': ['🌎', T('Latin America')], Europe: ['🌍', T('Europe')],
+  'Middle East and Africa': ['🌍', T('Middle East and Africa')], 'Asia-Pacific': ['🌏', T('Asia-Pacific')], Other: ['🌐', T('Supranational and other')] };
+const MARKET_INFO = { Developed: ['🏙️', T('Developed markets')], Emerging: ['🌱', T('Emerging markets')], 'Frontier and other': ['🧭', T('Frontier and other markets')] };
+const CLASS_ICON = { azioni: '📈', obbligazioni: '🧾', monetario: '🅿️', 'materie prime': '🪙', immobiliare: '🏠', crypto: '₿', altro: '🔹', liquidità: '💶', 'non specificato': '❔' };
+// weights always with two decimals (0,42%, never a rounded 0%)
+const fix2 = (x) => (x ?? 0).toLocaleString(LOCALE, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const pct2 = (x) => (x == null ? '—' : `${fix2(x * 100)}%`);
+let regionNames = null;
+const countryName = (code) => {
+  try { regionNames ||= new Intl.DisplayNames([LANG], { type: 'region' }); return regionNames.of(code) || code; } catch { return code; }
+};
+let FLAG_SET = new Set();
+const flag = (code) => (code && FLAG_SET.has(code) ? `<img class="flag" src="/static/vendor/flags/${esc(code.toLowerCase())}.svg" alt="" loading="lazy">` : `<span class="flag none">${esc(code || '··')}</span>`);
+const curSymbol = (code) => {
+  try { return (0).toLocaleString(LANG, { style: 'currency', currency: code, currencyDisplay: 'narrowSymbol' }).replace(/[\d\s.,  -]/g, '') || code; } catch { return code; }
+};
+const MISSING_REASON = { whole: T('valued only as a whole (no securities inside)'), cash: T('cash: currency known, no country'),
+  no_isin: T('ISIN missing: type it here or in Investments'), not_loaded: T('composition not downloaded yet'),
+  not_found: T('not published by a supported issuer'), partial: T('the issuer does not publish everything'),
+  no_price: T('no price yet: use "Update prices" in Investments') };
+const pctS2 = (x) => (x == null ? '—' : `${x > 0 ? '+' : ''}${fix2(x * 100)}%`);
+
+// a list of weights as horizontal bars: [{label (HTML, already escaped), value, share, color?, title?}]
+function barList(rows, { max = 12, empty = T('Not available') } = {}) {
+  if (!rows.length) return `<div class="empty small">${esc(empty)}</div>`;
+  if (rows.length === max + 1) max += 1;  // never a "1 other" line: the row itself takes the same space
+  const shown = rows.slice(0, max), rest = rows.slice(max);
+  const other = rest.reduce((s, r) => ({ value: s.value + r.value, share: s.share + r.share }), { value: 0, share: 0 });
+  const top = Math.max(...shown.map((r) => r.share), other.share, 0.0001);
+  return `<div class="pt-bars">${[...shown, ...(rest.length ? [{ label: `<span class="pt-ico">➕</span>${esc(tn('{n} other', '{n} others', rest.length))}`, ...other }] : [])].map((r) => `
+    <div class="pt-bar" title="${esc(r.title || '')}"><span class="pt-l">${r.label}</span>
+      <span class="pt-track"><i style="width:${(r.share / top * 100).toFixed(1)}%${r.color ? `;background:${esc(r.color)}` : ''}"></i></span>
+      <b class="num">${pct2(r.share)}</b><span class="muted small num">${money0(r.value)}</span></div>`).join('')}</div>`;
+}
+const coverageLine = (share, shares = false) => (share >= 0.995 ? '' : `<p class="muted small pt-cov">ℹ️ ${shares
+  ? T('Weights of the {percent} of the shares whose data is known: the rest is under "What is not known".', { percent: pct2(share) })
+  : T('Weights of the {percent} of the value whose data is known: the rest is under "What is not known".', { percent: pct2(share) })}</p>`);
+const ico = (i) => `<span class="pt-ico">${i}</span>`;
+
+// accounts analyzed: one choice for every tab (null = all the investment accounts of the space), remembered per space
+// in this browser. The portfolio is judged as a whole; fewer accounts = a part of it (e.g. the accounts of one goal)
+const ptAccKey = () => `hc-pt-accounts-${S.pid}`;
+const ptLoadAccounts = () => { try { const x = JSON.parse(localStorage.getItem(ptAccKey()) || 'null'); return Array.isArray(x) && x.length ? x : null; } catch { return null; } };
+const ptSaveAccounts = (ids) => { try { localStorage.setItem(ptAccKey(), JSON.stringify(ids)); } catch { /* ignore */ } };
+const ptQuery = (extra = {}) => { const q = qs({ ...(S.ptAccounts ? { accounts: S.ptAccounts.join(',') } : {}), ...extra }); return q ? `?${q}` : ''; };
+
+async function renderPortafoglio(v) {
+  S.ptTab ||= 'composition';
+  if (!PT_TABS.some(([k]) => k === S.ptTab)) S.ptTab = 'composition';
+  const { accounts } = await api('/portfolio/accounts');
+  const ids = new Set(accounts.map((a) => a.id));
+  S.ptAccountList = accounts;
+  S.ptAccounts = (ptLoadAccounts() || []).filter((id) => ids.has(id));  // accounts deleted since: dropped
+  if (!S.ptAccounts.length || S.ptAccounts.length === accounts.length) S.ptAccounts = null;
+  const on = (id) => !S.ptAccounts || S.ptAccounts.includes(id);
+  v.innerHTML = `${accounts.length > 1 ? `<div class="card pt-accbar"><span class="pt-accbar-l">💼 ${T('Accounts analyzed')}</span>
+      <div class="pt-accs">${accounts.map((a) => `<label class="pt-acc ${on(a.id) ? 'on' : ''}"><input type="checkbox" data-pt-acc="${a.id}" ${on(a.id) ? 'checked' : ''}> ${esc(a.icon)} ${esc(a.name)} <span class="muted small num">${esc(money0(a.value))}</span></label>`).join('')}</div>
+      <button class="btn btn-sm" id="pt-all" ${S.ptAccounts ? '' : 'disabled'}>${T('All')}</button></div>` : ''}
+    <div class="seg pt-tabs" id="pt-tabs">${PT_TABS.map(([k, i, l]) => `<button data-t="${k}" class="${k === S.ptTab ? 'on' : ''}">${i} ${l}</button>`).join('')}</div>
+    <div id="pt-body"><div class="loading">${T('Loading…')}</div></div>`;
+  $$('#pt-tabs button', v).forEach((b) => (b.onclick = () => { S.ptTab = b.dataset.t; route(); }));
+  $$('[data-pt-acc]', v).forEach((c) => (c.onchange = () => {
+    const chosen = $$('[data-pt-acc]', v).filter((x) => x.checked).map((x) => +x.dataset.ptAcc);
+    if (!chosen.length) { c.checked = true; return toast(T('Choose at least one account'), 'err'); }
+    ptSaveAccounts(chosen.length === accounts.length ? null : chosen);
+    route();
+  }));
+  if ($('#pt-all', v)) $('#pt-all', v).onclick = () => { ptSaveAccounts(null); route(); };
+  const box = $('#pt-body', v);
+  const draw = { composition: ptComposition, diversification: ptDiversification, rebalance: ptRebalance, costs: ptCosts,
+    projection: ptProjection, benchmark: ptBenchmark }[S.ptTab];
+  await draw(box);
+}
+
+const ptEmpty = (box) => {
+  box.innerHTML = `<div class="card empty"><div class="big">🧭</div><h3>${T('No investments to analyze')}</h3><p>${T('Add an investment account with its securities in Investments.')}</p>
+    <div class="actions"><a class="btn btn-primary" href="#/investimenti">${T('Go to Investments')}</a></div></div>`;
+};
+
+// world map: countries coloured by weight (sequential scale), the others in grey; hover for the details
+let WORLD_MAP = null;
+async function worldMap(el, countries, total) {
+  WORLD_MAP ||= await fetch('/static/vendor/world.json').then((r) => r.json());
+  const by = Object.fromEntries(countries.map((c) => [c.key, c]));
+  const max = Math.max(...countries.map((c) => c.share), 0.0001);
+  const shade = (s) => `color-mix(in srgb, #6366f1 ${Math.round(18 + 82 * Math.sqrt(s / max))}%, var(--surface-3))`;
+  el.innerHTML = `<div class="pt-map"><svg viewBox="0 0 ${WORLD_MAP.w} ${WORLD_MAP.h}" role="img" aria-label="${esc(T('World map of the countries you invest in'))}">
+    ${Object.entries(WORLD_MAP.countries).map(([k, d]) => `<path d="${d}" data-c="${esc(k)}" style="fill:${by[k] ? shade(by[k].share) : 'var(--surface-3)'}" class="${by[k] ? 'on' : ''}"></path>`).join('')}
+    </svg><div class="pt-tip hidden"></div></div>
+    <div class="pt-legend"><span class="muted small">0%</span><i></i><span class="muted small">${pct2(max)}</span><span class="muted small pt-legend-n">${tn('{n} country', '{n} countries', countries.length)}</span></div>`;
+  const tip = $('.pt-tip', el), wrap = $('.pt-map', el);
+  $$('path.on', el).forEach((p) => {
+    p.addEventListener('mousemove', (e) => {
+      const c = by[p.dataset.c], r = wrap.getBoundingClientRect();
+      tip.innerHTML = `${flag(c.key)} <b>${esc(countryName(c.key))}</b><br>${pct2(c.share)} · ${money0(c.value)}`;
+      tip.style.left = `${e.clientX - r.left + 14}px`; tip.style.top = `${e.clientY - r.top + 10}px`;
+      tip.classList.remove('hidden');
+    });
+    p.addEventListener('mouseleave', () => tip.classList.add('hidden'));
+  });
+  void total;
+}
+
+async function ptComposition(box) {
+  const d = await api('/portfolio/composition' + ptQuery({ by_account: (S.ptAccounts || S.ptAccountList).length > 1 ? 1 : '' }));
+  FLAG_SET = new Set(d.flags || []);
+  if (!d.total) return ptEmpty(box);
+  const regions = d.regions.map((r) => ({ ...r, label: `${ico((REGION_INFO[r.key] || ['🌐'])[0])}${esc((REGION_INFO[r.key] || [0, r.key])[1])}` }));
+  const markets = d.markets.map((r) => ({ ...r, label: `${ico((MARKET_INFO[r.key] || ['🌐'])[0])}${esc((MARKET_INFO[r.key] || [0, r.key])[1])}` }));
+  const sectors = d.sectors.map((r) => ({ ...r, label: `${ico((SECTOR_INFO[r.key] || ['🔹'])[0])}${esc((SECTOR_INFO[r.key] || [0, r.key])[1])}` }));
+  const countries = d.countries.map((r) => ({ ...r, label: `${flag(r.key)}${esc(countryName(r.key))}` }));
+  const currencies = d.currencies.map((r) => ({ ...r, label: `<span class="pt-cur">${esc(curSymbol(r.key))}</span>${esc(r.key)}` }));
+  const classes = d.asset_classes.map((r) => ({ ...r, label: `${ico(CLASS_ICON[r.key] || '🔹')}${esc(assetLabel(r.key))}`, color: ASSET_COLORS[r.key] }));
+  const instr = d.instruments.map((r) => ({ ...r, label: `${ico(CLASS_ICON[r.asset_class] || '🔹')}${esc(r.name)}`, title: `${r.name} · ${r.ticker} · ${r.account}` }));
+  const top1 = (rows, info) => (rows[0] ? [(info[rows[0].key] || [0, rows[0].key])[1], pct2(rows[0].share)] : ['—', '—']);
+  const fundsWithIsin = d.instruments.filter((x) => x.isin).length;
+  const ctop = d.countries[0];
+  box.innerHTML = `
+    <div class="card pt-online"><div class="card-head"><div><h3>🌐 ${T('Compositions from the issuers')}</h3>
+      <p class="muted small" style="margin:3px 0 0">${T('HomeCoin can download what is inside your funds from the public files of their issuers (iShares, Vanguard, Xtrackers, Amundi, SPDR, Invesco). Only the ISIN is sent; the result is saved encrypted with its date. Single stocks: country from the ISIN, sector from Yahoo Finance.')}</p></div>
+      <div class="btn-row"><label class="check"><input type="checkbox" id="pt-on" ${d.online ? 'checked' : ''}> ${T('Allowed')}</label>
+        <button class="btn btn-primary" id="pt-refresh" ${d.online && fundsWithIsin ? '' : 'disabled'}>⟳ ${T('Update compositions')}</button></div></div>
+      ${calcNotes(d.notes)}<div id="pt-report"></div></div>
+    <div class="kpis">
+      <div class="kpi g-indigo"><div class="k-label">💼 ${T('Value analyzed')}</div><div class="k-value">${money0(d.total)}</div>${kRows([`📄 ${T('Securities')}`, d.instruments.length], [`🔍 ${T('Read inside')}`, d.funds_loaded])}</div>
+      <div class="kpi g-indigo"><div class="k-label">🌍 ${T('Main area')}</div><div class="k-value">${esc(top1(d.regions, REGION_INFO)[0])}</div>${kRows([`📊 ${T('Weight')}`, top1(d.regions, REGION_INFO)[1]], [`ℹ️ ${T('Known')}`, pct2(d.coverage.region)])}</div>
+      <div class="kpi g-indigo"><div class="k-label">🚩 ${T('Main country')}</div><div class="k-value">${ctop ? esc(countryName(ctop.key)) : '—'}</div>${kRows([`📊 ${T('Weight')}`, ctop ? pct2(ctop.share) : '—'], [`🗺️ ${T('Countries')}`, d.countries.length])}</div>
+      <div class="kpi g-indigo"><div class="k-label">💱 ${T('Main currency')}</div><div class="k-value">${esc(d.currencies[0]?.key || '—')}</div>${kRows([`📊 ${T('Weight')}`, d.currencies[0] ? pct2(d.currencies[0].share) : '—'], [`ℹ️ ${T('Known')}`, pct2(d.coverage.currency)])}</div>
+    </div>
+    <div class="card"><div class="card-head"><div><h3>🗺️ ${T('Where your money is in the world')}</h3><p class="muted small" style="margin:3px 0 0">${T('Darker = larger weight. Point at a country for its weight and value.')}</p></div></div>
+      <div id="pt-map"><div class="loading">${T('Loading…')}</div></div>${coverageLine(d.coverage.country)}</div>
+    <div class="grid-2">
+      <div class="card"><div class="card-head"><h3>🌍 ${T('Geographic areas')}</h3></div>${barList(regions)}${coverageLine(d.coverage.region)}</div>
+      <div class="card"><div class="card-head"><h3>🚩 ${T('Countries')}</h3></div>${barList(countries)}${coverageLine(d.coverage.country)}</div>
+      <div class="card"><div class="card-head"><h3>🏙️ ${T('Developed and emerging markets')}</h3></div>${barList(markets)}${coverageLine(d.coverage.market)}</div>
+      <div class="card"><div class="card-head"><h3>💱 ${T('Currencies')}</h3></div>${barList(currencies)}${coverageLine(d.coverage.currency)}</div>
+      <div class="card"><div class="card-head"><div><h3>🏭 ${T('Sectors')}</h3><p class="muted small" style="margin:3px 0 0">${T('Of the shares: bonds, cash and commodities are in the asset classes.')}</p></div></div>${barList(sectors)}${coverageLine(d.coverage.sector, true)}</div>
+      <div class="card"><div class="card-head"><h3>🧱 ${T('Asset classes')}</h3></div>${barList(classes)}</div>
+    </div>
+    ${d.by_account?.length > 1 ? `<div class="card"><div class="card-head"><div><h3>💼 ${T('By account')}</h3><p class="muted small" style="margin:3px 0 0">${T('How each account is built on its own (for example one per goal). The portfolio is judged as a whole: its score is in Diversification.')}</p></div></div>
+      <div class="table-wrap"><table class="sp-table pt-byacc"><thead><tr><th>${T('Account')}</th><th class="right">${T('Value')}</th><th>${T('Weight')}</th><th>${T('Main asset class')}</th><th class="right">${T('Securities')}</th><th class="right">${T('Diversification')}</th></tr></thead><tbody>
+      ${d.by_account.map((a) => `<tr><td>${esc(a.icon)} ${esc(a.name)}</td><td class="right num">${money0(a.value)}</td>
+        <td><div class="pt-bar pt-bar-in"><span class="pt-track"><i style="width:${(a.share * 100).toFixed(1)}%"></i></span><b class="num">${pct2(a.share)}</b></div></td>
+        <td>${a.main_class ? `${ico(CLASS_ICON[a.main_class] || '🔹')}${esc(assetLabel(a.main_class))} <span class="muted small">${pct2(a.main_class_share)}</span>` : '—'}</td>
+        <td class="right num">${a.securities}</td>
+        <td class="right">${a.score ? `<span class="pt-pts ${a.level === 'high' ? 'full' : a.level === 'medium' ? 'half' : 'none'}">${a.score} / 10</span>` : `<span class="muted small" title="${esc(T('Not available: download the compositions first'))}">—</span>`}</td></tr>`).join('')}
+      </tbody></table></div></div>` : ''}
+    <div class="grid-2">
+      <div class="card"><div class="card-head"><h3>📄 ${T('Securities')}</h3></div>${barList(instr, { max: 20 })}</div>
+      <div class="card"><div class="card-head"><div><h3>🏢 ${T('Largest underlying securities')}</h3><p class="muted small" style="margin:3px 0 0">${T('The first 20, looking inside the funds: the same company held through several funds is added up. Weight = share of the whole value analyzed.')}</p></div></div>
+        ${d.top_holdings.length ? `<div class="table-wrap"><table class="sp-table pt-top"><thead><tr><th>${T('Security')}</th><th class="right">${T('Weight')}</th><th class="right">${T('Value')}</th><th>${T('Through')}</th></tr></thead><tbody>
+        ${d.top_holdings.map((x) => `<tr><td>${x.country ? flag(x.country) : ''}${esc(x.name)}</td><td class="right num">${pct2(x.share)}</td><td class="right num">${money0(x.value)}</td><td class="small">${esc(x.funds.join(', '))}</td></tr>`).join('')}
+        </tbody></table></div>` : `<div class="empty small">${T('Not available: download the compositions first')}</div>`}</div>
+    </div>
+    <div class="card"><div class="card-head"><h3>❔ ${T('What is not known')}</h3></div>
+      ${d.missing.length ? `<div class="list">${d.missing.map((x) => `<div class="list-item"><span class="grow">${esc(x.name)} <span class="muted small">· ${esc(MISSING_REASON[x.reason] || x.reason)}${x.issuer ? ` (${esc(x.issuer)})` : ''}</span></span>
+        ${x.reason === 'no_isin' ? `<input class="pt-isin" data-isin="${x.holding_id}" maxlength="14" placeholder="ISIN" title="${esc(T('12 characters: on the broker statement or the fund\'s factsheet'))}">` : ''}<b class="num">${x.value == null ? '—' : money0(x.value)}</b></div>`).join('')}</div>`
+        : `<div class="empty small">✅ ${T('Everything is known')}</div>`}</div>`;
+  worldMap($('#pt-map', box), d.countries, d.total).catch(() => { $('#pt-map', box).innerHTML = `<div class="empty small">${T('Not available')}</div>`; });
+  $('#pt-on', box).onchange = async (e) => {
+    try { await api('/portfolio/online', { method: 'PUT', body: { on: e.target.checked } }); route(); } catch (err) { fail(err); e.target.checked = !e.target.checked; }
+  };
+  $('#pt-refresh', box).onclick = async (e) => {
+    e.target.disabled = true; e.target.textContent = T('⏳ Updating…');
+    try {
+      const r = await api('/portfolio/refresh', { method: 'POST' });
+      const bad = r.report.filter((x) => x.status !== 'ok');
+      toast(tn('{n} security updated', '{n} securities updated', r.report.length - bad.length), bad.length ? 'err' : 'ok');
+      if (bad.length) S.ptReport = bad;
+      route();
+    } catch (err) { fail(err); e.target.disabled = false; }
+  };
+  $$('[data-isin]', box).forEach((inp) => inp.addEventListener('change', async () => {
+    try { await api(`/holdings/${inp.dataset.isin}/details`, { method: 'PUT', body: { isin: inp.value } }); toast(T('ISIN saved: now update the compositions')); route(); } catch (err) { fail(err); }
+  }));
+  if (S.ptReport) {
+    const why = { no_isin: T('ISIN missing'), bad_isin: T('invalid ISIN') };
+    $('#pt-report', box).innerHTML = calcNotes(S.ptReport.map((x) => ({ level: 'warn', text: `${x.name}: ${x.text || why[x.status] || x.status}` })));
+    S.ptReport = null;
+  }
+}
+
+// correlation colour: blue (−1) · grey (0) · red (+1)
+const corrColor = (c) => (c == null ? 'var(--surface-3)' : c >= 0 ? `color-mix(in srgb, #ef4444 ${Math.round(Math.abs(c) * 85)}%, var(--surface-3))`
+  : `color-mix(in srgb, #3b82f6 ${Math.round(Math.abs(c) * 85)}%, var(--surface-3))`);
+
+async function ptDiversification(box) {
+  const [d, cor] = await Promise.all([api('/portfolio/composition' + ptQuery()), api('/portfolio/correlation' + ptQuery())]);
+  FLAG_SET = new Set(d.flags || []);
+  if (!d.total) return ptEmpty(box);
+  const dv = d.diversification;
+  const LV = { high: [T('High'), 'g-emerald', '🟢'], medium: [T('Medium'), 'g-amber', '🟡'], low: [T('Low'), 'g-rose', '🔴'] };
+  const vs = (rows, info) => `<div class="pt-vs">${rows.filter((r) => r.portfolio >= 0.005 || r.world >= 0.005).map((r) => `<div class="pt-vs-row"><span class="pt-l">${ico((info[r.key] || ['🌐'])[0])}${esc((info[r.key] || [0, r.key])[1])}</span>
+      <div class="pt-vs-bars"><span class="pt-track"><i style="width:${Math.min(100, r.portfolio).toFixed(1)}%"></i></span><span class="pt-track world"><i style="width:${Math.min(100, r.world).toFixed(1)}%"></i></span></div>
+      <b class="num">${fix2(r.portfolio)}%</b><span class="muted small num">${fix2(r.world)}%</span></div>`).join('')}
+      <div class="pt-vs-legend muted small"><span><i class="you"></i>${T('Your shares')}</span><span><i class="wld"></i>${T('World market')}</span></div></div>`;
+  const m = (icon, label, value, tip) => `<div class="pt-metric" title="${esc(tip)}"><span>${icon} ${label}</span><b class="num">${value}</b></div>`;
+  // the criteria of the score: icon, name, what it measures, when it gets its points, how the value is written
+  // (thresholds = portfolio.SCORE_RULES)
+  const CRIT = {
+    companies: ['🏢', T('Effective number of companies'), T('How many companies with the same weight would give the same concentration: 1 ÷ the Herfindahl-Hirschman index (the sum of the squared weights).'),
+      T('Full score from {a}; half from {b}.', { a: 75, b: 25 }), (c) => num(c.value, 0)],
+    issuer: ['🥇', T('Largest company'), T('The UCITS 5/10/40 rule, the limit of the funds sold in Europe: no company above 10%, and those above 5% together at most 40%.'),
+      T('Full score when both limits are met.'), (c) => `${pct2(c.value)} · >5%: ${pct2(c.extra)}`],
+    top10: ['🔟', T('Weight of the 10 largest'), T('The concentration ratio: the share of your shares in the 10 largest companies.'),
+      T('Full score up to {a}.', { a: '30%' }), (c) => pct2(c.value)],
+    countries: ['🌍', T('Similarity to the world'), T('How close your countries are to the world equity market: 100% = the same mix.'),
+      T('Full score from {a}; half from {b}.', { a: '70%', b: '45%' }), (c) => pct2(c.value)],
+    sectors: ['🏭', T('Effective number of sectors'), T('The same measure on the 11 GICS sectors: the world market is about 7.'),
+      T('Full score from {a}; half from {b}.', { a: 6, b: 4 }), (c) => num(c.value, 1)],
+    classes: ['🧱', T('Asset classes'), T('Asset classes with at least 10% of the investments (shares, bonds, money market, commodities…; broker cash and accounts valued as a whole left out).'),
+      T('Full score from {a}.', { a: 2 }), (c) => c.value],
+    correlation: ['🔗', T('Average correlation'), T('How your securities moved together on average, from the monthly returns: the lower, the more they protect each other.'),
+      T('Full score up to {a}.', { a: fix2(0.5) }), (c) => fix2(c.value)],
+  };
+  box.innerHTML = dv ? `
+    <div class="kpis">
+      <div class="kpi ${LV[dv.level][1]}"><div class="k-label">🧩 ${T('Diversification')}</div><div class="k-value">${LV[dv.level][2]} ${LV[dv.level][0]}</div>${kRows([`⭐ ${T('Score')}`, `${dv.score} / ${dv.max_score}`])}</div>
+      <div class="kpi g-indigo" title="${esc(T('How many companies with the same weight would give the same concentration: 1 ÷ the Herfindahl-Hirschman index (the sum of the squared weights).'))}"><div class="k-label">🏢 ${T('Effective number of companies')}</div><div class="k-value">${num(dv.effective, 0)}</div>${kRows([`📄 ${T('Companies held')}`, num(dv.companies, 0)])}</div>
+      <div class="kpi g-indigo" title="${esc(T('The share of the world equity market made by the countries you hold.'))}"><div class="k-label">🌐 ${T('World market covered')}</div><div class="k-value">${pct2(dv.world_coverage)}</div>${kRows([`🚩 ${T('Countries')}`, dv.countries])}</div>
+      <div class="kpi g-indigo" title="${esc(T('How close your countries are to the world equity market: 100% = the same mix.'))}"><div class="k-label">🎯 ${T('Similarity to the world')}</div><div class="k-value">${pct2(dv.similarity)}</div>${kRows([`🏭 ${T('Sectors')}`, `${dv.sectors} / 11`])}</div>
+    </div>
+    <div class="grid-2">
+      <div class="card"><div class="card-head"><div><h3>🧩 ${T('How diversified your shares are')}</h3><p class="muted small" style="margin:3px 0 0">${T('Measured on the shares whose composition is known ({percent} of the shares).', { percent: pct2(dv.known_share) })}</p></div></div>
+        <div class="pt-crit">${dv.criteria.map((c) => { const k = CRIT[c.key]; return `<div class="pt-crit-row ${c.available ? '' : 'off'}">
+          <span class="pt-ico">${k[0]}</span><div><b>${k[1]}</b><div class="muted small">${k[2]} ${c.available ? k[3] : T('Not measurable yet: left out, the score is calculated on the other criteria.')}</div></div>
+          <b class="num">${c.available ? k[4](c) : '—'}</b><span class="pt-pts ${!c.available ? 'na' : c.points === c.max ? 'full' : c.points ? 'half' : 'none'}">${c.available ? `${c.points} / ${c.max}` : '—'}</span></div>`; }).join('')}
+          <div class="pt-crit-row total"><span class="pt-ico">⭐</span><div><b>${T('Score')}</b><div class="muted small">${T('From 1 to 10: 8–10 high, 5–7 medium, 1–4 low.')}</div></div><b>${LV[dv.level][2]} ${LV[dv.level][0]}</b><span class="pt-pts ${dv.level === 'high' ? 'full' : dv.level === 'medium' ? 'half' : 'none'}">${dv.score} / ${dv.max_score}</span></div>
+        </div>
+        <div class="pt-metrics">
+          ${m('🏢', T('Companies held'), num(dv.companies, 0), T('Different companies in all your funds and shares.'))}
+          ${m('🥇', T('Largest company'), `${esc(dv.largest.name)} · ${pct2(dv.largest.share)}`, T('The single company with the largest weight in your shares.'))}
+          ${dv.top_sector ? m(ico((SECTOR_INFO[dv.top_sector] || ['🔹'])[0]), T('Main sector'), `${esc((SECTOR_INFO[dv.top_sector] || [0, dv.top_sector])[1])} · ${pct2(dv.top_sector_share)}`, T('The sector with the largest weight in your shares.')) : ''}
+          ${m('🚩', T('Countries'), dv.countries, T('Countries with at least 0.1% of your shares.'))}
+        </div>
+        <p class="muted small">ℹ️ ${T('World market: approximate weights of the world equity market by country (developed and emerging, free-float), {date}.', { date: esc(dv.world_as_of) })}</p></div>
+      <div class="card"><div class="card-head"><h3>🌍 ${T('Your areas against the world market')}</h3></div>${vs(dv.regions, REGION_INFO)}
+        <div class="card-head" style="margin-top:14px"><h3>🏙️ ${T('Developed and emerging markets')}</h3></div>${vs(dv.markets, MARKET_INFO)}</div>
+    </div>` : `<div class="card empty"><div class="big">🧩</div><h3>${T('Not available: download the compositions first')}</h3><p>${T('Diversification is measured on what is inside your funds: allow the download in Composition and update the compositions.')}</p></div>`;
+  box.innerHTML += `
+    <div class="grid-2">
+      <div class="card"><div class="card-head"><div><h3>🔁 ${T('Overlap between funds')}</h3><p class="muted small" style="margin:3px 0 0">${T('How much two funds hold the same securities with the same weights (100% = identical). High overlap means less diversification than it seems.')}</p></div></div>
+        ${d.overlaps.length ? `<div class="pt-bars">${d.overlaps.map((o) => `<div class="pt-bar"><span class="pt-l">${esc(o.a)} ↔ ${esc(o.b)}</span><span class="pt-track"><i style="width:${o.overlap}%;background:${o.overlap >= 50 ? '#ef4444' : o.overlap >= 25 ? '#f59e0b' : '#10b981'}"></i></span><b class="num">${fix2(o.overlap)}%</b><span></span></div>`).join('')}</div>`
+          : `<div class="empty small">${d.funds_loaded > 1 ? T('No relevant overlap') : T('Needs at least two funds with their composition')}</div>`}</div>
+      <div class="card"><div class="card-head"><div><h3>🔗 ${T('Correlation between securities')}</h3><p class="muted small" style="margin:3px 0 0">${T('How your securities moved together, month by month (Pearson correlation of the monthly returns): +1 = always together (they do not diversify each other), 0 = unrelated, −1 = opposite.')}</p></div></div>
+        ${cor.securities.length > 1 ? `<div class="table-wrap"><table class="pt-corr"><thead><tr><th></th>${cor.securities.map((s, i) => `<th title="${esc(s.name)}">${i + 1}</th>`).join('')}</tr></thead><tbody>
+          ${cor.securities.map((s, i) => `<tr><th class="pt-corr-name" title="${esc(s.name)}">${i + 1}. ${ico(CLASS_ICON[s.asset_class] || '🔹')}${esc(s.name)}</th>${cor.matrix[i].map((c, j) => `<td class="${i === j ? 'self' : ''}" style="background:${corrColor(c)}" title="${esc(`${s.name} ↔ ${cor.securities[j].name}`)}">${c == null ? '·' : fix2(c)}</td>`).join('')}</tr>`).join('')}
+          </tbody></table></div>
+          <div class="pt-corr-legend muted small"><span>−1</span><i></i><span>0</span><i class="pos"></i><span>+1</span><span class="pt-legend-n">📅 ${T('Months')}: <b>${cor.months}</b>${cor.average != null ? ` · ${T('Average')}: <b>${fix2(cor.average)}</b>` : ''}</span></div>
+          ${cor.without_history.length ? `<p class="muted small">ℹ️ ${T('Without at least 12 months of prices (use "Update prices" in Investments): {list}', { list: esc(cor.without_history.join(', ')) })}</p>` : ''}`
+          : `<div class="empty small">${T('Needs at least two securities with 12 months of prices: use "Update prices" in Investments.')}</div>`}</div>
+    </div>`;
+}
+
+async function ptRebalance(box) {
+  box.innerHTML = `<div class="card rb-card" id="rb"><div class="card-head"><div><h3>⚖️ ${T('Rebalancing')}</h3>
+    <p class="muted small" style="margin:3px 0 0">${T('Target allocation, drift and what to buy or sell to get back to it. A calculator: it records nothing.')}</p></div>
+    <span class="rb-status muted small"></span></div><div class="rb-body"><div class="loading">${T('Loading…')}</div></div></div>`;
+  await rebalanceCard($('#rb', box), { accounts: S.ptAccounts });
+}
+
+async function ptCosts(box) {
+  const d = await api('/portfolio/costs' + ptQuery());
+  box.innerHTML = `<div class="kpis">
+      <div class="kpi g-rose"><div class="k-label">💸 ${T('Yearly cost of the funds')}</div><div class="k-value">${money(d.yearly)}</div>${kRows([`📅 ${T('Per month')}`, money(d.yearly / 12)])}</div>
+      <div class="kpi g-rose" title="${esc(T('TER of each fund weighted by its value'))}"><div class="k-label">📊 ${T('Average TER')}</div><div class="k-value">${d.weighted_ter == null ? '—' : fix2(d.weighted_ter) + '%'}</div>${kRows([`ℹ️ ${T('Known')}`, pct2(d.covered)])}</div>
+      <div class="kpi g-indigo"><div class="k-label">💼 ${T('Value')}</div><div class="k-value">${money0(d.total)}</div>${kRows([`📄 ${T('Securities')}`, d.items.length])}</div>
+      <div class="kpi ${d.missing.length ? 'g-rose' : 'g-indigo'}"><div class="k-label">❔ ${T('TER missing')}</div><div class="k-value">${d.missing.length}</div>${kRows([`📄 ${T('Securities')}`, d.items.length])}</div>
+    </div>
+    <div class="card"><div class="card-head"><div><h3>💸 ${T('Cost per security')}</h3><p class="muted small" style="margin:3px 0 0">${T('Type the TER (ongoing charges, % per year) of each fund here: it is on the fund\'s factsheet or KID and it is saved by itself. Single stocks have no TER: type 0.')}</p></div></div>
+      ${d.items.length ? `<div class="table-wrap"><table class="sp-table"><thead><tr><th>${T('Security')}</th><th class="right">${T('Value')}</th><th class="right">TER %</th><th class="right">${T('Per year')}</th></tr></thead><tbody>
+      ${d.items.map((x) => `<tr><td>${esc(x.name)} <span class="muted small">${esc(x.ticker)}</span></td><td class="right num">${money0(x.value)}</td>
+        <td class="right"><input class="pt-ter ${x.ter == null ? 'warn' : ''}" data-ter="${x.id}" inputmode="decimal" value="${x.ter == null ? '' : decInput(x.ter)}" placeholder="${esc(T('missing'))}"></td><td class="right num">${x.yearly == null ? '—' : money(x.yearly)}</td></tr>`).join('')}
+      </tbody></table></div>` : `<div class="empty small">${T('No securities')}</div>`}</div>`;
+  $$('[data-ter]', box).forEach((inp) => inp.addEventListener('change', async () => {
+    try { await api(`/holdings/${inp.dataset.ter}/details`, { method: 'PUT', body: { ter: inp.value } }); route(); } catch (err) { fail(err); }
+  }));
+}
+
+async function ptProjection(box) {
+  const comp = await api('/portfolio/composition' + ptQuery());
+  const P = (S.ptProj ||= { amount: 20000, every: 1, years: 20, rates: [2, 5, 8], inflation: 2 });
+  const sel = String(S.ptAccounts || 'all');
+  if (P.sel !== sel) { P.start = comp.total; P.sel = sel; }  // other accounts chosen: start from their value
+  const EVERY = [[1, T('Every month')], [3, T('Every 3 months')], [6, T('Every 6 months')], [12, T('Every year')], [0, T('Never (no contributions)')]];
+  box.innerHTML = `<div class="card"><div class="card-head"><div><h3>🔮 ${T('Projection')}</h3><p class="muted small" style="margin:3px 0 0">${T('How much the portfolio could be worth with regular contributions, in three scenarios of yearly return. A calculator: returns are not guaranteed and past results do not predict future ones.')}</p></div></div>
+      <div class="form-grid pt-proj">
+        <label class="field">💼 ${T('Starting value')} <input id="pp-start" inputmode="decimal" value="${moneyInput(P.start)}"></label>
+        <label class="field">💶 ${T('Contribution')} <input id="pp-amount" inputmode="decimal" value="${moneyInput(P.amount)}"></label>
+        <label class="field">📅 ${T('How often')} <select id="pp-every">${EVERY.map(([k, l]) => `<option value="${k}" ${k === P.every ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+        <label class="field">⏳ ${T('Years')} <input id="pp-years" type="number" min="1" max="50" value="${P.years}"></label>
+        <label class="field">🐢 ${T('Prudent return (%)')} <input id="pp-r0" inputmode="decimal" value="${decInput(P.rates[0])}"></label>
+        <label class="field">🚶 ${T('Middle return (%)')} <input id="pp-r1" inputmode="decimal" value="${decInput(P.rates[1])}"></label>
+        <label class="field">🚀 ${T('Optimistic return (%)')} <input id="pp-r2" inputmode="decimal" value="${decInput(P.rates[2])}"></label>
+        <label class="field">📉 ${T('Inflation (% per year)')} <input id="pp-infl" inputmode="decimal" value="${decInput(P.inflation)}"></label>
+      </div><div id="pp-out"></div></div>`;
+  const read = () => {
+    const n = (id, d) => { const x = parseFloat(String($(id, box).value).replace(',', '.')); return Number.isFinite(x) ? x : d; };
+    P.start = Math.max(0, parseMoney($('#pp-start', box).value) || 0); P.amount = Math.max(0, parseMoney($('#pp-amount', box).value) || 0);
+    P.every = +$('#pp-every', box).value; P.years = Math.min(50, Math.max(1, Math.round(n('#pp-years', 20)))); P.inflation = Math.min(20, Math.max(0, n('#pp-infl', 0)));
+    P.rates = ['#pp-r0', '#pp-r1', '#pp-r2'].map((id, i) => Math.min(30, Math.max(-20, n(id, P.rates[i]))));
+  };
+  const drawOut = () => {
+    read();
+    // monthly compounding; a contribution every `every` months (at the end of the month); values in today's money
+    // when inflation is set (deflated month by month)
+    const months = P.years * 12, defl = (1 + P.inflation / 100) ** (1 / 12);
+    const series = P.rates.map((r) => { const g = (1 + r / 100) ** (1 / 12); let v = P.start; const out = [v];
+      for (let m = 1; m <= months; m++) { v = v * g + (P.every && m % P.every === 0 ? P.amount : 0); out.push(v / defl ** m); } return out; });
+    // money put in, in today's money too when inflation is set (each contribution deflated to when it is paid), so that
+    // value and money put in are compared in the same units
+    const paid = [P.start];
+    for (let m = 1; m <= months; m++) paid.push(paid[m - 1] + (P.every && m % P.every === 0 ? P.amount / defl ** m : 0));
+    const at = (arr) => arr.filter((_, m) => m % 12 === 0);
+    const end = series.map((s) => s[months]);
+    const perYear = P.every ? P.amount * (12 / P.every) : 0;
+    $('#pp-out', box).innerHTML = `<div class="kpis" style="margin-top:14px">
+        <div class="kpi g-sky"><div class="k-label">💶 ${T('Money put in')}</div><div class="k-value">${money0(paid[months])}</div>${kRows([`📅 ${T('Per year')}`, money0(perYear)], [`⏳ ${T('Years')}`, P.years])}</div>
+        ${end.map((x, i) => `<div class="kpi ${x >= paid[months] - 50 ? 'g-emerald' : 'g-rose'}"><div class="k-label">${['🐢', '🚶', '🚀'][i]} ${[T('Prudent'), T('Middle'), T('Optimistic')][i]} · ${num(P.rates[i], 1)}%</div><div class="k-value">${money0(x)}</div>${kRows([`📈 ${T('Growth')}`, money0(Math.abs(x - paid[months]) < 50 ? 0 : x - paid[months])])}</div>`).join('')}
+      </div>${P.inflation ? `<p class="muted small">ℹ️ ${T('Values in today\'s money: inflation of {percent} per year taken out.', { percent: num(P.inflation, 1) + '%' })}</p>` : ''}
+      <div class="chart-box" style="height:280px"><canvas id="pp-chart"></canvas></div>`;
+    chart($('#pp-chart', box), { type: 'line', data: { labels: at(paid).map((_, i) => i), datasets: [
+      ...series.map((s, i) => ({ label: [T('Prudent'), T('Middle'), T('Optimistic')][i], data: at(s), borderColor: ['#f59e0b', '#f97316', '#10b981'][i], borderWidth: 2, pointRadius: 0, tension: .3 })),
+      { label: T('Money put in'), data: at(paid), borderColor: '#0ea5e9', borderDash: [5, 4], borderWidth: 2, pointRadius: 0 }] },
+      options: { maintainAspectRatio: false, interaction: { mode: 'index', intersect: false }, scales: { y: { ticks: { callback: (x) => moneyK(x) } }, x: { title: { display: true, text: T('Years') }, grid: { display: false } } },
+        plugins: { legend: { position: 'bottom', labels: { usePointStyle: true, boxWidth: 8 } }, tooltip: { callbacks: { label: (c) => ` ${c.dataset.label}: ${money0(c.raw)}` } } } } });
+  };
+  $$('.pt-proj input, .pt-proj select', box).forEach((i) => i.addEventListener('change', drawOut));
+  drawOut();
+}
+
+async function ptBenchmark(box) {
+  S.ptBench ||= { ticker: 'VWCE.DE', months: '36' };
+  const B = S.ptBench;
+  box.innerHTML = `<div class="card"><div class="card-head"><div><h3>📊 ${T('Comparison with an index')}</h3><p class="muted small" style="margin:3px 0 0">${T('Your investments against an index or ETF, month by month. Your return is time-weighted: money you add or take out does not count as performance. Only the ticker is sent to Yahoo Finance.')}</p></div></div>
+    <div class="inline-form"><input id="pb-t" maxlength="30" value="${esc(B.ticker)}" placeholder="VWCE.DE">
+      <select id="pb-m">${[['12', T('Last 12 months')], ['36', T('Last 36 months')], ['60', T('Last 5 years')], ['120', T('Last 10 years')]].map(([k, l]) => `<option value="${k}" ${k === B.months ? 'selected' : ''}>${l}</option>`).join('')}</select>
+      <button class="btn btn-primary" id="pb-go">📊 ${T('Compare')}</button></div><div id="pb-out"></div></div>`;
+  const go = async () => {
+    B.ticker = $('#pb-t', box).value.trim().toUpperCase(); B.months = $('#pb-m', box).value;
+    const out = $('#pb-out', box);
+    out.innerHTML = `<div class="loading">${T('Loading…')}</div>`;
+    try {
+      const d = await api('/portfolio/benchmark' + ptQuery({ ticker: B.ticker, months: B.months }));
+      const sign = (x) => (x >= 0 ? 'g-emerald' : 'g-rose');
+      out.innerHTML = `<div class="kpis" style="margin-top:14px">
+          <div class="kpi ${sign(d.portfolio.total)}"><div class="k-label">💼 ${T('Your investments')}</div><div class="k-value">${pctS2(d.portfolio.total)}</div>${kRows(d.portfolio.yearly != null && [`📅 ${T('Per year')}`, pctS2(d.portfolio.yearly)], [`📉 ${T('Largest fall')}`, pctS2(d.portfolio.drawdown)])}</div>
+          <div class="kpi ${sign(d.benchmark.total)}"><div class="k-label">📊 ${esc(d.ticker)}</div><div class="k-value">${pctS2(d.benchmark.total)}</div>${kRows(d.benchmark.yearly != null && [`📅 ${T('Per year')}`, pctS2(d.benchmark.yearly)], [`📉 ${T('Largest fall')}`, pctS2(d.benchmark.drawdown)])}</div>
+          <div class="kpi ${sign(d.portfolio.total - d.benchmark.total)}"><div class="k-label">⚖️ ${T('Difference')}</div><div class="k-value">${pctS2(d.portfolio.total - d.benchmark.total)}</div>${kRows([`📅 ${T('Months')}`, d.months])}</div>
+        </div>${d.missing_months ? `<p class="muted small">ℹ️ ${tn('{n} month without a price of the index', '{n} months without a price of the index', d.missing_months)}</p>` : ''}
+        <div class="chart-box" style="height:280px"><canvas id="pb-chart"></canvas></div>`;
+      chart($('#pb-chart', box), { type: 'line', data: { labels: d.points.map((p) => fmtMonth(p.month)), datasets: [
+        { label: T('Your investments'), data: d.points.map((p) => p.portfolio * 100), borderColor: '#6366f1', borderWidth: 2.5, pointRadius: 0, tension: .25 },
+        { label: d.ticker, data: d.points.map((p) => (p.benchmark == null ? null : p.benchmark * 100)), borderColor: '#8b8fa8', borderDash: [5, 4], borderWidth: 2, pointRadius: 0, tension: .25 }] },
+        options: { maintainAspectRatio: false, interaction: { mode: 'index', intersect: false }, scales: { y: { ticks: { callback: (x) => `${num(x, 0)}%` } }, x: { grid: { display: false } } },
+          plugins: { legend: { position: 'bottom', labels: { usePointStyle: true, boxWidth: 8 } }, tooltip: { callbacks: { label: (c) => ` ${c.dataset.label}: ${fix2(c.raw)}%` } } } } });
+    } catch (e) { out.innerHTML = calcNotes([{ level: 'warn', text: e.message }]); }
+  };
+  $('#pb-go', box).onclick = go;
 }
 
 // ================================================================ savings and net worth
@@ -3975,7 +4373,7 @@ async function renderImpostazioni(v, params) {
     <div class="card" style="margin-top:18px"><div class="card-head"><h3>🛡️ ${T('Where your data lives')}</h3></div>
       <div class="settings-row"><div><b>${T('Data encrypted on your PC')}</b><p class="muted small"><code class="path">${esc(S.data_dir)}</code></p>
         ${S.legacyCopies.length ? `<p class="small"><span class="tag warn">${T('old copy')}</span> ${T('Since version 1.2 the data lives in the folder above. The previous folder was kept, unused:')} ${S.legacyCopies.map((p) => `<code class="path">${esc(p)}</code>`).join(' ')} — ${T('delete it once you have checked that everything is here (it is encrypted, like the data).')}</p>` : ''}</div></div>
-      <div class="settings-row"><div><p class="muted small" style="margin:0">${T('HomeCoin accepts connections only from this PC (127.0.0.1), uses no external services or CDNs and blocks requests coming from other sites. It goes online only for two optional things: "Update prices" in Investments (sends only the tickers to Yahoo Finance) and the update check (asks GitHub for the latest version; nothing about you or your data is sent). Help and Support open GitHub and Ko-fi in a new browser tab, only when you click them.')}</p></div></div>
+      <div class="settings-row"><div><p class="muted small" style="margin:0">${T('HomeCoin accepts connections only from this PC (127.0.0.1), uses no external services or CDNs and blocks requests coming from other sites. It goes online only for three optional things: "Update prices" in Investments and the comparison with an index (they send only tickers to Yahoo Finance), "Update compositions" in Portfolio analysis (off until you allow it; it sends only the ISIN of each fund to its issuer) and the update check (asks GitHub for the latest version; nothing about you or your data is sent). Help and Support open GitHub and Ko-fi in a new browser tab, only when you click them.')}</p></div></div>
     </div>`,
     updates: updatePane(),
   };

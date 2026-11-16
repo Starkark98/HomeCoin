@@ -19,7 +19,7 @@ Thanks for your interest in improving HomeCoin!
 
 ## Ground rules
 
-- **Local only.** The server listens on `127.0.0.1`; no cloud, accounts, telemetry, CDNs or external resources. Only two outbound calls exist, both optional: the price update (tickers only, to Yahoo Finance) and the update check (the latest release, from GitHub).
+- **Local only.** The server listens on `127.0.0.1`; no cloud, accounts, telemetry, CDNs or external resources. Only three outbound calls exist, all optional: the price update and the index comparison (tickers only, to Yahoo Finance), the fund compositions of Portfolio analysis (off by default; ISIN only, to the issuers' hosts listed in `homecoin/funds.py`) and the update check (the latest release, from GitHub).
 - **Signed updates.** Releases are signed by the maintainer and HomeCoin installs nothing without a valid signature (`homecoin/updater.py`). Changes must never weaken these checks.
 - **Data always encrypted.** Nothing of the user's data may be written outside the encrypted database (logs, temporary files, caches). Unencrypted exports stay an explicit user action, with a warning.
 - **Request security.** Writes go through the existing checks (dedicated header, local origin, session); every value entered or imported goes through `esc()` before it reaches the HTML.

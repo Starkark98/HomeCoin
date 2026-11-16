@@ -1,4 +1,5 @@
-"""Helper functions: amounts, dates, recurrences, description normalization."""
+"""Shared helpers: currencies and their number formats, amount and number parsing, dates, recurrences, description
+normalization, rule matching and the optimal pairing of records (best_pairs)."""
 import calendar
 import datetime as dt
 import re
@@ -7,6 +8,8 @@ from collections import namedtuple
 from decimal import ROUND_HALF_UP, Decimal, DecimalException
 
 from . import i18n
+from .i18n import all_names as _all_names
+
 FREQUENCIES = {
     "weekly": ("d", 7),
     "monthly": ("m", 1),
@@ -23,7 +26,6 @@ MONTHLY_FACTOR = {
 
 # system categories with a role in the calculations, recognized by their fixed code (categories.code); these are all the
 # names they may have (every language, and the Italian of older databases), used to give them the code when created
-from .i18n import all_names as _all_names  # noqa: E402
 BALANCE_ADJUSTMENT = _all_names("balance_adjustment")
 # trades on securities that were not imported (excluded from reports, counted as invested in Savings)
 OTHER_INVESTMENTS = _all_names("other_investments")

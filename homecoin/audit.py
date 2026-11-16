@@ -81,6 +81,10 @@ EVENTS = {
     "goal_create": ("change", "Goal created"),
     "goal_update": ("change", "Goal edited"),
     "valuation_add": ("change", "Valuation recorded"),
+    # 2.5.0: portfolio analysis
+    "portfolio_online": ("security", "Download of fund compositions changed"),
+    "portfolio_refresh": ("data", "Fund compositions downloaded"),
+    "holding_details": ("change", "Security edited"),
 }
 # actions written directly (not through EVENTS): listed so that they are translated like the others
 OTHER_ACTIONS = ("HomeCoin closed", "HomeCoin updated")
