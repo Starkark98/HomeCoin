@@ -235,6 +235,7 @@ DYNAMIC_TEXTS = (
     "buy", "sell", "split", "capital return", "interest", "dividend", "fee", "Family", "Personal",
     "Multiple transactions deleted", "Category changed on multiple transactions", "Transactions excluded from reports",
     "Transactions included in reports",
+    "HomeCoin closed", "HomeCoin updated",  # activity log actions written directly (audit.OTHER_ACTIONS)
 )
 
 

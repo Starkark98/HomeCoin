@@ -2,7 +2,7 @@
 
 # HomeCoin *by Starkark98*
 
-![Version](https://img.shields.io/badge/version-2.4.3-8b5cf6)
+![Version](https://img.shields.io/badge/version-2.4.4-8b5cf6)
 ![Python](https://img.shields.io/badge/Python-3.12%20%7C%203.13%20%7C%203.14-3776AB?logo=python&logoColor=white)
 ![Platform](https://img.shields.io/badge/platform-Windows-0078D6)
 ![Data](https://img.shields.io/badge/data-encrypted%2C%20on%20your%20PC-16a34a)
@@ -559,7 +559,7 @@ An income with no matching transfer stays as it is. Tick it only if that money r
 
 **What you can do.** Choose the period (last 6, 12, 24 or 36 months, or all).
 
-**Tip.** *Saved* is the surplus of the month (income minus spending minus money given to other spaces), not the change in your accounts. *Invested* is purchases minus sales of securities (money market funds excluded), even if paid with earlier savings.
+**Tip.** *Saved* is the surplus of the month (income minus spending minus money given to other spaces), not the change in your accounts. *Invested* is purchases minus sales of securities, even if paid with earlier savings. Money market funds are not counted there: they are parked cash (very low risk, available within days, counted as cash in the Emergency fund too), so moving money into them is not investing. What you put into them is shown apart, in the row *In money market* under the invested amount. Money moved to an investment account that has no trades (for example a pension fund you only value as a whole) is a transfer between your own accounts, not a purchase, so it does not count as invested either.
 
 ## Tools
 
@@ -637,7 +637,13 @@ An encrypted backup of the database is saved before the change; each option can 
 ![Activity log](docs/images/19-activity-log.png)
 *Activity log: sign-ins, security, changes, deletions, imports and exports.*
 
-**What you see.** When, what, the details and the space, for sign-ins (including wrong passwords), security changes, edits and deletions, imports and exports. Filter by kind with the buttons at the top.
+**What you see.** When, what, the details and the space. Filter by kind with the buttons at the top. It records every deliberate change, in every page:
+- **sign-ins and security:** sign-ins (including wrong passwords), password and recovery key, auto-lock, the temporary import code, the data folder protection, updates and closing HomeCoin;
+- **settings:** language, currency, automatic update check, backup settings, Emergency fund target, Fair split settings (people, calculation basis, split rules), rebalancing targets saved;
+- **changes and deletions:** spaces, accounts, categories, rules, budgets, recurring items, transactions edited or deleted, goals, securities, trades and valuations, conversions and reconciliations between spaces, money recorded twice removed;
+- **data:** imports, unencrypted exports, backups downloaded, restored or put back.
+
+To keep it readable it leaves out what changes nothing or happens by itself: pages opened, previews and calculators, single new transactions, payments recorded automatically by recurring items, price updates, locking. A setting you adjust several times in a row (a budget, the Fair split figures) becomes one row, from the first value to the last.
 
 **Tip.** It is stored in the encrypted database and cleans itself up after 12 months.
 
@@ -892,4 +898,4 @@ Any copy or modified version must keep the [LICENSE](LICENSE) file, including th
 
 ---
 
-*HomeCoin by **Starkark98** · v2.4.3 · see the [changelog](CHANGELOG.md)*
+*HomeCoin by **Starkark98** · v2.4.4 · see the [changelog](CHANGELOG.md)*

@@ -28,7 +28,7 @@ from . import updater
 from . import util
 from .util import FREQUENCIES, add_months, months_between, parse_date, parse_number, rule_matches
 
-VERSION = "2.4.3"
+VERSION = "2.4.4"
 STATIC_DIR = dbm.BASE_DIR / "static"
 KINDS = ("expense", "income", "transfer")
 ACCOUNT_TYPES = ("corrente", "risparmio", "credito", "prepagata", "contanti", "investimenti", "altro")
@@ -394,7 +394,7 @@ def create_app(port):
                 try:
                     if request.endpoint == "auth_login":
                         audit.purge(conn)  # cleanup: lines older than 12 months
-                    audit.write(kind, action, detail, p["name"] if p else "", conn)
+                    audit.write(kind, action, detail, p["name"] if p else "", conn, merge=g.get("audit_merge"))
                 finally:
                     conn.close()
             except Exception:  # the activity log must never make the operation fail
@@ -637,6 +637,9 @@ def create_app(port):
         if not isinstance(auto, bool):
             raise ApiError(i18n.t("Invalid value"))
         db = get_db()
+        if update_status(db)["auto"] == auto:
+            g.audit_skip = True  # nothing changed
+        note(i18n.t("on") if auto else i18n.t("off"))
         save_setting(db, "update_auto", "1" if auto else "0")
         db.commit()
         return jsonify(update_status(db))
@@ -1351,13 +1354,21 @@ def create_app(port):
         if portfolio_of("categories", cid) != pf():
             raise ApiError(i18n.t("Category not found"))
         db = get_db()
-        db.execute("INSERT OR IGNORE INTO rules(pattern, category_id) VALUES (?,?)", (pattern, cid))
+        if not db.execute("INSERT OR IGNORE INTO rules(pattern, category_id) VALUES (?,?)", (pattern, cid)).rowcount:
+            g.audit_skip = True  # the same rule already existed
+        note(f"{pattern} → {(db.execute('SELECT name FROM categories WHERE id = ?', (cid,)).fetchone() or [''])[0]}")
         db.commit()
         return jsonify(ok=True), 201
 
     @app.delete("/api/rules/<int:rid>")
     def rule_delete(rid):
         db = get_db()
+        r = db.execute("SELECT r.pattern, c.name FROM rules r JOIN categories c ON c.id = r.category_id "
+                       "WHERE r.id = ? AND c.portfolio_id = ?", (rid, pf())).fetchone()
+        if r:
+            note(f"{r[0]} → {r[1]}")
+        else:
+            g.audit_skip = True  # not found in this space: nothing deleted
         db.execute("DELETE FROM rules WHERE id = ? AND category_id IN (SELECT id FROM categories WHERE portfolio_id = ?)",
                    (rid, pf()))
         db.commit()
@@ -2697,6 +2708,15 @@ def create_app(port):
         b = body()
         db = get_db()
         cur_pf = pf()
+
+        def snapshot():  # people, settings and split rules of the space: what the activity log compares
+            return (json.dumps([list(r) for r in db.execute("SELECT name, income, keyword, space_id FROM people "
+                                                             "WHERE portfolio_id = ? ORDER BY position, id", (cur_pf,))]),
+                    json.dumps([list(r) for r in db.execute("SELECT key, value FROM settings WHERE key LIKE ? ORDER BY key",
+                                                             (f"split%@{cur_pf}",))]),
+                    json.dumps([list(r) for r in db.execute("SELECT id, split FROM categories WHERE portfolio_id = ? "
+                                                             "AND kind = 'expense' ORDER BY id", (cur_pf,))]))
+        before = snapshot()
         people = b.get("people")
         if isinstance(people, list):
             if len(people) > 10:
@@ -2752,6 +2772,14 @@ def create_app(port):
                 raise ApiError(i18n.t("Invalid split rule"))
             db.execute("UPDATE categories SET split = ? WHERE id = ? AND kind = 'expense' AND portfolio_id = ?",
                        (rule, as_int(cid, "category"), cur_pf))
+        after = snapshot()
+        changed = [label for label, x, y in zip((i18n.t("people"), i18n.t("settings"), i18n.t("split rules")), before, after)
+                   if x != y]
+        if changed:  # saved while typing: one row for the changes of the next few minutes (audit.write merge)
+            note(", ".join(changed))
+            g.audit_merge = ""
+        else:
+            g.audit_skip = True
         db.commit()
         return jsonify(split_state())
 
@@ -2901,8 +2929,15 @@ def create_app(port):
     def budget_put(cid):
         db = get_db()
         budget = as_int(body().get("budget") or 0, "budget", minimum=0)
-        if not db.execute("UPDATE categories SET budget = ? WHERE id = ? AND portfolio_id = ?", (budget, cid, pf())).rowcount:
+        old = db.execute("SELECT name, budget FROM categories WHERE id = ? AND portfolio_id = ?", (cid, pf())).fetchone()
+        if not old:
             raise ApiError(i18n.t("Category not found"), 404)
+        if old["budget"] == budget:
+            g.audit_skip = True  # nothing changed
+        # a limit typed in steps is one change: same category within a few minutes = one row (audit.write merge)
+        note(f"{old['name']} · {audit.eur(old['budget'] or 0)} → {audit.eur(budget)}")
+        g.audit_merge = f"{old['name']} · "
+        db.execute("UPDATE categories SET budget = ? WHERE id = ? AND portfolio_id = ?", (budget, cid, pf()))
         db.commit()
         return jsonify(ok=True)
 
@@ -2931,6 +2966,11 @@ def create_app(port):
         if v is None or not 1 <= v <= 36:
             raise ApiError(i18n.t("Invalid number of months"))
         db = get_db()
+        old = float(tools.setting(db, "emergency_months", pf(), 6))
+        if old == v:
+            g.audit_skip = True  # nothing changed
+        note(f"{util.fmt_decimal(old)} → {util.fmt_decimal(v)}")  # months: the unit is in the action's text
+        g.audit_merge = ""
         tools.set_setting(db, "emergency_months", pf(), v)
         db.commit()
         return jsonify(tools.emergency(db, pf()))
@@ -2991,9 +3031,11 @@ def create_app(port):
         own_invest_account(aid)
         b = body()
         db = get_db()
+        d, value = tx_date(b.get("date")), as_int(b.get("value"), "value", minimum=0)  # 2.4.3: plausible year
+        note(f"{db.execute('SELECT name FROM accounts WHERE id = ?', (aid,)).fetchone()[0]} · {d} · {audit.eur(value)}")
         db.execute("""INSERT INTO valuations(account_id, date, value, source) VALUES (?, ?, ?, 'manual')
                       ON CONFLICT(account_id, date) DO UPDATE SET value = excluded.value, source = 'manual'""",
-                   (aid, tx_date(b.get("date")), as_int(b.get("value"), "value", minimum=0)))  # 2.4.3: plausible year
+                   (aid, d, value))
         db.commit()
         return jsonify(ok=True), 201
 
@@ -3426,8 +3468,14 @@ def create_app(port):
         b, db = body(), get_db()
         cfg = rebalance_config(b, rebalance_saved(db))
         if b.get("save") is True:
+            if json.dumps(cfg) == json.dumps(rebalance_saved(db)):
+                g.audit_skip = True  # saved again unchanged
             tools.set_setting(db, "rebalance", pf(), json.dumps(cfg))
             db.commit()
+            targets = cfg["targets"].get(cfg["mode"]) or {}
+            note(i18n.tn("{n} target", "{n} targets", len(targets)))
+        else:
+            g.audit_skip = True  # a calculation: nothing saved
         return jsonify(config=cfg, result=tools.rebalance(db, pf(), cfg))
 
     @app.post("/api/investments/refresh")

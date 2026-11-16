@@ -1010,7 +1010,9 @@ def savings(db, pid, months=12):
       saved        = income − spent − other spaces (always the month's surplus)
     and, separately, invested = buys − sells of NON money market securities in investment accounts (excluded securities
     too), net of what was funded by inflows that are not income (severance pay, opening positions). Money market ETFs are
-    cash: buying or selling them is not investing. Invested can exceed the surplus (earlier savings are used)."""
+    cash: buying or selling them is not investing; their net buys are returned apart as money_market. Invested can exceed
+    the surplus (earlier savings are used). Transfers to investment accounts without trades (a pension fund valued as a
+    whole) are moves between own accounts and do not count as invested (maintainer's decision, 2026-11-16)."""
     accs = pf_accounts(db, pid, active_only=False)
     ids = {a["id"] for a in accs}
     inv_ids = {a["id"] for a in accs if a["type"] == INVEST}
@@ -1019,7 +1021,7 @@ def savings(db, pid, months=12):
     for ym in months_back(months):
         first = dt.date(int(ym[:4]), int(ym[5:]), 1)
         end = month_end(ym).isoformat()
-        r = {"month": ym, "income": 0, "from_others": 0, "expense": 0, "to_others": 0, "invested": 0}
+        r = {"month": ym, "income": 0, "from_others": 0, "expense": 0, "to_others": 0, "invested": 0, "money_market": 0}
         for t in db.execute(f"""SELECT t.kind, t.amount, t.account_id, t.to_account_id, t.excluded, c.code AS category,
                                        COALESCE(c.flow, '') AS flow
                                 FROM transactions t LEFT JOIN categories c ON c.id = t.category_id
@@ -1049,8 +1051,9 @@ def savings(db, pid, months=12):
                                 LEFT JOIN holdings h ON h.id = o.holding_id
                                 WHERE o.account_id IN ({marks}) AND o.date BETWEEN ? AND ?""", (*ids, first.isoformat(), end)):
             if o["kind"] in ("buy", "sell", "capital"):
-                if o["cls"] != "monetario":  # money market ETFs are parked cash, not an investment
-                    r["invested"] -= o["amount"]  # buy: negative amount → positive invested
+                # buy: negative amount → positive invested. Money market ETFs are parked cash, not an investment: their
+                # net buys are shown apart (2.4.4), so moving cash into them never inflates "invested"
+                r["money_market" if o["cls"] == "monetario" else "invested"] -= o["amount"]
             elif o["kind"] in ("interest", "dividend"):
                 r["income"] += o["amount"]
             elif o["kind"] == "fee":
@@ -1060,7 +1063,7 @@ def savings(db, pid, months=12):
         r["rate"] = r["saved"] / inc if inc > 0 else None
         r["invest_rate"] = r["invested"] / inc if inc > 0 else None
         rows.append(r)
-    keys = ("income", "from_others", "expense", "to_others", "invested", "saved")
+    keys = ("income", "from_others", "expense", "to_others", "invested", "money_market", "saved")
     tot = {k: sum(r[k] for r in rows) for k in keys}
     inc = tot["income"] + tot["from_others"]
     tot["rate"] = tot["saved"] / inc if inc > 0 else None

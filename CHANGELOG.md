@@ -2,6 +2,11 @@
 
 All notable changes to HomeCoin are listed here, newest first.
 
+## 2.4.4 — 2026-11-16
+
+- **The activity log records every setting.** Added: the automatic update check, the Emergency fund target, the Fair split settings (people, calculation basis, split rules), the rebalancing targets saved, budgets, rules created or deleted, goals created or edited, valuations recorded. Nothing is written when a save changes nothing, and a setting adjusted several times in a row (a budget typed in steps, the Fair split figures) is one row, from the first value to the last. *HomeCoin closed* and *HomeCoin updated* are now translated like the other actions. The guide lists what is recorded and what is deliberately left out.
+- **Savings: money market shown apart.** Money market funds still do not count as *invested* (they are parked cash, as in the Emergency fund), but what you put into them now appears in the row *In money market* under the invested amount.
+
 ## 2.4.3 — 2026-11-13
 
 - **Clearer summary boxes on every page.** The boxes at the top now follow one color code everywhere: red = money going out, green = money coming in, blue = transfers, yellow = what is left (savings, margin, money still available), violet = balances and totals. Under each figure, the same short rows with its detail (for example *Income* / *From other spaces*, *Confirmed* / *Estimated*, the savings rate, the share already repaid) instead of sentences; the explanations are in the tooltip of the box. The charts follow the same colors (transfers between spaces in blue).

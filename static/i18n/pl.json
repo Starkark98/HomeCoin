@@ -1,67 +1,4 @@
 {
-" and each person's share based on income": " oraz udział każdej osoby według dochodów",
-" · from another space": " · z innej przestrzeni",
-" — 30 minutes or less is better": " — lepiej 30 minut lub mniej",
-"\"{name}\" is a system category used in the savings and invested calculations: it can't be deleted": "„{name}” to kategoria systemowa używana do obliczania oszczędności i inwestycji: nie można jej usunąć",
-"\"{name}\" is a system category used in the savings and invested calculations: you can change its color and icon, not its name": "„{name}” to kategoria systemowa używana do obliczania oszczędności i inwestycji: możesz zmienić jej kolor i ikonę, ale nie nazwę",
-"\"{name}\" is used by {items}: they will be left uncategorized and drop out of budgets and category reports.": "„{name}” jest używana przez {items}: zostaną bez kategorii i wypadną z budżetów oraz raportów według kategorii.",
-"(and {n} linked automatic investment plan purchase)": "(oraz {n} powiązany automatyczny zakup planu inwestycyjnego)",
-"(and {n} linked automatic investment plan purchases)": {
-"few": "(oraz {n} powiązane automatyczne zakupy planu inwestycyjnego)",
-"many": "(oraz {n} powiązanych automatycznych zakupów planu inwestycyjnego)",
-"other": "(oraz {n} powiązanego automatycznego zakupu planu inwestycyjnego)"
-},
-"(date, description, amount or money in/out).": "(data, opis, kwota albo wpływy/wypływy).",
-"(e.g. salary, commissions, usage-based bills)": "(np. wynagrodzenie, prowizje, rachunki zależne od zużycia)",
-"(for the amortization schedule; excluding APR and additional costs)": "(do harmonogramu spłat; bez RRSO i kosztów dodatkowych)",
-"(it still counts in the account balance)": "(nadal liczy się do salda konta)",
-"(optional)": "(opcjonalnie)",
-"(otherwise they are only counted as paid)": "(w przeciwnym razie są tylko liczone jako zapłacone)",
-"(security no longer owned or account not counted)": "(instrument już nieposiadany lub konto nieuwzględniane)",
-"(the same as in the Calendar)": "(tak samo jak w Kalendarzu)",
-"0% rate": "Oprocentowanie 0%",
-"2-year warranty until {date}": "Gwarancja 2-letnia do {date}",
-"<b>Estimated</b>, with the same method for income and expenses: variable recurring items (median of recent payments) and regular transactions without a recurring item, recognized from history (same payer or payee in at least {min} of the last {months} months, ignoring month and year in the description; median monthly amount and day). Occasional expenses are not forecast; among estimated income only significant amounts are included (at least {amount} and 5% of the largest, so small account interest is left out). To track an item better, create a \"variable amount\" recurring item in Recurring.": "<b>Szacowane</b> tą samą metodą dla przychodów i wydatków: zmienne pozycje cykliczne (mediana ostatnich płatności) oraz regularne transakcje bez pozycji cyklicznej, rozpoznane z historii (ten sam płatnik lub odbiorca w co najmniej {min} z ostatnich {months} mies., z pominięciem miesiąca i roku w opisie; mediana miesięcznej kwoty i dnia). Wydatki okazjonalne nie są prognozowane; spośród szacowanych przychodów uwzględniane są tylko znaczące kwoty (co najmniej {amount} i 5% największej), więc drobne odsetki na koncie są pomijane. Aby lepiej śledzić daną pozycję, utwórz w Cyklicznych pozycję cykliczną ze „zmienną kwotą”.",
-"<b>Income</b> and <b>expenses</b> count in reports, budgets and the month's savings": "<b>Przychody</b> i <b>wydatki</b> liczą się w raportach, budżetach i oszczędnościach miesiąca",
-"<b>Money market</b>: it is parked cash. Buying or selling it does <b>not</b> count as invested, and it counts toward the emergency fund.": "<b>Rynek pieniężny</b>: to zaparkowana gotówka. Jego kupno lub sprzedaż <b>nie</b> liczy się jako zainwestowane, a sam wlicza się do poduszki finansowej.",
-"<b>Transfers</b> move money between accounts (e.g. current → savings, card top-up) without counting as spending.": "<b>Przelewy</b> przenoszą pieniądze między kontami (np. konto osobiste → oszczędnościowe, doładowanie karty) i nie liczą się jako wydatki.",
-"<b>With their own space</b> in HomeCoin, every transfer from that space counts as theirs: nothing else to set. <b>Without a space</b> (they pay from a bank that is not in HomeCoin), their incomes are recognized by the keyword in the description: their name if you leave it empty, so write it the way it appears on the bank transfers (e.g. \"Anna\" in \"Transfer from ANNA ROSSI\"). Check the result in <i>Contributions in the period</i> below, and correct any row by hand.": "<b>Z własną przestrzenią</b> w HomeCoin każdy przelew z tej przestrzeni liczy się jako jej: nic więcej nie trzeba ustawiać. <b>Bez przestrzeni</b> (płaci z banku, którego nie ma w HomeCoin) jej przychody są rozpoznawane po słowie kluczowym w opisie: jej imieniu, jeśli zostawisz je puste, więc wpisz je tak, jak widnieje na przelewach (np. „Anna” w „Przelew od ANNA ROSSI”). Sprawdź wynik niżej w <i>Wpłaty w okresie</i> i popraw ręcznie dowolny wiersz.",
-"<b>{n}</b> duplicate": "<b>{n}</b> duplikat",
-"<b>{n}</b> duplicates": {
-"few": "<b>{n}</b> duplikaty",
-"many": "<b>{n}</b> duplikatów",
-"other": "<b>{n}</b> duplikatu"
-},
-"<b>{n}</b> excluded from totals": {
-"one": "<b>{n}</b> wyłączona z sum",
-"few": "<b>{n}</b> wyłączone z sum",
-"many": "<b>{n}</b> wyłączonych z sum",
-"other": "<b>{n}</b> wyłączonej z sum"
-},
-"<b>{n}</b> invalid": {
-"one": "<b>{n}</b> nieprawidłowa",
-"few": "<b>{n}</b> nieprawidłowe",
-"many": "<b>{n}</b> nieprawidłowych",
-"other": "<b>{n}</b> nieprawidłowej"
-},
-"<b>{n}</b> to import": {
-"one": "<b>{n}</b> do zaimportowania",
-"few": "<b>{n}</b> do zaimportowania",
-"many": "<b>{n}</b> do zaimportowania",
-"other": "<b>{n}</b> do zaimportowania"
-},
-"<b>{n}</b> transaction": "<b>{n}</b> transakcja",
-"<b>{n}</b> transactions": {
-"few": "<b>{n}</b> transakcje",
-"many": "<b>{n}</b> transakcji",
-"other": "<b>{n}</b> transakcji"
-},
-"<b>{n}</b> uncategorized": {
-"one": "<b>{n}</b> bez kategorii",
-"few": "<b>{n}</b> bez kategorii",
-"many": "<b>{n}</b> bez kategorii",
-"other": "<b>{n}</b> bez kategorii"
-},
 "@meta": {
 "name": "Polski",
 "plural": "pl",
@@ -180,6 +117,69 @@
 "value_date": true,
 "date": "%d.%m.%Y"
 }
+},
+" and each person's share based on income": " oraz udział każdej osoby według dochodów",
+" · from another space": " · z innej przestrzeni",
+" — 30 minutes or less is better": " — lepiej 30 minut lub mniej",
+"\"{name}\" is a system category used in the savings and invested calculations: it can't be deleted": "„{name}” to kategoria systemowa używana do obliczania oszczędności i inwestycji: nie można jej usunąć",
+"\"{name}\" is a system category used in the savings and invested calculations: you can change its color and icon, not its name": "„{name}” to kategoria systemowa używana do obliczania oszczędności i inwestycji: możesz zmienić jej kolor i ikonę, ale nie nazwę",
+"\"{name}\" is used by {items}: they will be left uncategorized and drop out of budgets and category reports.": "„{name}” jest używana przez {items}: zostaną bez kategorii i wypadną z budżetów oraz raportów według kategorii.",
+"(and {n} linked automatic investment plan purchase)": "(oraz {n} powiązany automatyczny zakup planu inwestycyjnego)",
+"(and {n} linked automatic investment plan purchases)": {
+"few": "(oraz {n} powiązane automatyczne zakupy planu inwestycyjnego)",
+"many": "(oraz {n} powiązanych automatycznych zakupów planu inwestycyjnego)",
+"other": "(oraz {n} powiązanego automatycznego zakupu planu inwestycyjnego)"
+},
+"(date, description, amount or money in/out).": "(data, opis, kwota albo wpływy/wypływy).",
+"(e.g. salary, commissions, usage-based bills)": "(np. wynagrodzenie, prowizje, rachunki zależne od zużycia)",
+"(for the amortization schedule; excluding APR and additional costs)": "(do harmonogramu spłat; bez RRSO i kosztów dodatkowych)",
+"(it still counts in the account balance)": "(nadal liczy się do salda konta)",
+"(optional)": "(opcjonalnie)",
+"(otherwise they are only counted as paid)": "(w przeciwnym razie są tylko liczone jako zapłacone)",
+"(security no longer owned or account not counted)": "(instrument już nieposiadany lub konto nieuwzględniane)",
+"(the same as in the Calendar)": "(tak samo jak w Kalendarzu)",
+"0% rate": "Oprocentowanie 0%",
+"2-year warranty until {date}": "Gwarancja 2-letnia do {date}",
+"<b>Estimated</b>, with the same method for income and expenses: variable recurring items (median of recent payments) and regular transactions without a recurring item, recognized from history (same payer or payee in at least {min} of the last {months} months, ignoring month and year in the description; median monthly amount and day). Occasional expenses are not forecast; among estimated income only significant amounts are included (at least {amount} and 5% of the largest, so small account interest is left out). To track an item better, create a \"variable amount\" recurring item in Recurring.": "<b>Szacowane</b> tą samą metodą dla przychodów i wydatków: zmienne pozycje cykliczne (mediana ostatnich płatności) oraz regularne transakcje bez pozycji cyklicznej, rozpoznane z historii (ten sam płatnik lub odbiorca w co najmniej {min} z ostatnich {months} mies., z pominięciem miesiąca i roku w opisie; mediana miesięcznej kwoty i dnia). Wydatki okazjonalne nie są prognozowane; spośród szacowanych przychodów uwzględniane są tylko znaczące kwoty (co najmniej {amount} i 5% największej), więc drobne odsetki na koncie są pomijane. Aby lepiej śledzić daną pozycję, utwórz w Cyklicznych pozycję cykliczną ze „zmienną kwotą”.",
+"<b>Income</b> and <b>expenses</b> count in reports, budgets and the month's savings": "<b>Przychody</b> i <b>wydatki</b> liczą się w raportach, budżetach i oszczędnościach miesiąca",
+"<b>Money market</b>: it is parked cash. Buying or selling it does <b>not</b> count as invested, and it counts toward the emergency fund.": "<b>Rynek pieniężny</b>: to zaparkowana gotówka. Jego kupno lub sprzedaż <b>nie</b> liczy się jako zainwestowane, a sam wlicza się do poduszki finansowej.",
+"<b>Transfers</b> move money between accounts (e.g. current → savings, card top-up) without counting as spending.": "<b>Przelewy</b> przenoszą pieniądze między kontami (np. konto osobiste → oszczędnościowe, doładowanie karty) i nie liczą się jako wydatki.",
+"<b>With their own space</b> in HomeCoin, every transfer from that space counts as theirs: nothing else to set. <b>Without a space</b> (they pay from a bank that is not in HomeCoin), their incomes are recognized by the keyword in the description: their name if you leave it empty, so write it the way it appears on the bank transfers (e.g. \"Anna\" in \"Transfer from ANNA ROSSI\"). Check the result in <i>Contributions in the period</i> below, and correct any row by hand.": "<b>Z własną przestrzenią</b> w HomeCoin każdy przelew z tej przestrzeni liczy się jako jej: nic więcej nie trzeba ustawiać. <b>Bez przestrzeni</b> (płaci z banku, którego nie ma w HomeCoin) jej przychody są rozpoznawane po słowie kluczowym w opisie: jej imieniu, jeśli zostawisz je puste, więc wpisz je tak, jak widnieje na przelewach (np. „Anna” w „Przelew od ANNA ROSSI”). Sprawdź wynik niżej w <i>Wpłaty w okresie</i> i popraw ręcznie dowolny wiersz.",
+"<b>{n}</b> duplicate": "<b>{n}</b> duplikat",
+"<b>{n}</b> duplicates": {
+"few": "<b>{n}</b> duplikaty",
+"many": "<b>{n}</b> duplikatów",
+"other": "<b>{n}</b> duplikatu"
+},
+"<b>{n}</b> excluded from totals": {
+"one": "<b>{n}</b> wyłączona z sum",
+"few": "<b>{n}</b> wyłączone z sum",
+"many": "<b>{n}</b> wyłączonych z sum",
+"other": "<b>{n}</b> wyłączonej z sum"
+},
+"<b>{n}</b> invalid": {
+"one": "<b>{n}</b> nieprawidłowa",
+"few": "<b>{n}</b> nieprawidłowe",
+"many": "<b>{n}</b> nieprawidłowych",
+"other": "<b>{n}</b> nieprawidłowej"
+},
+"<b>{n}</b> to import": {
+"one": "<b>{n}</b> do zaimportowania",
+"few": "<b>{n}</b> do zaimportowania",
+"many": "<b>{n}</b> do zaimportowania",
+"other": "<b>{n}</b> do zaimportowania"
+},
+"<b>{n}</b> transaction": "<b>{n}</b> transakcja",
+"<b>{n}</b> transactions": {
+"few": "<b>{n}</b> transakcje",
+"many": "<b>{n}</b> transakcji",
+"other": "<b>{n}</b> transakcji"
+},
+"<b>{n}</b> uncategorized": {
+"one": "<b>{n}</b> bez kategorii",
+"few": "<b>{n}</b> bez kategorii",
+"many": "<b>{n}</b> bez kategorii",
+"other": "<b>{n}</b> bez kategorii"
 },
 "A category with this name already exists": "Kategoria o tej nazwie już istnieje",
 "A closed account can be <b>archived</b>: it stays in the history but no longer appears in the choices.": "Zamknięte konto możesz <b>zarchiwizować</b>: zostaje w historii, ale nie pojawia się już na listach wyboru.",
@@ -326,6 +326,7 @@
 "Automatic purchase «{name}» · {estimated} {price}: replace it with the real one": "Automatyczny zakup «{name}» · {estimated} {price}: zastąp ją rzeczywistą",
 "Automatic purchase «{name}» · {verified}": "Automatyczny zakup «{name}» · {verified}",
 "automatic purchases with an estimated price for more than 30 days: enter the actual price and units from the broker statement": "automatyczne zakupy z szacowaną ceną od ponad 30 dni: wpisz rzeczywistą cenę i liczbę jednostek z wyciągu od brokera",
+"Automatic update check changed": "Automatyczne sprawdzanie aktualizacji zmienione",
 "Automatic updates are not available for this installation: download the new version from GitHub": "Automatyczne aktualizacje nie są dostępne dla tej instalacji: pobierz nową wersję z GitHub",
 "Available money": "Dostępne pieniądze",
 "Available on Windows only": "Dostępne tylko w systemie Windows",
@@ -392,6 +393,7 @@
 "Broker: cash and money market": "Dom maklerski: gotówka i rynek pieniężny",
 "budget": "budżet",
 "Budget / month": "Budżet / miesiąc",
+"Budget changed": "Budżet zmieniony",
 "Budget for the month": "Budżet na miesiąc",
 "Budget per category": "Budżet według kategorii",
 "Budget {amount} / month": "Budżet {amount} / miesiąc",
@@ -674,6 +676,7 @@
 "Electronics": "Elektronika",
 "Emergency fund": "Poduszka finansowa",
 "Emergency fund based on household expenses": "Poduszka finansowa według wydatków domowych",
+"Emergency fund target changed (months)": "Cel funduszu awaryjnego zmieniony (miesiące)",
 "Emergency reserve": "Rezerwa awaryjna",
 "Empty = no end": "Puste = bez końca",
 "Encrypted backup downloaded": "Zaszyfrowana kopia zapasowa pobrana",
@@ -757,6 +760,7 @@
 "Fair share vs actual share of the total paid": "Należny udział a rzeczywisty udział w łącznej wpłaconej kwocie",
 "Fair split": "Sprawiedliwy podział",
 "Fair split applied to recurring items": "Sprawiedliwy podział zastosowany do pozycji cyklicznych",
+"Fair split settings changed": "Ustawienia podziału zmienione",
 "fair vs actual": "należny a rzeczywisty",
 "Family": "Rodzina",
 "Features that change": "Funkcje, które się zmieniają",
@@ -829,7 +833,9 @@
 "Go to Recurring": "Przejdź do Cyklicznych",
 "Go →": "Przejdź →",
 "Goal": "Cel",
+"Goal created": "Cel utworzony",
 "Goal deleted": "Cel usunięty",
+"Goal edited": "Cel zmieniony",
 "Goal not found": "Nie znaleziono celu",
 "Goal saved": "Cel zapisany",
 "Goals": "Cele",
@@ -858,11 +864,13 @@
 "HomeCoin accepts connections only from this PC (127.0.0.1), uses no external services or CDNs and blocks requests coming from other sites. It goes online only for two optional things: \"Update prices\" in Investments (sends only the tickers to Yahoo Finance) and the update check (asks GitHub for the latest version; nothing about you or your data is sent). Help and Support open GitHub and Ko-fi in a new browser tab, only when you click them.": "HomeCoin przyjmuje połączenia tylko z tego komputera (127.0.0.1), nie korzysta z usług zewnętrznych ani CDN i blokuje żądania pochodzące z innych stron. Łączy się z internetem tylko w dwóch opcjonalnych przypadkach: „Aktualizuj ceny” w Inwestycjach (wysyła do Yahoo Finance wyłącznie tickery) oraz sprawdzanie aktualizacji (pyta GitHub o najnowszą wersję; nie są wysyłane żadne informacje o Tobie ani o Twoich danych). Pomoc i Wsparcie otwierają GitHub i Ko-fi w nowej karcie przeglądarki, tylko gdy je klikniesz.",
 "HomeCoin calculates how much each person should pay into each account so that everyone <b>saves the same percentage of their income</b>.": "HomeCoin oblicza, ile każda osoba powinna wpłacać na każde konto, aby wszyscy <b>oszczędzali ten sam procent swoich dochodów</b>.",
 "HomeCoin cannot write in this folder": "HomeCoin nie może zapisywać w tym folderze",
+"HomeCoin closed": "HomeCoin zamknięty",
 "HomeCoin is already up to date": "HomeCoin jest już aktualny",
 "HomeCoin is closed 👋": "HomeCoin jest zamknięty 👋",
 "HomeCoin is free. If it helps you, a coffee on Ko-fi keeps it growing": "HomeCoin jest darmowy. Jeśli Ci pomaga, kawa na Ko-fi pozwoli mu się dalej rozwijać",
 "HomeCoin is locked: enter the password": "HomeCoin jest zablokowany: wpisz hasło",
 "HomeCoin saves an encrypted copy at every start and before every bulk change. Choose one: you see the transactions of this account deleted, changed or added since then, and you can put back the deleted ones you need. Nothing else changes.": "HomeCoin zapisuje zaszyfrowaną kopię przy każdym uruchomieniu i przed każdą zbiorczą zmianą. Wybierz jedną: zobaczysz transakcje tego konta usunięte, zmienione lub dodane od tamtej pory i możesz przywrócić potrzebne usunięte transakcje. Nic innego się nie zmienia.",
+"HomeCoin updated": "HomeCoin zaktualizowany",
 "HomeCoin will download version {version} from GitHub, verify its signature and SHA-256, save an encrypted backup of the database and install it. Then it restarts by itself (about a minute). Your data is not touched.": "HomeCoin pobierze wersję {version} z GitHub, zweryfikuje jej podpis i SHA-256, zapisze zaszyfrowaną kopię zapasową bazy danych i ją zainstaluje. Potem sam uruchomi się ponownie (około minuty). Twoje dane pozostaną nietknięte.",
 "HomeCoin will lock and stop. To open it again, use the HomeCoin shortcut (Start menu or desktop).": "HomeCoin zostanie zablokowany i zatrzymany. Aby otworzyć go ponownie, użyj skrótu HomeCoin (menu Start lub pulpit).",
 "HomeCoin will show every amount in {currency} ({code}), written as {example}.": "HomeCoin będzie pokazywać każdą kwotę w walucie {currency} ({code}), w formacie {example}.",
@@ -905,6 +913,7 @@
 "Import failed: {exc}": "Import nie powiódł się: {exc}",
 "Import into account": "Importuj na konto",
 "Import session expired: upload the file again": "Sesja importu wygasła: prześlij plik ponownie",
+"In money market": "Na rynku pieniężnym",
 "in progress": "w toku",
 "In Recurring, create an expense with the number of installments, amount financed and rate (fixed, variable or mixed): you will see the amortization schedule here.": "W Cyklicznych utwórz wydatek z liczbą rat, kwotą kredytu i oprocentowaniem (stałym, zmiennym lub mieszanym): zobaczysz tutaj harmonogram spłat.",
 "In the bundle the units of {value} drop below zero on {value2}: check buys and sells": "W pakiecie liczba jednostek {value} spada poniżej zera w dniu {value2}: sprawdź kupna i sprzedaże",
@@ -1155,6 +1164,7 @@
 "Name of the space": "Nazwa przestrzeni",
 "Needed if you forget the password; generating a new one invalidates the previous one": "Potrzebny, jeśli zapomnisz hasła; wygenerowanie nowego unieważnia poprzedni",
 "needs updating": "wymaga aktualizacji",
+"Net buys of money market ETFs: parked cash, not counted as invested": "Zakupy netto ETF rynku pieniężnego: zaparkowana gotówka, nie liczy się jako zainwestowana",
 "Net income / month": "Dochód netto / miesiąc",
 "Net invested": "Zainwestowane netto",
 "Net monthly income": "Miesięczny dochód netto",
@@ -1269,6 +1279,7 @@
 "ok": "ok",
 "old copy": "stara kopia",
 "Old savings book": "Stara książeczka oszczędnościowa",
+"on": "wł.",
 "On invested": "Od zainwestowanej kwoty",
 "Once a day, after you sign in, HomeCoin asks GitHub whether there is a new version. Nothing about you or your data is sent.": "Raz dziennie, po zalogowaniu, HomeCoin pyta GitHub, czy jest nowa wersja. Nie są wysyłane żadne informacje o Tobie ani o Twoich danych.",
 "One flow of money between two spaces is one recurring transfer. Here are the records that look like the same money (similar amount, close date): tick what to fix. Nothing changes until you confirm.": "Jeden przepływ pieniędzy między dwiema przestrzeniami to jeden przelew cykliczny. Oto zapisy, które wyglądają na te same pieniądze (podobna kwota, bliska data): zaznacz, co poprawić. Nic się nie zmieni, dopóki nie potwierdzisz.",
@@ -1342,6 +1353,7 @@
 "Pension fund": "Fundusz emerytalny",
 "Pension fund contribution": "Wpłata na fundusz emerytalny",
 "People": "Osoby",
+"people": "osoby",
 "People and income": "Osoby i dochody",
 "People's contributions counted as shared income": "Wpłaty osób liczone jako wspólny przychód",
 "Per day": "Dziennie",
@@ -1436,6 +1448,7 @@
 "other": "Potrzebne rebalansowanie · największe odchylenie: {n} punktu"
 },
 "Rebalancing settings saved": "Ustawienia rebalansowania zapisane",
+"Rebalancing targets saved": "Cele rebalansowania zapisane",
 "Recognize the money already recorded: similar amount and close date, each record paired once with the best overall pairing. An income in the destination account is replaced by the transfer; an expense already recorded as a transfer to that account is a duplicate and is deleted. Nothing is counted twice.": "Rozpoznaj pieniądze już zapisane: podobna kwota i bliska data, każdy zapis łączony tylko raz, według najlepszego dopasowania całości. Przychód na koncie docelowym zostaje zastąpiony przelewem; wydatek zapisany już jako przelew na to konto jest duplikatem i zostaje usunięty. Nic nie jest liczone dwa razy.",
 "Recognized from the dates in the file": "Rozpoznane na podstawie dat w pliku",
 "recognizes the columns": "rozpoznaje kolumny",
@@ -1505,6 +1518,8 @@
 "Rows put back from an automatic backup": "Wiersze przywrócone z automatycznej kopii",
 "Rule": "Reguła",
 "Rule added": "Reguła dodana",
+"Rule created": "Reguła utworzona",
+"Rule deleted": "Reguła usunięta",
 "Rule «": "Reguła «",
 "Rules": "Reguły",
 "Rules applied to transactions": "Reguły zastosowane do transakcji",
@@ -1933,6 +1948,7 @@
 "Valuation deleted": "Wycena usunięta",
 "Valuation history (": "Historia wycen (",
 "Valuation not found": "Nie znaleziono wyceny",
+"Valuation recorded": "Wycena zapisana",
 "Value": "Wartość",
 "value": "wartość",
 "Value (": "Wartość (",
@@ -2309,6 +2325,12 @@
 "few": "{n} pominięte: ich konto już nie istnieje",
 "many": "{n} pominiętych: ich konto już nie istnieje",
 "other": "{n} pominiętego: ich konto już nie istnieje"
+},
+"{n} target": "{n} cel",
+"{n} targets": {
+"few": "{n} cele",
+"many": "{n} celów",
+"other": "{n} celu"
 },
 "{n} thing to fix": "{n} rzecz do poprawy",
 "{n} things to fix": {

@@ -14,8 +14,10 @@ KEEP_MONTHS = 12
 MAX_ROWS = 5000
 KINDS = {"access": "Sign-in", "security": "Security", "change": "Change", "delete": "Deletion", "data": "Data"}
 
-# endpoint -> (kind, description). Deliberately not logged (noise): reads, single new transactions, budgets,
-# rules, recurring items processed automatically, price updates, auto-lock/unlock.
+# endpoint -> (kind, description). Logged: every deliberate change of settings, configuration or data, in every tab.
+# Deliberately not logged (noise): reads and calculations (previews, simulations, comparisons), single new transactions,
+# recurring items processed automatically, price updates, lock/unlock, the per-transaction choices of Fair split.
+# Settings saved while typing (Fair split, budgets) are merged into one row per subject (see write(merge=...)).
 EVENTS = {
     "auth_setup": ("security", "Password created"),
     "auth_login": ("access", "Sign-in"),
@@ -68,7 +70,21 @@ EVENTS = {
     "auth_language": ("change", "Interface language changed"),
     "backup": ("data", "Encrypted backup downloaded"),
     "restore": ("data", "Backup restored"),
+    # 2.4.4: the settings and configuration that were missing
+    "update_settings": ("change", "Automatic update check changed"),
+    "emergency_put": ("change", "Emergency fund target changed (months)"),
+    "split_put": ("change", "Fair split settings changed"),
+    "rebalance_calc": ("change", "Rebalancing targets saved"),
+    "budget_put": ("change", "Budget changed"),
+    "rule_create": ("change", "Rule created"),
+    "rule_delete": ("delete", "Rule deleted"),
+    "goal_create": ("change", "Goal created"),
+    "goal_update": ("change", "Goal edited"),
+    "valuation_add": ("change", "Valuation recorded"),
 }
+# actions written directly (not through EVENTS): listed so that they are translated like the others
+OTHER_ACTIONS = ("HomeCoin closed", "HomeCoin updated")
+MERGE_MINUTES = 10  # the same setting changed again within this time: the row is updated, not repeated
 
 
 def eur(cents):
@@ -77,14 +93,28 @@ def eur(cents):
     return fmt_money(cents)
 
 
-def write(kind, action, detail="", portfolio=None, conn=None):
-    """Append a row (own connection: works even after a restore or in a response already finished)."""
+def write(kind, action, detail="", portfolio=None, conn=None, merge=None):
+    """Append a row (own connection: works even after a restore or in a response already finished).
+    merge: the subject of a setting saved while typing (e.g. a category name): if the newest row is the same action on
+    the same subject and space, less than MERGE_MINUTES old, it is updated instead (time and detail)."""
     own = conn is None
     conn = conn or dbm.connect()
+    now = dt.datetime.now()
+    ts, detail, portfolio = now.isoformat(sep=" ", timespec="seconds"), (detail or "")[:200], (portfolio or "")[:40]
     try:
-        conn.execute("INSERT INTO audit_log(ts, kind, action, detail, portfolio) VALUES (?,?,?,?,?)",
-                     (dt.datetime.now().isoformat(sep=" ", timespec="seconds"), kind, action, (detail or "")[:200],
-                      (portfolio or "")[:40]))
+        last = conn.execute("SELECT id, ts, kind, action, detail, portfolio FROM audit_log ORDER BY id DESC LIMIT 1").fetchone() \
+            if merge is not None else None
+        if last and (last[2], last[3], last[5]) == (kind, action, portfolio) and last[4].startswith(merge) \
+                and now - dt.datetime.fromisoformat(last[1]) < dt.timedelta(minutes=MERGE_MINUTES):
+            if " → " in last[4] and " → " in detail:  # keep the value before the first change: "A → C", not "B → C"
+                detail = (last[4].split(" → ", 1)[0] + " → " + detail.split(" → ", 1)[1])[:200]
+            elif not merge:  # a list of what changed ("people, settings"): everything changed in those minutes
+                parts = [p for p in (last[4] + ", " + detail).split(", ") if p]
+                detail = ", ".join(dict.fromkeys(parts))[:200]
+            conn.execute("UPDATE audit_log SET ts = ?, detail = ? WHERE id = ?", (ts, detail, last[0]))
+        else:
+            conn.execute("INSERT INTO audit_log(ts, kind, action, detail, portfolio) VALUES (?,?,?,?,?)",
+                         (ts, kind, action, detail, portfolio))
         conn.commit()
     finally:
         if own:
