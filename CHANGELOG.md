@@ -2,6 +2,10 @@
 
 All notable changes to HomeCoin are listed here, newest first.
 
+## 2.6.1 — 2026-11-17
+
+- **New logo** in the colors of the app: a house in front of a gold coin, on the violet of the totals, with the door cut out so the coin shows through. The program icon, the browser tab, the *HomeCoin* name in the menu and the welcome banner follow the same colors.
+
 ## 2.6.0 — 2026-11-17
 
 - **Fixed: recording a trade in Investments did nothing.** The *＋ Trade* window opened, but *Save*, *Cancel* and the type choice did not respond (a name clash in the window's code stopped it while it opened). Trades are recorded again; nothing recorded before was affected.
