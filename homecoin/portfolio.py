@@ -257,7 +257,7 @@ def composition(db, pid, account_ids=None, today=None):
         "asset_classes": [{"key": k, "value": v, "share": v / total if total else 0}
                           for k, v in sorted(classes.items(), key=lambda x: -x[1])],
         "instruments": sorted([{**x, "share": x["value"] / total if total else 0} for x in instruments], key=lambda x: -x["value"]),
-        "countries": table("country"), "regions": table("region"), "markets": table("market"), "sectors": table("sector"),
+        "countries": [{**r, "region": funds.region_of(r["key"])} for r in table("country")], "regions": table("region"), "markets": table("market"), "sectors": table("sector"),
         "currencies": table("currency"), "diversification": diversification,
         "top_holdings": [{"name": u["name"], "isin": u["isin"], "country": u["country"], "value": round(u["value"]),
                           "share": u["value"] / total if total else 0, "funds": [names.get(f, "") for f in u["funds"]]}

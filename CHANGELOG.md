@@ -2,6 +2,15 @@
 
 All notable changes to HomeCoin are listed here, newest first.
 
+## 2.6.0 — 2026-11-17
+
+- **Fixed: recording a trade in Investments did nothing.** The *＋ Trade* window opened, but *Save*, *Cancel* and the type choice did not respond (a name clash in the window's code stopped it while it opened). Trades are recorded again; nothing recorded before was affected.
+- **Recurring: "Costs more than before".** When a bill or a subscription goes up, Recurring shows its last payment against the usual one (the median of the previous ones), the increase in % and how much more it costs per year. Only a signal: recurring items are never changed by themselves. Variable items and loans are not checked.
+- **Unusual spending** on the Dashboard (this month) and in Reports (a single month): categories well above their average of the previous months, and single expenses well above the usual ones of their category, each one click away from its transactions.
+- **Year in brief** in Reports: income, money out, savings and savings rate, net worth and its change, where the money went, the best and the hardest month, each against the year before (the same months, for the current year), printable or savable as PDF.
+- **A new look, lighter and consistent.** One palette for every kind of data, the same on every page, box and chart: red money out, green money in, light blue transfers and money put in, yellow what is left, violet balances and totals, slate debt; asset classes, geographic areas and sectors each with their own set of soft colors, chosen so that no two of the same set look alike. Summary boxes with a soft tint and a colored line instead of a full color block, lighter cards and charts, a lighter highlight of the page you are on, budget bars green, yellow from 90% and red over the limit.
+- **The guide reorganized:** a feature overview, a *Find it fast* table, a compact contents table, a section on the colors, the recurring options folded, and a table of every kind of trade (how a sale works, its realized gain and where its money goes).
+
 ## 2.5.0 — 2026-11-16
 
 - **New page: Portfolio analysis** (Wealth menu, with the Investments tab). What your investments are really made of, how well they are spread and the tools investment platforms offer, in six tabs. Every weight has two decimals and a symbol: country flags, icons for areas, markets, sectors and asset classes, currency symbols.

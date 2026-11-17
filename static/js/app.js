@@ -289,6 +289,10 @@ const KIND_LABEL = { expense: T('Expense'), income: T('Income'), transfer: T('Tr
 const FREQ = { weekly: T('Weekly'), monthly: T('Monthly'), bimonthly: T('Every 2 months'), quarterly: T('Quarterly'), semiannual: T('Every 6 months'), yearly: T('Yearly') };
 const ACC_TYPES = { corrente: T('Current account'), risparmio: T('Savings account'), credito: T('Credit card'), prepagata: T('Prepaid card'), contanti: T('Cash'), investimenti: T('Investment account'), altro: T('Other') };
 const PALETTE = ['#6366f1', '#8b5cf6', '#ec4899', '#f43f5e', '#f97316', '#f59e0b', '#eab308', '#84cc16', '#22c55e', '#10b981', '#14b8a6', '#06b6d4', '#0ea5e9', '#3b82f6', '#64748b', '#78716c'];
+// data colors (2.5.1): one palette for the whole app, by meaning, the same in boxes, charts and bars. Money out, money
+// in, transfers, what is left, balances and totals, debt; asset classes, areas, markets and sectors further down
+const C = { out: '#e8707e', in: '#3fbf8f', transfer: '#6cc0f0', left: '#f2b84b', total: '#8d7ff0', debt: '#5f6b7d',
+  muted: '#b4b9c2', bench: '#9aa1b3', terracotta: '#e58a62' };
 // suggested icons for categories, accounts, spaces and goals, grouped by theme (the picker appends the ones
 // already in use that are not here; you can always type an emoji by hand)
 const EMOJIS = [
@@ -928,8 +932,8 @@ function vGradient(ctx, color) {
 }
 
 const catPill = (t) => {
-  if (t.kind === 'transfer') return `<span class="pill" style="--c:#0ea5e9">🔄 ${T('Transfer')}</span>`;
-  if (!t.category_id) return `<span class="pill" style="--c:#94a3b8">❔ ${T('To categorize')}</span>`;
+  if (t.kind === 'transfer') return `<span class="pill" style="--c:${C.transfer}">🔄 ${T('Transfer')}</span>`;
+  if (!t.category_id) return `<span class="pill" style="--c:${C.muted}">❔ ${T('To categorize')}</span>`;
   return `<span class="pill" style="--c:${esc(t.category_color)}">${esc(t.category_icon)} ${esc(t.category_name)}</span>`;
 };
 // sign: internal transfers have no sign, those from/to other spaces do
@@ -995,6 +999,31 @@ async function route() {
 const refresh = async () => { await loadMeta(); await route(); };
 
 // ================================================================ dashboard
+// unusual spending of a month (2.6.0, Dashboard and Reports): categories far above their average and single expenses
+// far above the usual one of their category. Nothing shown when the month is normal
+async function unusualCard(el, month) {
+  if (!el) return;
+  let u;
+  try { u = await api('/insights/unusual' + (month ? `?month=${month}` : '')); } catch { return; }
+  if (!el.isConnected || (!u.categories.length && !u.transactions.length)) { el.innerHTML = ''; return; }
+  const [y, m] = u.month.split('-');
+  const range = { from: `${u.month}-01`, to: `${u.month}-${String(new Date(+y, +m, 0).getDate()).padStart(2, '0')}` };
+  el.innerHTML = `<div class="card ins-card" style="margin-bottom:18px"><div class="card-head"><div><h3>🔎 ${T('Unusual spending')} · ${esc(fmtMonth(u.month))}</h3>
+      <p class="muted small" style="margin:3px 0 0">${T('Categories well above their average of the previous months and single expenses well above the usual ones of their category.')}</p></div></div>
+    <div class="grid-2" style="margin:0">
+      <div class="list">${u.categories.map((c) => `<div class="list-item clickable" ${txLink({ category_id: c.id ?? 'none', kind: 'expense', ...range })}>
+        <div class="cat-ico" style="--c:${esc(c.color)}">${esc(c.icon)}</div>
+        <div class="grow"><b>${esc(c.name || T('Uncategorized'))}</b><div class="muted small num">${T('Average')}: ${money0(c.average)}</div></div>
+        <div class="right"><b class="num">${money0(c.now)}</b><div class="small neg num">+${money0(c.extra)}${c.ratio ? ` · ×${fix2(c.ratio)}` : ''}</div></div></div>`).join('')
+        || `<div class="empty small">${T('No category above its average')}</div>`}</div>
+      <div class="list">${u.transactions.map((t) => `<div class="list-item clickable" ${txLink({ q: searchKey(t.description), ...range })}>
+        <div class="cat-ico" style="--c:${C.out}">${esc(t.icon)}</div>
+        <div class="grow"><b>${esc(t.description || t.category)}</b><div class="muted small">${fmtDate(t.date)} · ${esc(t.category)}</div></div>
+        <div class="right"><b class="num">${money0(t.amount)}</b><div class="muted small num">${T('Usually')}: ${money0(t.usual)}</div></div></div>`).join('')
+        || `<div class="empty small">${T('No single expense out of the ordinary')}</div>`}</div>
+    </div></div>`;
+}
+
 async function renderDashboard(v) {
   const d = S.dash;
   const [from, to] = periodRange(d.period);
@@ -1038,6 +1067,7 @@ async function renderDashboard(v) {
       <div class="kpi g-amber"><div class="k-label">🐷 ${T('Savings')}</div><div class="k-value">${money(saved)}</div>
         ${kRows(inflow && [`📊 ${T('Savings rate')}`, pct(saved / inflow)])}</div>
     </div>
+    <div id="d-unusual"></div>
     <div class="grid-2">
       <div class="card"><div class="card-head"><h3>${T('Expenses by category')}</h3><span class="muted">${T('click for details')}</span></div>
         ${exp.length ? `<div class="donut-wrap"><div class="chart-box"><canvas id="c-donut"></canvas></div>
@@ -1067,6 +1097,7 @@ async function renderDashboard(v) {
 
   $('#d-period').onchange = (e) => { d.period = e.target.value; route(); };
   $('#d-account').onchange = (e) => { d.account_id = e.target.value; route(); };
+  if (S.tx_count) unusualCard($('#d-unusual', v));  // after the page: it never slows the dashboard down
   $$('[data-go="add"]', v).forEach((b) => (b.onclick = () => txModal()));
   const goCat = (id) => { location.hash = '#/movimenti?' + qs({ category_id: id, from, to, kind: 'expense', account_id: d.account_id }); };
   $$('.legend-item', v).forEach((el) => (el.onclick = () => goCat(el.dataset.cat)));
@@ -1077,7 +1108,7 @@ async function renderDashboard(v) {
     const spent = exp.find((x) => x.id === c.id)?.total || 0, limit = c.budget * st.months, r = spent / limit;
     return `<div class="budget-row clickable" ${txLink({ category_id: c.id, from, to, kind: 'expense', account_id: d.account_id })}><div class="top"><span>${esc(c.icon)} ${esc(c.name)}</span>
       <span class="num ${r > 1 ? 'neg' : 'muted'}"><b>${money0(spent)}</b> / ${money0(limit)}</span></div>
-      <div class="bar ${r > 1 ? 'over' : ''}"><i style="width:${Math.min(100, r * 100).toFixed(1)}%"></i></div></div>`;
+      <div class="bar ${budgetState(r)}"><i style="width:${Math.min(100, r * 100).toFixed(1)}%"></i></div></div>`;
   }).join('') : `<div class="empty"><div class="big">🎯</div><p>${T('Set a monthly budget on your categories to keep your spending under control.')}</p>
     <div class="actions"><a class="btn btn-sm" href="#/categorie">${T('Set budgets')}</a></div></div>`;
 
@@ -1099,12 +1130,12 @@ async function renderDashboard(v) {
       datasets: [
         // same colors everywhere: income green, expenses red, transfers between spaces blue (received light, sent
         // dark, each on its side), savings yellow
-        { label: T('Income'), stack: 'in', data: months.map((m) => bm[m]?.income || 0), backgroundColor: '#059669', borderRadius: 8, maxBarThickness: 34 },
-        ...(fromOthers ? [{ label: T('From other spaces'), stack: 'in', data: months.map((m) => bm[m]?.from_others || 0), backgroundColor: '#7dd3fc', borderRadius: 8, maxBarThickness: 34 }] : []),
-        { label: T('Expenses'), stack: 'out', data: months.map((m) => bm[m]?.expense || 0), backgroundColor: '#e11d48', borderRadius: 8, maxBarThickness: 34 },
-        ...(toOthers ? [{ label: T('Other spaces'), stack: 'out', data: months.map((m) => bm[m]?.to_others || 0), backgroundColor: '#0ea5e9', borderRadius: 8, maxBarThickness: 34 }] : []),
+        { label: T('Income'), stack: 'in', data: months.map((m) => bm[m]?.income || 0), backgroundColor: C.in, borderRadius: 8, maxBarThickness: 34 },
+        ...(fromOthers ? [{ label: T('From other spaces'), stack: 'in', data: months.map((m) => bm[m]?.from_others || 0), backgroundColor: C.transfer, borderRadius: 8, maxBarThickness: 34 }] : []),
+        { label: T('Expenses'), stack: 'out', data: months.map((m) => bm[m]?.expense || 0), backgroundColor: C.out, borderRadius: 8, maxBarThickness: 34 },
+        ...(toOthers ? [{ label: T('Other spaces'), stack: 'out', data: months.map((m) => bm[m]?.to_others || 0), backgroundColor: C.transfer, borderRadius: 8, maxBarThickness: 34 }] : []),
         { label: T('Savings'), stack: 'sav', data: months.map((m) => { const x = bm[m]; return x ? x.income + (x.from_others || 0) - x.expense - (x.to_others || 0) : 0; }),
-          backgroundColor: '#f59e0b', borderRadius: 8, maxBarThickness: 34 },
+          backgroundColor: C.left, borderRadius: 8, maxBarThickness: 34 },
       ],
     },
     options: {
@@ -1119,7 +1150,7 @@ async function renderDashboard(v) {
   });
   chart($('#c-balance'), {
     type: 'line',
-    data: { labels: months.map(fmtMonth), datasets: [{ label: T('Balance'), data: st.balance_series.map((b) => b.balance), borderColor: '#8b5cf6', borderWidth: 3, tension: .35, fill: true, backgroundColor: (ctx) => vGradient(ctx, '#8b5cf6'), pointRadius: 3, pointBackgroundColor: '#8b5cf6', pointHitRadius: 14 }] },
+    data: { labels: months.map(fmtMonth), datasets: [{ label: T('Balance'), data: st.balance_series.map((b) => b.balance), borderColor: C.total, borderWidth: 3, tension: .35, fill: true, backgroundColor: (ctx) => vGradient(ctx, C.total), pointRadius: 3, pointBackgroundColor: C.total, pointHitRadius: 14 }] },
     options: {
       maintainAspectRatio: false, scales: { y: moneyAxis, x: { grid: { display: false } } }, plugins: { legend: { display: false } },
       onHover: pointerOnHover,
@@ -1496,9 +1527,9 @@ async function renderConti(v) {
       <div class="card"><div class="card-head"><h3>${T('Net worth breakdown')}</h3></div><div class="chart-box"><canvas id="c-acc"></canvas></div></div>
       <div class="card"><div class="card-head"><h3>${T('How it works')}</h3></div>
         <div class="list">
-          <div class="list-item"><div class="cat-ico" style="--c:#6366f1">🏦</div><div class="grow">${T('Every transaction belongs to an account: the balance is the opening balance plus income minus expenses.')}</div></div>
-          <div class="list-item"><div class="cat-ico" style="--c:#0ea5e9">🔄</div><div class="grow">${T('<b>Transfers</b> move money between accounts (e.g. current → savings, card top-up) without counting as spending.')}</div></div>
-          <div class="list-item"><div class="cat-ico" style="--c:#f59e0b">🗄️</div><div class="grow">${T('A closed account can be <b>archived</b>: it stays in the history but no longer appears in the choices.')}</div></div>
+          <div class="list-item"><div class="cat-ico" style="--c:${C.total}">🏦</div><div class="grow">${T('Every transaction belongs to an account: the balance is the opening balance plus income minus expenses.')}</div></div>
+          <div class="list-item"><div class="cat-ico" style="--c:${C.transfer}">🔄</div><div class="grow">${T('<b>Transfers</b> move money between accounts (e.g. current → savings, card top-up) without counting as spending.')}</div></div>
+          <div class="list-item"><div class="cat-ico" style="--c:${C.left}">🗄️</div><div class="grow">${T('A closed account can be <b>archived</b>: it stays in the history but no longer appears in the choices.')}</div></div>
         </div></div>
     </div>`;
   $('#acc-new').onclick = $('#acc-add').onclick = () => accountModal();
@@ -1658,6 +1689,7 @@ async function renderRicorrenti(v) {
   const pac = sum((r) => isPac(r) && !toOther(r));
   // margin: what is left each month after every fixed item (income and transfers received − expenses − transfers out)
   const margin = fixedIn + trIn - fixedOut - trOutOther;
+  const rises = list.filter((r) => r.increase).sort((a, b) => b.increase.per_year - a.increase.per_year);  // 2.6.0
   const groups = [
     [T('📈 Investment plans'), list.filter(isPac), T('Each contribution automatically buys units of the chosen security at the day\'s estimated price: then verify the actual price in Investments.')],
     [T('🏠 Mortgages & loans'), list.filter((r) => r.installments)],
@@ -1683,8 +1715,15 @@ async function renderRicorrenti(v) {
       <div>${groups.length ? groups.map(([title, l, help]) => `<div class="section-title" style="margin-top:4px">${title}</div>${help ? `<p class="muted small" style="margin:-4px 0 10px">${help}</p>` : ''}<div class="rec-grid">${l.map(recCard).join('')}</div>`).join('')
         : `<div class="card empty"><div class="big">🔁</div><h3>${T('No recurring items')}</h3><p>${T('Set up your mortgage, loans, rent, subscriptions and salary: they will be recorded automatically every time they fall due.')}</p>
           <div class="actions"><button class="btn btn-primary" data-new>＋ ${T('Create the first one')}</button></div></div>`}</div>
-      <div class="card" style="align-self:start"><div class="card-head"><h3>${T('Next 60 days')}</h3><span class="muted">${tn('{n} due', '{n} due', up.length)}</span></div>
-        <div class="list">${up.length ? up.slice(0, 20).map(upcomingItem).join('') : `<div class="empty">${T('Nothing due')}</div>`}</div></div>
+      <div style="align-self:start;display:grid;gap:18px">${rises.length ? `<div class="card ins-card"><div class="card-head"><div><h3>📈 ${T('Costs more than before')}</h3>
+          <p class="muted small" style="margin:3px 0 0">${T('The last payment against the usual one (median of the previous ones). Only a signal: nothing is changed; edit the item if the new price stays.')}</p></div>
+          <span class="tag warn">${money0(rises.reduce((s, r) => s + r.increase.per_year, 0))} / ${T('year')}</span></div>
+        <div class="list">${rises.map((r) => `<div class="list-item"><div class="cat-ico" style="--c:${esc(r.category_color || C.out)}">${esc(r.category_icon || '🔁')}</div>
+          <div class="grow"><b>${esc(r.name)}</b><div class="muted small num">${money(r.increase.before)} → ${money(r.increase.now)}</div></div>
+          <div class="right"><b class="neg num">+${fix2(r.increase.pct * 100)}%</b><div class="muted small num">+${money0(r.increase.per_year)} / ${T('year')}</div></div>
+          <button class="btn btn-sm btn-ghost" data-r="edit" data-id="${r.id}" title="${esc(T('Edit'))}">✏️</button></div>`).join('')}</div></div>` : ''}
+      <div class="card"><div class="card-head"><h3>${T('Next 60 days')}</h3><span class="muted">${tn('{n} due', '{n} due', up.length)}</span></div>
+        <div class="list">${up.length ? up.slice(0, 20).map(upcomingItem).join('') : `<div class="empty">${T('Nothing due')}</div>`}</div></div></div>
     </div>`;
   $('#r-new').onclick = () => recurringModal();
   $$('[data-new]', v).forEach((b) => (b.onclick = () => recurringModal()));
@@ -1776,7 +1815,7 @@ async function renderCalendario(v) {
 function recCard(r) {
   const pac = r.kind === 'transfer' && r.holding_id;
   const ico = pac ? '📈' : r.kind === 'transfer' ? '🔄' : r.category_icon || '🔁';
-  const color = pac ? '#10b981' : r.kind === 'transfer' ? '#0ea5e9' : r.category_color || '#94a3b8';
+  const color = pac ? C.in : r.kind === 'transfer' ? C.transfer : r.category_color || C.muted;
   const status = !r.active ? T('⏸ Paused') : r.late_since ? `⚠️ ${T('expected since {date}', { date: fmtDate(r.late_since) })}` : r.next_date ? `📅 ${r.expected ? '≈ ' : ''}${fmtDate(r.next_date)}` : T('✅ Completed');
   const stat = (label, value) => `<div class="rec-stat"><span>${label}</span><b>${value}</b></div>`;
   const progress = r.installments
@@ -2235,6 +2274,7 @@ async function renderReport(v) {
       <div class="seg" id="r-tab"><button data-t="expense" class="${tab === 'expense' ? 'on' : ''}">📤 ${T('Expenses')}</button><button data-t="income" class="${tab === 'income' ? 'on' : ''}">📥 ${T('Income')}</button>${hasOther ? `<button data-t="other" class="${tab === 'other' ? 'on' : ''}">↗ ${T('Other spaces')}</button>` : ''}</div>
       ${data.excluded ? `<a class="chip small" href="#/movimenti?excluded=1&${range}" title="${esc(T('Not counted in the report'))}">🙈 ${tn('{n} excluded', '{n} excluded', data.excluded)}</a>` : ''}
       <span class="spacer"></span>
+      <button class="btn btn-sm" id="r-brief">📅 ${T('Year in brief')}</button>
       <a class="btn btn-sm" href="/api/export/report?${range}&pf=${S.pid}">⬇ ${T('Excel report')}</a>
       <a class="btn btn-sm" href="/api/export/transactions?format=xlsx&${range}&pf=${S.pid}">⬇ ${T('Transactions')}</a>
     </div>
@@ -2248,6 +2288,7 @@ async function renderReport(v) {
       <div class="kpi g-amber"><div class="k-label">🐷 ${T('Savings')}</div><div class="k-value">${money(saved)}</div>${kRows(inflow && [`📊 ${T('Savings rate')}`, pct(saved / inflow)])}</div>
       <div class="kpi g-rose"><div class="k-label">📊 ${T('Average monthly spending')}</div><div class="k-value">${money(exp / monthsWithData)}</div>${kRows([`📅 ${T('Months with expenses')}`, monthsWithData])}</div>
     </div>
+    ${single ? '<div id="r-unusual"></div>' : ''}
     <div class="card" style="margin-bottom:18px">
       <div class="card-head"><div><h3>${{ expense: T('Expenses'), income: T('Income'), other: T('Contributions to other spaces') }[tab]} ${single ? T('by category') : T('by month and category')}</h3>
         <p class="muted small" style="margin:3px 0 0">${single ? T('Amount per category in the month') : `${T('Total above each bar · dashed line = monthly average ({amount})', { amount: money0(d.total / (d.months.filter((x) => x > 0).length || 1)) })} · ${T('hover over a bar for details')}`}</p></div></div>
@@ -2269,8 +2310,56 @@ async function renderReport(v) {
 
   $('#r-period').onchange = (e) => { R.period = e.target.value; route(); };
   $$('#r-tab button, .k-split [data-t]', v).forEach((b) => (b.onclick = (e) => { e.preventDefault(); S.reportTab = b.dataset.t; route(); }));
+  $('#r-brief').onclick = () => yearBriefModal(R.period.startsWith('y:') ? +R.period.slice(2) : new Date().getFullYear(),
+    [...new Set([String(new Date().getFullYear()), ...data.years])].map(Number).sort((a, b) => b - a));
+  if (single) unusualCard($('#r-unusual', v), data.months[0]);
 
   if (d.rows.length) drawReportChart(data, d, single, tab);
+}
+
+// the year in brief (2.6.0): the same monthly balance as Savings and the Dashboard, with the year before; printable
+async function yearBriefModal(year, years) {
+  let b;
+  try { b = await api('/report/year?year=' + year); } catch (e) { return fail(e); }
+  const c = b.current, p = b.previous;
+  // change against the year before: up is good for income, savings and net worth, bad for money out
+  const delta = (now, before, upGood = true) => {
+    if (!before) return '';
+    const x = (now - before) / Math.abs(before), good = upGood ? x >= 0 : x <= 0;
+    return `<span class="${good ? 'pos' : 'neg'}">${x >= 0 ? '▲' : '▼'} ${fix2(Math.abs(x) * 100)}%</span>`;
+  };
+  const nwChange = b.net_worth_start != null && b.net_worth_end != null ? b.net_worth_end - b.net_worth_start : null;
+  const top = Math.max(1, ...b.categories.map((x) => x.total));
+  const m = openModal(`📅 ${T('Year in brief')} · ${year}${b.partial ? ` (${T('so far')})` : ''}`, `
+    <div class="yb">
+      <div class="kpis yb-kpis">
+        <div class="kpi g-emerald"><div class="k-label">📥 ${T('Income')}</div><div class="k-value">${money0(c.income_all)}</div>${kRows([`${year - 1}`, `${money0(p.income_all)} ${delta(c.income_all, p.income_all)}`])}</div>
+        <div class="kpi g-rose"><div class="k-label">📤 ${T('Money out')}</div><div class="k-value">${money0(c.out_all)}</div>${kRows([`${year - 1}`, `${money0(p.out_all)} ${delta(c.out_all, p.out_all, false)}`])}</div>
+        <div class="kpi g-amber"><div class="k-label">🐷 ${T('Saved')}</div><div class="k-value">${money0(c.saved)}</div>${kRows(c.rate != null && [`📊 ${T('Savings rate')}`, pct(c.rate)], [`${year - 1}`, `${money0(p.saved)} ${delta(c.saved, p.saved)}`])}</div>
+        <div class="kpi g-indigo"><div class="k-label">💎 ${T('Net worth')}</div><div class="k-value">${b.net_worth_end == null ? '—' : money0(b.net_worth_end)}</div>${kRows(nwChange != null && [`📈 ${T('In the year')}`, `${nwChange >= 0 ? '+' : '−'}${money0(Math.abs(nwChange))}`], c.invested > 0 && [`📈 ${T('Invested')}`, money0(c.invested)])}</div>
+      </div>
+      ${b.partial || (p.months && p.months < c.months) ? `<p class="muted small" style="margin:-6px 0 14px">ℹ️ ${[
+        b.partial ? T('Compared with the same months of the year before (January to {month}).', { month: esc(fmtMonth(`${year - 1}-${String(b.compared_months).padStart(2, '0')}`)) }) : '',
+        p.months && p.months < c.months ? tn('The year before has data for {n} month only: compare with care.', 'The year before has data for {n} months only: compare with care.', p.months) : '',
+      ].filter(Boolean).join(' ')}</p>` : ''}
+      <div class="grid-2" style="margin:0">
+        <div><h4 class="yb-h">🏷️ ${T('Where the money went')}</h4>
+          <div class="pt-bars">${b.categories.map((x) => `<div class="pt-bar yb-bar"><span class="pt-l">${esc(x.icon)} ${esc(x.name || T('Uncategorized'))}</span>
+            <span class="pt-track"><i style="width:${(x.total / top * 100).toFixed(1)}%;background:${esc(x.color)}"></i></span>
+            <b class="num">${money0(x.total)}</b><span class="small num">${delta(x.total, x.before, false) || '<span class="muted">—</span>'}</span></div>`).join('') || `<div class="empty small">${T('No expenses')}</div>`}</div></div>
+        <div><h4 class="yb-h">🗓️ ${T('Months')}</h4>
+          <div class="list">
+            ${b.best_month ? `<div class="list-item"><div class="cat-ico" style="--c:${C.in}">🏆</div><div class="grow"><b>${T('Best month')}</b><div class="muted small">${esc(fmtMonth(b.best_month.month))}</div></div><b class="num pos">${money0(b.best_month.saved)}</b></div>` : ''}
+            ${b.hardest_month ? `<div class="list-item"><div class="cat-ico" style="--c:${C.out}">🌧️</div><div class="grow"><b>${T('Hardest month')}</b><div class="muted small">${esc(fmtMonth(b.hardest_month.month))}</div></div><b class="num ${b.hardest_month.saved < 0 ? 'neg' : ''}">${money0(b.hardest_month.saved)}</b></div>` : ''}
+            <div class="list-item"><div class="cat-ico" style="--c:${C.total}">🧾</div><div class="grow"><b>${T('Average monthly spending')}</b><div class="muted small">${tn('{n} month with data', '{n} months with data', c.months)}</div></div><b class="num">${money0(c.months ? c.expense / c.months : 0)}</b></div>
+          </div></div>
+      </div>
+    </div>
+    <div class="modal-foot no-print"><select id="yb-year">${years.map((y) => `<option value="${y}" ${y === year ? 'selected' : ''}>${y}</option>`).join('')}</select>
+      <span class="spacer" style="flex:1"></span><button class="btn" id="yb-print">🖨 ${T('Print or save as PDF')}</button><button class="btn btn-primary" data-cancel>${T('Close')}</button></div>`, { wide: true });
+  $('[data-cancel]', m).onclick = closeModal;
+  $('#yb-year', m).onchange = (e) => yearBriefModal(+e.target.value, years);
+  $('#yb-print', m).onclick = () => { document.body.classList.add('print-modal'); window.print(); document.body.classList.remove('print-modal'); };
 }
 
 // compact amounts for axes and labels: 950 €, 1,2K €, 12K € · $950, $1.2K, $12K · CHF 1.2K · R$ 1,2K (symbol where the currency puts it)
@@ -2314,7 +2403,7 @@ function drawReportChart(data, d, single, tab) {
   // month by month: up to 12 stacked categories (the largest at the bottom) + "Other" only for the marginal items
   const MAX = d.rows.length <= 13 ? 13 : 12, top = d.rows.slice(0, MAX), rest = d.rows.slice(MAX);
   const series = top.map((r) => ({ id: r.id ?? 'none', transfer: r.transfer, name: `${r.icon} ${r.name}`, color: r.color, months: r.months, total: r.total }));
-  if (rest.length) series.push({ name: tn('{n} other category', '{n} other categories', rest.length), color: '#a8adc2', months: data.months.map((_, i) => rest.reduce((s, r) => s + r.months[i], 0)), total: rest.reduce((s, r) => s + r.total, 0), others: rest });
+  if (rest.length) series.push({ name: tn('{n} other category', '{n} other categories', rest.length), color: C.muted, months: data.months.map((_, i) => rest.reduce((s, r) => s + r.months[i], 0)), total: rest.reduce((s, r) => s + r.total, 0), others: rest });
   const active = d.months.filter((x) => x > 0).length || 1, avg = d.total / active;
   const hidden = new Set();
 
@@ -3164,7 +3253,7 @@ async function renderBudget(v) {
     return `<tr><td><span class="pill quick-filter" style="--c:${esc(c.color)}" ${txLink({ category_id: c.id, kind: 'expense', ...monthBounds(S.budgetMonth), excluded: 0 })}>${esc(c.icon)} ${esc(c.name)}</span></td>
       <td><input class="bd-input" data-cat="${c.id}" inputmode="decimal" value="${c.budget ? moneyInput(c.budget) : ''}" placeholder="—"></td>
       <td class="right"><b>${money0(c.spent)}</b></td><td class="right muted">${money0(c.avg)}</td>
-      <td style="min-width:160px">${c.budget ? `<div class="bar ${r > 1 ? 'over' : ''}"><i style="width:${Math.min(100, r * 100).toFixed(1)}%"></i></div><div class="muted small">${T('{percent} of budget', { percent: pct(r) })}</div>` : c.avg ? `<button class="btn btn-sm btn-ghost" data-suggest="${c.id}" data-v="${Math.ceil(c.avg / 1000) * 1000}">${T('Use the average ({amount})', { amount: money0(Math.ceil(c.avg / 1000) * 1000) })}</button>` : ''}</td>
+      <td style="min-width:160px">${c.budget ? `<div class="bar ${budgetState(r)}"><i style="width:${Math.min(100, r * 100).toFixed(1)}%"></i></div><div class="muted small">${T('{percent} of budget', { percent: pct(r) })}</div>` : c.avg ? `<button class="btn btn-sm btn-ghost" data-suggest="${c.id}" data-v="${Math.ceil(c.avg / 1000) * 1000}">${T('Use the average ({amount})', { amount: money0(Math.ceil(c.avg / 1000) * 1000) })}</button>` : ''}</td>
       <td>${state}</td></tr>`;
   };
   v.innerHTML = `
@@ -3203,7 +3292,7 @@ async function renderMutuo(v) {
   const principal = tot('residual') + tot('capital_paid'), interest = tot('interest_paid') + tot('interest_left');
   v.innerHTML = `
     <div class="kpis">
-      <div class="kpi g-indigo" title="${esc(T('principal still to repay'))}"><div class="k-label">🏦 ${T('Total remaining debt')}</div><div class="k-value">${money0(tot('residual'))}</div>${kRows([`🏠 ${T('Loans')}`, plans.length])}</div>
+      <div class="kpi g-slate" title="${esc(T('principal still to repay'))}"><div class="k-label">🏦 ${T('Total remaining debt')}</div><div class="k-value">${money0(tot('residual'))}</div>${kRows([`🏠 ${T('Loans')}`, plans.length])}</div>
       <div class="kpi g-amber"><div class="k-label">✅ ${T('Principal already repaid')}</div><div class="k-value">${money0(tot('capital_paid'))}</div>${kRows(principal && [`📊 ${T('Of the principal')}`, pct(tot('capital_paid') / principal)])}</div>
       <div class="kpi g-rose"><div class="k-label">💸 ${T('Interest paid')}</div><div class="k-value">${money0(tot('interest_paid'))}</div>${kRows(interest && [`📊 ${T('Of the total interest')}`, pct(tot('interest_paid') / interest)])}</div>
       <div class="kpi g-rose" title="${esc(T('until the end of the schedules'))}"><div class="k-label">⏳ ${T('Interest remaining')}</div><div class="k-value">${money0(tot('interest_left'))}</div>${kRows([`Σ ${T('Total interest')}`, money0(interest)])}</div>
@@ -3245,8 +3334,8 @@ async function renderMutuo(v) {
     chart($(`#mt-c${i}`), {
       type: 'bar',
       data: { labels: years, datasets: [
-        { label: T('Principal'), data: years.map((yy) => yearly[yy].c), backgroundColor: '#7b52ab', borderRadius: 3, maxBarThickness: 18 },
-        { label: T('Interest'), data: years.map((yy) => yearly[yy].i), backgroundColor: '#f59f45', borderRadius: 3, maxBarThickness: 18 }] },
+        { label: T('Principal'), data: years.map((yy) => yearly[yy].c), backgroundColor: C.left, borderRadius: 3, maxBarThickness: 18 },
+        { label: T('Interest'), data: years.map((yy) => yearly[yy].i), backgroundColor: C.out, borderRadius: 3, maxBarThickness: 18 }] },
       options: { maintainAspectRatio: false, scales: { x: { stacked: true, grid: { display: false } }, y: { stacked: true, ticks: { callback: (x) => moneyK(x) } } },
         plugins: { legend: { position: 'bottom', labels: { usePointStyle: true, boxWidth: 8 } } } },
     });
@@ -3380,7 +3469,7 @@ const CLASS_HELP = {
   'materie prime': `📈 ${T('Investment: purchases and sales count as <b>invested</b>.')}`, immobiliare: `📈 ${T('Investment: purchases and sales count as <b>invested</b>.')}`,
   crypto: `📈 ${T('Investment: purchases and sales count as <b>invested</b>.')}`, altro: `📈 ${T('Investment: purchases and sales count as <b>invested</b>.')}`,
 };
-const ASSET_COLORS = { azioni: '#7b52ab', obbligazioni: '#3f86dc', monetario: '#2fbf71', 'materie prime': '#fcc419', immobiliare: '#f59f45', crypto: '#e45bc4', altro: '#8b8fa8', 'non specificato': '#c9976a', 'liquidità': '#94a3b8' };
+const ASSET_COLORS = { azioni: '#8b85f0', obbligazioni: '#3fb8a8', monetario: '#5fb4ec', 'materie prime': '#f2c14e', immobiliare: '#e58a62', crypto: '#e47fc1', altro: '#6f6964', 'non specificato': '#a8576f', 'liquidità': '#e3dccf' };
 const pctSigned = (x) => (x == null ? '—' : `${x > 0 ? '+' : ''}${num(x * 100, 2)}%`);
 
 async function renderInvestimenti(v) {
@@ -3400,7 +3489,7 @@ async function renderInvestimenti(v) {
   v.innerHTML = `
     <div class="kpis">
       <div class="kpi g-indigo"><div class="k-label">📊 ${T('Current value')}</div><div class="k-value">${money0(d.total_value)}</div>${kRows([`🏦 ${T('Accounts')}`, d.accounts.length])}</div>
-      <div class="kpi g-indigo" title="${esc(T('capital put in'))}"><div class="k-label">💶 ${T('Net invested')}</div><div class="k-value">${money0(d.total_invested)}</div>${kRows([`📄 ${T('Securities')}`, d.accounts.reduce((s, a) => s + a.holdings.length, 0)])}</div>
+      <div class="kpi g-sky" title="${esc(T('capital put in'))}"><div class="k-label">💶 ${T('Net invested')}</div><div class="k-value">${money0(d.total_invested)}</div>${kRows([`📄 ${T('Securities')}`, d.accounts.reduce((s, a) => s + a.holdings.length, 0)])}</div>
       <div class="kpi ${d.total_gain >= 0 ? 'g-emerald' : 'g-rose'}"><div class="k-label">${d.total_gain >= 0 ? '📈' : '📉'} ${T('Gain')}</div><div class="k-value">${d.total_gain >= 0 ? '+' : ''}${money0(d.total_gain)}</div>${kRows(d.total_return != null && [`📊 ${T('On invested')}`, pctSigned(d.total_return)])}</div>
       <div class="kpi ${d.total_xirr == null ? 'g-indigo' : d.total_xirr >= 0 ? 'g-emerald' : 'g-rose'}" title="${esc(T('XIRR, accounts for when you invested'))}"><div class="k-label">⏱️ ${T('Annual return')}</div><div class="k-value">${pctSigned(d.total_xirr)}</div>${kRows([`🧮 ${T('Method')}`, 'XIRR'])}</div>
     </div>
@@ -3421,7 +3510,7 @@ async function renderInvestimenti(v) {
         <select id="iv-months" style="width:auto">${[['12', T('Last 12 months')], ['24', T('Last 24 months')], ['36', T('Last 36 months')], ['all', T('All')]].map(([k, l]) => `<option value="${k}" ${k === S.invMonths ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
         <div class="chart-box"><canvas id="iv-line"></canvas></div></div>
       <div class="card"><div class="card-head"><h3>${T('Allocation')}</h3></div>${d.allocation.length ? `<div class="chart-box" style="height:220px"><canvas id="iv-alloc"></canvas></div>
-        <div class="legend" style="margin-top:10px">${d.allocation.map((x) => `<div class="legend-item"><span class="dot" style="background:${ASSET_COLORS[x.name] || '#8b8fa8'}"></span><span>${esc(assetLabel(x.name))}<span class="pct">${pct(x.value / d.allocation.reduce((s, y) => s + y.value, 0))}</span></span><b class="num">${money0(x.value)}</b></div>`).join('')}</div>`
+        <div class="legend" style="margin-top:10px">${d.allocation.map((x) => `<div class="legend-item"><span class="dot" style="background:${ASSET_COLORS[x.name] || C.muted}"></span><span>${esc(assetLabel(x.name))}<span class="pct">${pct(x.value / d.allocation.reduce((s, y) => s + y.value, 0))}</span></span><b class="num">${money0(x.value)}</b></div>`).join('')}</div>`
         : `<div class="empty">${T('Add securities to see the allocation')}</div>`}</div>
     </div>
     <a class="card clickable-card pt-link" href="#/portafoglio"><div class="card-head"><div><h3>🧭 ${T('Portfolio analysis')}</h3>
@@ -3476,13 +3565,13 @@ async function renderInvestimenti(v) {
   chart($('#iv-line'), {
     type: 'line',
     data: { labels: s.map((x) => fmtMonth(x.month)), datasets: [
-      { label: T('Value'), data: s.map((x) => x.value), borderColor: '#7b52ab', backgroundColor: (ctx) => vGradient(ctx, '#7b52ab'), fill: true, tension: .3, borderWidth: 2, pointRadius: 3 },
-      { label: T('Invested'), data: s.map((x) => x.invested), borderColor: '#8b8fa8', borderDash: [5, 4], borderWidth: 2, pointRadius: 0, tension: .3 }] },
+      { label: T('Value'), data: s.map((x) => x.value), borderColor: C.total, backgroundColor: (ctx) => vGradient(ctx, C.total), fill: true, tension: .3, borderWidth: 2, pointRadius: 3 },
+      { label: T('Invested'), data: s.map((x) => x.invested), borderColor: C.transfer, borderDash: [5, 4], borderWidth: 2, pointRadius: 0, tension: .3 }] },
     options: { maintainAspectRatio: false, interaction: { mode: 'index', intersect: false }, scales: { y: { ticks: { callback: (x) => moneyK(x) } }, x: { grid: { display: false } } },
       plugins: { legend: { position: 'bottom', labels: { usePointStyle: true, boxWidth: 8 } } } },
   });
   if (d.allocation.length) chart($('#iv-alloc'), {
-    type: 'doughnut', data: { labels: d.allocation.map((x) => assetLabel(x.name)), datasets: [{ data: d.allocation.map((x) => x.value), backgroundColor: d.allocation.map((x) => ASSET_COLORS[x.name] || '#8b8fa8'), borderColor: css('--surface'), borderWidth: 2 }] },
+    type: 'doughnut', data: { labels: d.allocation.map((x) => assetLabel(x.name)), datasets: [{ data: d.allocation.map((x) => x.value), backgroundColor: d.allocation.map((x) => ASSET_COLORS[x.name] || C.muted), borderColor: css('--surface'), borderWidth: 2 }] },
     options: { cutout: '65%', maintainAspectRatio: false, plugins: { legend: { display: false } } },
   });
 }
@@ -3512,7 +3601,7 @@ async function rebalanceCard(det, opts = {}) {
   const label = (r) => {
     if (r.kind === 'security') return `<b>${esc(r.label)}</b><div class="muted small">${esc(r.name || '')}${r.name ? ' · ' : ''}${esc(r.account)} · ${esc(assetLabel(r.asset_class))}</div>`;
     if (r.kind === 'account') return `<b>${esc(r.label)}</b><div class="muted small">${T('account valued as a whole')}</div>`;
-    return `<span class="dot" style="background:${ASSET_COLORS[r.key] || '#8b8fa8'}"></span> <b>${esc(assetLabel(r.key === 'cash' ? 'liquidità' : r.key))}</b>${r.kind === 'cash' ? `<div class="muted small">${T('uninvested cash on the broker')}</div>` : ''}`;
+    return `<span class="dot" style="background:${ASSET_COLORS[r.key] || C.muted}"></span> <b>${esc(assetLabel(r.key === 'cash' ? 'liquidità' : r.key))}</b>${r.kind === 'cash' ? `<div class="muted small">${T('uninvested cash on the broker')}</div>` : ''}`;
   };
   const trade = (r) => {
     if (!r.trade) return '<span class="muted">—</span>';
@@ -3603,6 +3692,8 @@ async function rebalanceCard(det, opts = {}) {
     } else draw();
   } catch (e) { box.innerHTML = `<div class="empty">${esc(e.message || e)}</div>`; }
 }
+// budget bars, by status: within the budget green, from 90% amber, over it red
+const budgetState = (r) => (r > 1 ? 'over' : r >= 0.9 ? 'near' : 'ok');
 const signedMoney0 = (c) => (c >= 0 ? '+' : '') + money0(c);
 function holdingsTable(a) {
   const open = a.holdings.filter((h) => !h.trades || h.quantity > 1e-9);  // securities sold entirely stay in the trades
@@ -3617,7 +3708,7 @@ function holdingsTable(a) {
       ${t ? `<tr class="inv-groups"><th colspan="3"></th><th colspan="2" class="center">${T('Purchase')}</th><th colspan="2" class="center">${T('Today')}</th><th colspan="2"></th></tr>` : ''}
       <tr><th>${T('Security')}</th><th>${T('Class')}</th><th class="right">${T('Quantity')}</th>
       ${t ? `<th class="right">${T('Avg cost')}</th><th class="right">${T('Cost')}</th>` : ''}<th class="right">${T('Price')}</th><th class="right">${T('Value')}</th>${t ? `<th class="right">${T('Gain')}</th>` : ''}<th></th></tr></thead>
-    <tbody>${open.map((h) => `<tr><td><b>${esc(h.ticker)}</b><div class="muted small">${esc(h.name)}${h.isin ? ` · ${esc(h.isin)}` : ''}</div></td><td class="nowrap"><span class="dot" style="background:${ASSET_COLORS[h.asset_class] || '#8b8fa8'}"></span> ${esc(assetLabel(h.asset_class))}</td>
+    <tbody>${open.map((h) => `<tr><td><b>${esc(h.ticker)}</b><div class="muted small">${esc(h.name)}${h.isin ? ` · ${esc(h.isin)}` : ''}</div></td><td class="nowrap"><span class="dot" style="background:${ASSET_COLORS[h.asset_class] || C.muted}"></span> ${esc(assetLabel(h.asset_class))}</td>
       <td class="right num">${qtyFmt(h.quantity)}</td>
       ${t ? `<td class="right num">${h.avg_price != null ? esc(unitPrice(h.avg_price)) : '—'}</td><td class="right num">${h.cost != null ? money0(h.cost) : '—'}</td>` : ''}
       <td class="right num">${priceCell(h)}</td>
@@ -3676,10 +3767,11 @@ function tradeModal(a, o = null, preset = {}) {
       sell: T('Cash increases by the total; the gain or loss is calculated on the average cost.'),
       split: T('Only the quantity changes (e.g. reverse split {from} → {to}: {change}).', { from: num(50), to: num(1.66, 2), change: num(-48.34, 2) }), capital: T('Return of capital: it reduces the cost of the security and increases cash.') }[k] || '';
   };
-  const num = (id) => parseQty($(id, m).value);
+  // (named qv, not num: the hints above use the global num() formatter; a local num broke the whole window — 2.5.1)
+  const qv = (id) => parseQty($(id, m).value);
   // fixed-amount purchases (investment plan): total amount + price → quantity
   const autoQty = () => {
-    const total = parseMoney($('#tr-total', m).value), price = +num('#tr-price'), fees = parseMoney($('#tr-fees', m).value) || 0;
+    const total = parseMoney($('#tr-total', m).value), price = +qv('#tr-price'), fees = parseMoney($('#tr-fees', m).value) || 0;
     if (total > 0 && price > 0 && !$('#tr-qty', m).dataset.manual) $('#tr-qty', m).value = dec(((total - fees) / 100) / price);
   };
   $('#tr-qty', m).oninput = () => { $('#tr-qty', m).dataset.manual = $('#tr-qty', m).value ? '1' : ''; };
@@ -3692,7 +3784,7 @@ function tradeModal(a, o = null, preset = {}) {
   $('#tr-save', m).onclick = async () => {
     const total = parseMoney($('#tr-total', m).value);
     const body = { kind: $('#tr-kind', m).value, date: $('#tr-date', m).value, holding_id: $('#tr-hold', m).value || null,
-      quantity: num('#tr-qty'), price: num('#tr-price'), fees: parseMoney($('#tr-fees', m).value) || 0, total: total || null,
+      quantity: qv('#tr-qty'), price: qv('#tr-price'), fees: parseMoney($('#tr-fees', m).value) || 0, total: total || null,
       amount: parseMoney($('#tr-amount', m).value), notes: $('#tr-notes', m).value, external_id: x.external_id || '' };
     try {
       await api(o ? `/trades/${o.id}` : `/investments/${a.id}/trades`, { method: o ? 'PUT' : 'POST', body });
@@ -3772,13 +3864,17 @@ function holdingModal(accountId, h = null) {
 // projection and comparison with an index. Everything here is a calculation: nothing is recorded.
 const PT_TABS = [['composition', '🧭', T('Composition')], ['diversification', '🧩', T('Diversification')], ['rebalance', '⚖️', T('Rebalancing')],
   ['costs', '💸', T('Costs')], ['projection', '🔮', T('Projection')], ['benchmark', '📊', T('Comparison')]];
-const SECTOR_INFO = { 'Information Technology': ['💻', T('Information technology')], Financials: ['🏦', T('Financials')], 'Health Care': ['🩺', T('Health care')],
-  'Consumer Discretionary': ['🛍️', T('Consumer discretionary')], 'Consumer Staples': ['🛒', T('Consumer staples')], Industrials: ['🏭', T('Industrials')],
-  'Communication Services': ['📡', T('Communication services')], Energy: ['⛽', T('Energy')], Materials: ['⛏️', T('Materials')], Utilities: ['💡', T('Utilities')],
-  'Real Estate': ['🏢', T('Real estate')] };
-const REGION_INFO = { 'North America': ['🌎', T('North America')], 'Latin America': ['🌎', T('Latin America')], Europe: ['🌍', T('Europe')],
-  'Middle East and Africa': ['🌍', T('Middle East and Africa')], 'Asia-Pacific': ['🌏', T('Asia-Pacific')], Other: ['🌐', T('Supranational and other')] };
-const MARKET_INFO = { Developed: ['🏙️', T('Developed markets')], Emerging: ['🌱', T('Emerging markets')], 'Frontier and other': ['🧭', T('Frontier and other markets')] };
+// [icon, label, color]: the colors are chosen so that no two of the same family look alike (CIEDE2000 distance ≥ 18)
+const SECTOR_INFO = { 'Information Technology': ['💻', T('Information technology'), '#3d6fb8'], Financials: ['🏦', T('Financials'), '#5aa36b'],
+  'Health Care': ['🩺', T('Health care'), '#9fd0f5'], 'Consumer Discretionary': ['🛍️', T('Consumer discretionary'), '#f4a6c0'],
+  'Consumer Staples': ['🛒', T('Consumer staples'), '#c7d36a'], Industrials: ['🏭', T('Industrials'), '#8f6e5a'],
+  'Communication Services': ['📡', T('Communication services'), '#c08ae6'], Energy: ['⛽', T('Energy'), '#d9655f'],
+  Materials: ['⛏️', T('Materials'), '#d4a373'], Utilities: ['💡', T('Utilities'), '#2f9fb3'], 'Real Estate': ['🏢', T('Real estate'), '#8b5e9e'] };
+const REGION_INFO = { 'North America': ['🌎', T('North America'), '#5b8def'], 'Latin America': ['🌎', T('Latin America'), '#f08a5a'],
+  Europe: ['🌍', T('Europe'), '#46b8a0'], 'Middle East and Africa': ['🌍', T('Middle East and Africa'), '#e9cd57'],
+  'Asia-Pacific': ['🌏', T('Asia-Pacific'), '#e07fae'], Other: ['🌐', T('Supranational and other'), '#b4b9c2'] };
+const MARKET_INFO = { Developed: ['🏙️', T('Developed markets'), '#5b8def'], Emerging: ['🌱', T('Emerging markets'), '#f08a5a'],
+  'Frontier and other': ['🧭', T('Frontier and other markets'), '#b4b9c2'] };
 const CLASS_ICON = { azioni: '📈', obbligazioni: '🧾', monetario: '🅿️', 'materie prime': '🪙', immobiliare: '🏠', crypto: '₿', altro: '🔹', liquidità: '💶', 'non specificato': '❔' };
 // weights always with two decimals (0,42%, never a rounded 0%)
 const fix2 = (x) => (x ?? 0).toLocaleString(LOCALE, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -3814,6 +3910,8 @@ const coverageLine = (share, shares = false) => (share >= 0.995 ? '' : `<p class
   ? T('Weights of the {percent} of the shares whose data is known: the rest is under "What is not known".', { percent: pct2(share) })
   : T('Weights of the {percent} of the value whose data is known: the rest is under "What is not known".', { percent: pct2(share) })}</p>`);
 const ico = (i) => `<span class="pt-ico">${i}</span>`;
+// a summary box in a color of the palette (e.g. the color of an area): the label in a darker shade of it
+const kColor = (c) => (c ? `style="--k:${c};--k-ink:color-mix(in srgb, ${c} 62%, var(--text))"` : '');
 
 // accounts analyzed: one choice for every tab (null = all the investment accounts of the space), remembered per space
 // in this browser. The portfolio is judged as a whole; fewer accounts = a part of it (e.g. the accounts of one goal)
@@ -3861,7 +3959,7 @@ async function worldMap(el, countries, total) {
   WORLD_MAP ||= await fetch('/static/vendor/world.json').then((r) => r.json());
   const by = Object.fromEntries(countries.map((c) => [c.key, c]));
   const max = Math.max(...countries.map((c) => c.share), 0.0001);
-  const shade = (s) => `color-mix(in srgb, #6366f1 ${Math.round(18 + 82 * Math.sqrt(s / max))}%, var(--surface-3))`;
+  const shade = (s) => `color-mix(in srgb, ${C.total} ${Math.round(18 + 82 * Math.sqrt(s / max))}%, var(--surface-3))`;
   el.innerHTML = `<div class="pt-map"><svg viewBox="0 0 ${WORLD_MAP.w} ${WORLD_MAP.h}" role="img" aria-label="${esc(T('World map of the countries you invest in'))}">
     ${Object.entries(WORLD_MAP.countries).map(([k, d]) => `<path d="${d}" data-c="${esc(k)}" style="fill:${by[k] ? shade(by[k].share) : 'var(--surface-3)'}" class="${by[k] ? 'on' : ''}"></path>`).join('')}
     </svg><div class="pt-tip hidden"></div></div>
@@ -3883,13 +3981,13 @@ async function ptComposition(box) {
   const d = await api('/portfolio/composition' + ptQuery({ by_account: (S.ptAccounts || S.ptAccountList).length > 1 ? 1 : '' }));
   FLAG_SET = new Set(d.flags || []);
   if (!d.total) return ptEmpty(box);
-  const regions = d.regions.map((r) => ({ ...r, label: `${ico((REGION_INFO[r.key] || ['🌐'])[0])}${esc((REGION_INFO[r.key] || [0, r.key])[1])}` }));
-  const markets = d.markets.map((r) => ({ ...r, label: `${ico((MARKET_INFO[r.key] || ['🌐'])[0])}${esc((MARKET_INFO[r.key] || [0, r.key])[1])}` }));
-  const sectors = d.sectors.map((r) => ({ ...r, label: `${ico((SECTOR_INFO[r.key] || ['🔹'])[0])}${esc((SECTOR_INFO[r.key] || [0, r.key])[1])}` }));
+  const regions = d.regions.map((r) => ({ ...r, color: (REGION_INFO[r.key] || [])[2], label: `${ico((REGION_INFO[r.key] || ['🌐'])[0])}${esc((REGION_INFO[r.key] || [0, r.key])[1])}` }));
+  const markets = d.markets.map((r) => ({ ...r, color: (MARKET_INFO[r.key] || [])[2], label: `${ico((MARKET_INFO[r.key] || ['🌐'])[0])}${esc((MARKET_INFO[r.key] || [0, r.key])[1])}` }));
+  const sectors = d.sectors.map((r) => ({ ...r, color: (SECTOR_INFO[r.key] || [])[2], label: `${ico((SECTOR_INFO[r.key] || ['🔹'])[0])}${esc((SECTOR_INFO[r.key] || [0, r.key])[1])}` }));
   const countries = d.countries.map((r) => ({ ...r, label: `${flag(r.key)}${esc(countryName(r.key))}` }));
   const currencies = d.currencies.map((r) => ({ ...r, label: `<span class="pt-cur">${esc(curSymbol(r.key))}</span>${esc(r.key)}` }));
   const classes = d.asset_classes.map((r) => ({ ...r, label: `${ico(CLASS_ICON[r.key] || '🔹')}${esc(assetLabel(r.key))}`, color: ASSET_COLORS[r.key] }));
-  const instr = d.instruments.map((r) => ({ ...r, label: `${ico(CLASS_ICON[r.asset_class] || '🔹')}${esc(r.name)}`, title: `${r.name} · ${r.ticker} · ${r.account}` }));
+  const instr = d.instruments.map((r) => ({ ...r, color: ASSET_COLORS[r.asset_class], label: `${ico(CLASS_ICON[r.asset_class] || '🔹')}${esc(r.name)}`, title: `${r.name} · ${r.ticker} · ${r.account}` }));
   const top1 = (rows, info) => (rows[0] ? [(info[rows[0].key] || [0, rows[0].key])[1], pct2(rows[0].share)] : ['—', '—']);
   const fundsWithIsin = d.instruments.filter((x) => x.isin).length;
   const ctop = d.countries[0];
@@ -3901,8 +3999,8 @@ async function ptComposition(box) {
       ${calcNotes(d.notes)}<div id="pt-report"></div></div>
     <div class="kpis">
       <div class="kpi g-indigo"><div class="k-label">💼 ${T('Value analyzed')}</div><div class="k-value">${money0(d.total)}</div>${kRows([`📄 ${T('Securities')}`, d.instruments.length], [`🔍 ${T('Read inside')}`, d.funds_loaded])}</div>
-      <div class="kpi g-indigo"><div class="k-label">🌍 ${T('Main area')}</div><div class="k-value">${esc(top1(d.regions, REGION_INFO)[0])}</div>${kRows([`📊 ${T('Weight')}`, top1(d.regions, REGION_INFO)[1]], [`ℹ️ ${T('Known')}`, pct2(d.coverage.region)])}</div>
-      <div class="kpi g-indigo"><div class="k-label">🚩 ${T('Main country')}</div><div class="k-value">${ctop ? esc(countryName(ctop.key)) : '—'}</div>${kRows([`📊 ${T('Weight')}`, ctop ? pct2(ctop.share) : '—'], [`🗺️ ${T('Countries')}`, d.countries.length])}</div>
+      <div class="kpi" ${kColor((REGION_INFO[d.regions[0]?.key] || [])[2])}><div class="k-label">🌍 ${T('Main area')}</div><div class="k-value">${esc(top1(d.regions, REGION_INFO)[0])}</div>${kRows([`📊 ${T('Weight')}`, top1(d.regions, REGION_INFO)[1]], [`ℹ️ ${T('Known')}`, pct2(d.coverage.region)])}</div>
+      <div class="kpi" ${kColor(ctop && (REGION_INFO[ctop.region] || [])[2])}><div class="k-label">🚩 ${T('Main country')}</div><div class="k-value">${ctop ? esc(countryName(ctop.key)) : '—'}</div>${kRows([`📊 ${T('Weight')}`, ctop ? pct2(ctop.share) : '—'], [`🗺️ ${T('Countries')}`, d.countries.length])}</div>
       <div class="kpi g-indigo"><div class="k-label">💱 ${T('Main currency')}</div><div class="k-value">${esc(d.currencies[0]?.key || '—')}</div>${kRows([`📊 ${T('Weight')}`, d.currencies[0] ? pct2(d.currencies[0].share) : '—'], [`ℹ️ ${T('Known')}`, pct2(d.coverage.currency)])}</div>
     </div>
     <div class="card"><div class="card-head"><div><h3>🗺️ ${T('Where your money is in the world')}</h3><p class="muted small" style="margin:3px 0 0">${T('Darker = larger weight. Point at a country for its weight and value.')}</p></div></div>
@@ -3959,8 +4057,8 @@ async function ptComposition(box) {
 }
 
 // correlation colour: blue (−1) · grey (0) · red (+1)
-const corrColor = (c) => (c == null ? 'var(--surface-3)' : c >= 0 ? `color-mix(in srgb, #ef4444 ${Math.round(Math.abs(c) * 85)}%, var(--surface-3))`
-  : `color-mix(in srgb, #3b82f6 ${Math.round(Math.abs(c) * 85)}%, var(--surface-3))`);
+const corrColor = (c) => (c == null ? 'var(--surface-3)' : c >= 0 ? `color-mix(in srgb, ${C.out} ${Math.round(Math.abs(c) * 85)}%, var(--surface-3))`
+  : `color-mix(in srgb, #5b8def ${Math.round(Math.abs(c) * 85)}%, var(--surface-3))`);
 
 async function ptDiversification(box) {
   const [d, cor] = await Promise.all([api('/portfolio/composition' + ptQuery()), api('/portfolio/correlation' + ptQuery())]);
@@ -3969,7 +4067,7 @@ async function ptDiversification(box) {
   const dv = d.diversification;
   const LV = { high: [T('High'), 'g-emerald', '🟢'], medium: [T('Medium'), 'g-amber', '🟡'], low: [T('Low'), 'g-rose', '🔴'] };
   const vs = (rows, info) => `<div class="pt-vs">${rows.filter((r) => r.portfolio >= 0.005 || r.world >= 0.005).map((r) => `<div class="pt-vs-row"><span class="pt-l">${ico((info[r.key] || ['🌐'])[0])}${esc((info[r.key] || [0, r.key])[1])}</span>
-      <div class="pt-vs-bars"><span class="pt-track"><i style="width:${Math.min(100, r.portfolio).toFixed(1)}%"></i></span><span class="pt-track world"><i style="width:${Math.min(100, r.world).toFixed(1)}%"></i></span></div>
+      <div class="pt-vs-bars"><span class="pt-track"><i style="width:${Math.min(100, r.portfolio).toFixed(1)}%;background:${(info[r.key] || [])[2] || C.total}"></i></span><span class="pt-track world"><i style="width:${Math.min(100, r.world).toFixed(1)}%"></i></span></div>
       <b class="num">${fix2(r.portfolio)}%</b><span class="muted small num">${fix2(r.world)}%</span></div>`).join('')}
       <div class="pt-vs-legend muted small"><span><i class="you"></i>${T('Your shares')}</span><span><i class="wld"></i>${T('World market')}</span></div></div>`;
   const m = (icon, label, value, tip) => `<div class="pt-metric" title="${esc(tip)}"><span>${icon} ${label}</span><b class="num">${value}</b></div>`;
@@ -4018,7 +4116,7 @@ async function ptDiversification(box) {
   box.innerHTML += `
     <div class="grid-2">
       <div class="card"><div class="card-head"><div><h3>🔁 ${T('Overlap between funds')}</h3><p class="muted small" style="margin:3px 0 0">${T('How much two funds hold the same securities with the same weights (100% = identical). High overlap means less diversification than it seems.')}</p></div></div>
-        ${d.overlaps.length ? `<div class="pt-bars">${d.overlaps.map((o) => `<div class="pt-bar"><span class="pt-l">${esc(o.a)} ↔ ${esc(o.b)}</span><span class="pt-track"><i style="width:${o.overlap}%;background:${o.overlap >= 50 ? '#ef4444' : o.overlap >= 25 ? '#f59e0b' : '#10b981'}"></i></span><b class="num">${fix2(o.overlap)}%</b><span></span></div>`).join('')}</div>`
+        ${d.overlaps.length ? `<div class="pt-bars">${d.overlaps.map((o) => `<div class="pt-bar"><span class="pt-l">${esc(o.a)} ↔ ${esc(o.b)}</span><span class="pt-track"><i style="width:${o.overlap}%;background:${o.overlap >= 50 ? C.out : o.overlap >= 25 ? C.left : C.in}"></i></span><b class="num">${fix2(o.overlap)}%</b><span></span></div>`).join('')}</div>`
           : `<div class="empty small">${d.funds_loaded > 1 ? T('No relevant overlap') : T('Needs at least two funds with their composition')}</div>`}</div>
       <div class="card"><div class="card-head"><div><h3>🔗 ${T('Correlation between securities')}</h3><p class="muted small" style="margin:3px 0 0">${T('How your securities moved together, month by month (Pearson correlation of the monthly returns): +1 = always together (they do not diversify each other), 0 = unrelated, −1 = opposite.')}</p></div></div>
         ${cor.securities.length > 1 ? `<div class="table-wrap"><table class="pt-corr"><thead><tr><th></th>${cor.securities.map((s, i) => `<th title="${esc(s.name)}">${i + 1}</th>`).join('')}</tr></thead><tbody>
@@ -4098,8 +4196,8 @@ async function ptProjection(box) {
       </div>${P.inflation ? `<p class="muted small">ℹ️ ${T('Values in today\'s money: inflation of {percent} per year taken out.', { percent: num(P.inflation, 1) + '%' })}</p>` : ''}
       <div class="chart-box" style="height:280px"><canvas id="pp-chart"></canvas></div>`;
     chart($('#pp-chart', box), { type: 'line', data: { labels: at(paid).map((_, i) => i), datasets: [
-      ...series.map((s, i) => ({ label: [T('Prudent'), T('Middle'), T('Optimistic')][i], data: at(s), borderColor: ['#f59e0b', '#f97316', '#10b981'][i], borderWidth: 2, pointRadius: 0, tension: .3 })),
-      { label: T('Money put in'), data: at(paid), borderColor: '#0ea5e9', borderDash: [5, 4], borderWidth: 2, pointRadius: 0 }] },
+      ...series.map((s, i) => ({ label: [T('Prudent'), T('Middle'), T('Optimistic')][i], data: at(s), borderColor: [C.left, C.terracotta, C.in][i], borderWidth: 2, pointRadius: 0, tension: .3 })),
+      { label: T('Money put in'), data: at(paid), borderColor: C.transfer, borderDash: [5, 4], borderWidth: 2, pointRadius: 0 }] },
       options: { maintainAspectRatio: false, interaction: { mode: 'index', intersect: false }, scales: { y: { ticks: { callback: (x) => moneyK(x) } }, x: { title: { display: true, text: T('Years') }, grid: { display: false } } },
         plugins: { legend: { position: 'bottom', labels: { usePointStyle: true, boxWidth: 8 } }, tooltip: { callbacks: { label: (c) => ` ${c.dataset.label}: ${money0(c.raw)}` } } } } });
   };
@@ -4128,8 +4226,8 @@ async function ptBenchmark(box) {
         </div>${d.missing_months ? `<p class="muted small">ℹ️ ${tn('{n} month without a price of the index', '{n} months without a price of the index', d.missing_months)}</p>` : ''}
         <div class="chart-box" style="height:280px"><canvas id="pb-chart"></canvas></div>`;
       chart($('#pb-chart', box), { type: 'line', data: { labels: d.points.map((p) => fmtMonth(p.month)), datasets: [
-        { label: T('Your investments'), data: d.points.map((p) => p.portfolio * 100), borderColor: '#6366f1', borderWidth: 2.5, pointRadius: 0, tension: .25 },
-        { label: d.ticker, data: d.points.map((p) => (p.benchmark == null ? null : p.benchmark * 100)), borderColor: '#8b8fa8', borderDash: [5, 4], borderWidth: 2, pointRadius: 0, tension: .25 }] },
+        { label: T('Your investments'), data: d.points.map((p) => p.portfolio * 100), borderColor: C.total, borderWidth: 2.5, pointRadius: 0, tension: .25 },
+        { label: d.ticker, data: d.points.map((p) => (p.benchmark == null ? null : p.benchmark * 100)), borderColor: C.bench, borderDash: [5, 4], borderWidth: 2, pointRadius: 0, tension: .25 }] },
         options: { maintainAspectRatio: false, interaction: { mode: 'index', intersect: false }, scales: { y: { ticks: { callback: (x) => `${num(x, 0)}%` } }, x: { grid: { display: false } } },
           plugins: { legend: { position: 'bottom', labels: { usePointStyle: true, boxWidth: 8 } }, tooltip: { callbacks: { label: (c) => ` ${c.dataset.label}: ${fix2(c.raw)}%` } } } } });
     } catch (e) { out.innerHTML = calcNotes([{ level: 'warn', text: e.message }]); }
@@ -4176,8 +4274,8 @@ async function renderRisparmio(v) {
       { type: 'line', label: T('Income'), data: rows.map((r) => r.income + r.from_others), borderColor: css('--text'), backgroundColor: css('--text'),
         borderWidth: 2, borderDash: [5, 4], pointRadius: 3, tension: 0, order: -1 },
       // same colors as everywhere: red for spending, blue for transfers to other spaces, yellow for savings
-      bar(T('Spent'), 'expense', '#e11d48'), bar(T('Other spaces'), 'to_others', '#0ea5e9'), bar(T('Saved'), 'saved', '#f59e0b'),
-      { ...bar(T('Invested in securities'), 'invested', '#7c3aed'), stack: 'inv' }] },
+      bar(T('Spent'), 'expense', C.out), bar(T('Other spaces'), 'to_others', C.transfer), bar(T('Saved'), 'saved', C.left),
+      { ...bar(T('Invested in securities'), 'invested', C.total), stack: 'inv' }] },
     options: { maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
       scales: { x: { stacked: true, grid: { display: false } }, y: { stacked: true, ticks: { callback: (x) => moneyK(x) } } },
       plugins: { legend: { position: 'bottom', labels: { usePointStyle: true, boxWidth: 8 } },
@@ -4186,10 +4284,10 @@ async function renderRisparmio(v) {
   chart($('#sv-nw'), {
     type: 'line',
     data: { labels: nw.series.map((x) => fmtMonth(x.month)), datasets: [
-      { label: T('Net worth'), data: nw.series.map((x) => x.net), borderColor: '#6366f1', backgroundColor: (ctx) => vGradient(ctx, '#6366f1'), fill: true, borderWidth: 3, tension: .3, pointRadius: 3 },
-      { label: T('Cash'), data: nw.series.map((x) => x.liquidity), borderColor: '#2fbf71', borderWidth: 2, pointRadius: 0, tension: .3 },
-      { label: T('Investments'), data: nw.series.map((x) => x.investments), borderColor: '#7b52ab', borderWidth: 2, pointRadius: 0, tension: .3 },
-      ...(nw.series.some((x) => x.debts) ? [{ label: T('Debts'), data: nw.series.map((x) => -x.debts), borderColor: '#e8364f', borderDash: [5, 4], borderWidth: 2, pointRadius: 0 }] : [])] },
+      { label: T('Net worth'), data: nw.series.map((x) => x.net), borderColor: C.total, backgroundColor: (ctx) => vGradient(ctx, C.total), fill: true, borderWidth: 3, tension: .3, pointRadius: 3 },
+      { label: T('Cash'), data: nw.series.map((x) => x.liquidity), borderColor: '#5fb4ec', borderWidth: 2, pointRadius: 0, tension: .3 },
+      { label: T('Investments'), data: nw.series.map((x) => x.investments), borderColor: '#3fb8a8', borderWidth: 2, pointRadius: 0, tension: .3 },
+      ...(nw.series.some((x) => x.debts) ? [{ label: T('Debts'), data: nw.series.map((x) => -x.debts), borderColor: C.debt, borderDash: [5, 4], borderWidth: 2, pointRadius: 0 }] : [])] },
     options: { maintainAspectRatio: false, interaction: { mode: 'index', intersect: false }, scales: { y: { ticks: { callback: (x) => moneyK(x) } }, x: { grid: { display: false } } },
       plugins: { legend: { position: 'bottom', labels: { usePointStyle: true, boxWidth: 8 } } } },
   });

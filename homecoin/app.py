@@ -19,6 +19,7 @@ from . import db as dbm
 from . import forecast
 from . import i18n
 from . import importer
+from . import insights
 from . import security
 from .db import get_db
 from .services import (Categorizer, account_balances, count_past_occurrences, process_recurring,
@@ -31,7 +32,7 @@ from . import updater
 from . import util
 from .util import FREQUENCIES, add_months, months_between, parse_date, parse_number, rule_matches
 
-VERSION = "2.5.0"
+VERSION = "2.6.0"
 STATIC_DIR = dbm.BASE_DIR / "static"
 KINDS = ("expense", "income", "transfer")
 ACCOUNT_TYPES = ("corrente", "risparmio", "credito", "prepagata", "contanti", "investimenti", "altro")
@@ -1758,6 +1759,9 @@ def create_app(port):
             unverified[u["recurring_id"]] = unverified.get(u["recurring_id"], 0) + 1
         for r in out:
             r["pac_unverified"] = unverified.get(r["id"], 0)
+        rises = insights.price_increases(db, out)  # 2.6.0: costs more than before (shown, never changed by itself)
+        for r in out:
+            r["increase"] = rises.get(r["id"])
         return jsonify(out)
 
     def own_recurring(rid):
@@ -2609,6 +2613,22 @@ def create_app(port):
             # savings = surplus: income (and transfers received from other spaces) − spending − contributions to other spaces
             saved=tot["income"] + cross[0] - tot["expense"] - cross[1] - tot["other_cat"],
         )
+
+    @app.get("/api/insights/unusual")
+    def insights_unusual():
+        """Unusual spending of a month (2.6.0): categories far above their average, single expenses far above the usual."""
+        month = request.args.get("month") or None
+        if month and not re.fullmatch(r"(19|20)\d\d-(0[1-9]|1[0-2])", month):
+            raise ApiError(i18n.t("Invalid value"))
+        return jsonify(insights.unusual(get_db(), pf(), month))
+
+    @app.get("/api/report/year")
+    def report_year():
+        """The year in brief (2.6.0), with the year before for comparison."""
+        year = as_int(request.args.get("year") or dt.date.today().year, "year", minimum=1990)
+        if year > dt.date.today().year:
+            raise ApiError(i18n.t("Invalid value"))
+        return jsonify(insights.year_brief(get_db(), pf(), year))
 
     @app.get("/api/report")
     def report():

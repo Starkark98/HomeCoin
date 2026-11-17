@@ -367,6 +367,14 @@ def build(today=None):
                       add_months(today, -2).isoformat()))
         from .tools import sync_holdings
         sync_holdings(conn, broker)
+        # 2.6.0 insights: the internet bill came higher the last time (Recurring → "Costs more than before"; the item
+        # itself is not changed) and an unusual purchase this month (Dashboard → "Unusual spending")
+        for name, cents in ((L("Home internet"), 3290), (L("Streaming"), 1399)):
+            last = conn.execute("""SELECT t.id FROM transactions t JOIN recurring r ON r.id = t.recurring_id
+                                   WHERE r.name = ? ORDER BY t.date DESC LIMIT 1""", (name,)).fetchone()
+            if last:
+                conn.execute("UPDATE transactions SET amount = ? WHERE id = ?", (cents, last[0]))
+        _tx(conn, max(today.replace(day=1), today - dt.timedelta(days=2)), 89000, "expense", comune, casa_c, L("New sofa"))
         conn.commit()
     finally:
         conn.close()
