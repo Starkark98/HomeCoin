@@ -348,6 +348,12 @@ def build(today=None):
                                                                          "materie prime": 5}, "security": {}},
             "excluded": {"class": [], "security": []}, "drift_abs": 5.0, "drift_rel": 25.0, "contribution": 100000, "sells": False}))
         _setting(conn, "last_backup_download", (today - dt.timedelta(days=41)).isoformat())  # shows the backup reminder
+        # 2.7.0: groceries carry their unspent budget over (since 3 months ago), a minimum cash for the Calendar, and
+        # the household account checked against the bank statement a few days ago
+        conn.execute("UPDATE categories SET rollover = ? WHERE portfolio_id = ? AND code = 'groceries'",
+                     (add_months(today.replace(day=1), -3).strftime("%Y-%m"), fam))
+        _setting(conn, f"cash_floor@{fam}", 150000)
+        _setting(conn, f"balance_checked_{comune}@{fam}", (today - dt.timedelta(days=9)).isoformat())
         log = [(40, "security", "Password created", ""), (40, "change", "Space created", "Marco"),
                (39, "data", "Bank statement imported", L("{n} transactions", n=62)), (38, "change", "Account created", L("Credit card")),
                (32, "change", "Recurring item created", L("Water bill")), (21, "change", "Fair split applied to recurring items", ""),

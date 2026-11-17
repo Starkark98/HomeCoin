@@ -32,7 +32,7 @@ from . import updater
 from . import util
 from .util import FREQUENCIES, add_months, months_between, parse_date, parse_number, rule_matches
 
-VERSION = "2.6.1"
+VERSION = "2.7.0"
 STATIC_DIR = dbm.BASE_DIR / "static"
 KINDS = ("expense", "income", "transfer")
 ACCOUNT_TYPES = ("corrente", "risparmio", "credito", "prepagata", "contanti", "investimenti", "altro")
@@ -755,6 +755,10 @@ def create_app(port):
             for a in accs:
                 if a["id"] in mv:
                     a["market_value"] = mv[a["id"]]["value"]
+        # 2.7.0: the last date its balance matched the bank statement (Accounts → ⋯ → Check against the bank statement)
+        checked = {r[0]: r[1] for r in db.execute("SELECT key, value FROM settings WHERE key LIKE 'balance_checked_%'")}
+        for a in accs:
+            a["checked_until"] = checked.get(f"balance_checked_{a['id']}@{p}")
         return accs
 
     @app.get("/api/meta")
@@ -2072,6 +2076,64 @@ def create_app(port):
              + (" · " + i18n.tn("{n} recurring item", "{n} recurring items", len(removed)) if removed else ""))
         return jsonify(dry_run=False, **summary)
 
+    @app.post("/api/accounts/<int:aid>/check-balance")
+    def account_check_balance(aid):
+        """Balance check against the bank statement (2.7.0): the balance HomeCoin has at a date, the difference from the
+        one on the statement and the most likely causes. Read-only: nothing is recorded (the user decides what to do;
+        a difference can be recorded through the normal transaction window). When the two match, the date is
+        remembered as "checked up to" for the account."""
+        db = get_db()
+        own_account(aid)
+        acc = db.execute("SELECT * FROM accounts WHERE id = ?", (aid,)).fetchone()
+        b = body()
+        when = tx_date(b.get("date"))
+        statement = as_int(b.get("balance"), "balance")  # (it may be negative: a card, an overdraft)
+        book = tools.book_balance(db, acc, when)
+        diff = statement - book  # > 0: the bank has more money than HomeCoin (an income or a transfer in is missing)
+        cols = """t.id, t.date, t.amount, t.kind, t.account_id, t.to_account_id, t.description, t.source,
+                  a.name AS account_name, ta.name AS to_account_name"""
+        rows = [dict(r) for r in db.execute(
+            f"""SELECT {cols} FROM transactions t JOIN accounts a ON a.id = t.account_id
+                LEFT JOIN accounts ta ON ta.id = t.to_account_id
+                WHERE (t.account_id = :a OR t.to_account_id = :a) AND t.date BETWEEN :f AND :t ORDER BY t.date, t.id""",
+            {"a": aid, "f": (parse_date(when) - dt.timedelta(days=90)).isoformat(),
+             "t": (parse_date(when) + dt.timedelta(days=10)).isoformat()})]
+        for t in rows:
+            inflow = t["kind"] == "income" or (t["kind"] == "transfer" and t["to_account_id"] == aid)
+            t["effect"] = t["amount"] if inflow else -t["amount"]
+        causes = []
+        if diff:
+            # recorded after the date but within 10 days: the bank may have booked it earlier (value date)
+            near = [t for t in rows if t["date"] > when]
+            run = 0
+            for t in near:
+                run += t["effect"]
+                if run == diff:
+                    causes.append({"type": "later", "items": near[:near.index(t) + 1]})
+                    break
+            # one record that explains the difference: missing (same amount), in the wrong direction (twice the
+            # amount) or recorded twice
+            for t in rows:
+                if t["date"] > when:
+                    continue
+                if t["effect"] == -diff:
+                    causes.append({"type": "twice", "items": [t]})  # recorded but the bank does not have it
+                elif t["effect"] * 2 == -diff:
+                    causes.append({"type": "sign", "items": [t]})  # in the wrong direction
+            seen = {}
+            for t in [t for t in rows if t["date"] <= when]:
+                k = (t["effect"], t["description"].strip().casefold())
+                if k in seen and abs((parse_date(t["date"]) - parse_date(seen[k]["date"])).days) <= 3 and t["effect"] == -diff:
+                    causes.append({"type": "double", "items": [seen[k], t]})
+                seen[k] = t
+            causes = causes[:8]
+        else:
+            tools.set_setting(db, f"balance_checked_{aid}", pf(), when)
+            db.commit()
+        g.audit_skip = True  # a check changes no data
+        return jsonify(date=when, book=book, statement=statement, difference=diff, causes=causes,
+                       last_checked=tools.setting(db, f"balance_checked_{aid}", pf(), None))
+
     @app.post("/api/accounts/<int:aid>/doubles")
     def account_doubles(aid):
         """Money recorded twice in one account: two records in the same direction (both bring money in, or both take it
@@ -2171,6 +2233,53 @@ def create_app(port):
         return (a.get("created_at") == b.get("created_at")
                 and all(a[k] == b[k] for k in ("kind", "account_id", "to_account_id"))
                 and any(a[k] == b[k] for k in ("description", "amount", "date")))
+
+    # 2.6.2: rows are paired by id AND by content. The same transaction can have another id in the backup: deleted
+    # and recorded again, imported again, data rebuilt or restored from another copy. Paired by id only, every one of
+    # them was "deleted + added" and the comparison showed everything as different.
+    # what makes two rows the same one when the ids differ (references to other rows already translated)
+    MATCH_KEYS = {"accounts": ("portfolio_id", "name", "type"), "categories": ("portfolio_id", "name", "kind"),
+                  "rules": ("pattern", "category_id"), "recurring": ("name", "kind", "account_id", "to_account_id", "frequency"),
+                  "transactions": ("date", "amount", "kind", "account_id", "to_account_id", "description")}
+    # a second, looser pass: the same money on the same day and account with something else edited (description,
+    # category, notes…) is the same transaction "changed"
+    LOOSE_KEYS = {"transactions": ("date", "amount", "kind", "account_id", "to_account_id"),
+                  "recurring": ("name", "kind", "account_id")}
+    # references to other rows: the id they have now, through the pairs of the parent table
+    REFS = {"account_id": "accounts", "to_account_id": "accounts", "category_id": "categories", "recurring_id": "recurring"}
+
+    def translate(row, pairs):
+        """A backup row with its references to accounts, categories and recurring items turned into today's ids."""
+        out = dict(row)
+        for col, table in REFS.items():
+            if col in out and out[col] is not None and table in pairs:
+                out[col] = pairs[table].get(out[col], -out[col])  # a parent that has no pair: never equal to a real id
+        return out
+
+    def pair_rows(t, old, now, pairs):
+        """{backup id: current id} for the rows of table t that are the same row, by id first, then by content."""
+        tr = {i: translate(r, pairs) for i, r in old.items()}
+        out, used = {}, set()
+        for i in sorted(old):
+            if i in now and (same_row(tr[i], now[i]) if t == "transactions" else tr[i].get("created_at") == now[i].get("created_at")):
+                out[i] = i
+                used.add(i)
+        for keys in (MATCH_KEYS.get(t), LOOSE_KEYS.get(t)):
+            if not keys:
+                continue
+            free = {}
+            for j in sorted(now):
+                if j not in used:
+                    free.setdefault(tuple(now[j].get(k) for k in keys), []).append(j)
+            for i in sorted(old):
+                if i in out:
+                    continue
+                bucket = free.get(tuple(tr[i].get(k) for k in keys))
+                if bucket:
+                    j = bucket.pop(0)
+                    out[i] = j
+                    used.add(j)
+        return out, tr
 
     _sched = {"checked": 0.0}
 
@@ -2273,14 +2382,15 @@ def create_app(port):
         old = backup_rows(path)
         names = {r["id"]: r["name"] for r in db.execute("SELECT id, name FROM accounts")}
         names.update({r["id"]: r["name"] for t, rows in [("accounts", old["accounts"])] for r in rows.values()})
-        out = {}
-        for t, (label, _) in RESTORABLE.items():
+        out, pairs = {}, {}
+        # bookkeeping columns: they differ for the same row recorded again and are not something the user changed
+        ignore = {"id", "created_at", "updated_at", "generated", "last_used", "source"}
+        for t, (label, _) in RESTORABLE.items():  # parents first: their pairs translate the references of the others
             now = {r["id"]: dict(r) for r in db.execute(f"SELECT * FROM {t}")}
-            ignore = {"created_at", "updated_at", "generated", "last_used"}
             # SQLite may give the id of a deleted row to a new one: the same id is the same row only if it was created
-            # at the same moment (an edit keeps created_at), else it is "deleted + added"
-            same = {i for i in old[t] if i in now and (same_row(old[t][i], now[i]) if t == "transactions"
-                                                        else old[t][i].get("created_at") == now[i].get("created_at"))}
+            # at the same moment (an edit keeps created_at); rows with another id are paired by their content
+            pairs[t], tr = pair_rows(t, old[t], now, pairs)
+            taken = set(pairs[t].values())
 
             def show(r):
                 x = {"id": r["id"], "label": r.get(label) or "", "date": r.get("date") or r.get("start_date"),
@@ -2289,12 +2399,13 @@ def create_app(port):
                 return x
 
             changed = []
-            for i in sorted(same):
-                diff = [k for k in old[t][i] if k not in ignore and k in now[i] and old[t][i][k] != now[i][k]]
+            for i, j in sorted(pairs[t].items()):
+                diff = [k for k in tr[i] if k not in ignore and k in now[j] and tr[i][k] != now[j][k]]
                 if diff:
-                    changed.append({"before": show(old[t][i]), "after": show(now[i]), "fields": diff})
-            out[t] = {"deleted": [show(r) for i, r in old[t].items() if i not in same],
-                      "changed": changed, "added": [show(r) for i, r in now.items() if i not in same]}
+                    changed.append({"before": show(old[t][i]), "after": show(now[j]), "fields": diff})
+            out[t] = {"deleted": [show(r) for i, r in old[t].items() if i not in pairs[t]],
+                      "changed": changed, "added": [show(r) for j, r in now.items() if j not in taken],
+                      "same": len(pairs[t]) - len(changed)}
             for k in ("deleted", "added"):
                 out[t][k].sort(key=lambda x: str(x["date"] or ""))
         g.audit_skip = True  # a comparison changes nothing
@@ -2321,13 +2432,16 @@ def create_app(port):
         dbm.backup_now("pre-restore-tx", force=True)
         done, skipped = 0, 0
         optional = {"category_id": "categories", "recurring_id": "recurring", "holding_id": "holdings", "person_id": "people"}
+        pairs = {}  # the same pairing as the comparison: backup id → current id
         for t, (_, needed) in RESTORABLE.items():  # parents first: accounts and categories before what points to them
             cols = [r[1] for r in db.execute(f"PRAGMA table_info({t})")]
+            now = {r["id"]: dict(r) for r in db.execute(f"SELECT * FROM {t}")}
+            pairs[t], _ = pair_rows(t, old[t], now, pairs)
             for i in sorted(put.get(t, set()) | rev.get(t, set())):
-                row = old[t].get(i)
-                if not row:
+                if i not in old[t]:
                     continue
-                row = {k: v for k, v in row.items() if k in cols}
+                # references translated now, so that a parent put back just before (a new id) is found
+                row = {k: v for k, v in translate(old[t][i], pairs).items() if k in cols}
                 exists = lambda table, v: v is None or db.execute(f"SELECT 1 FROM {table} WHERE id = ?", (v,)).fetchone()  # noqa: E731
                 if not all(exists(tab, row.get(col)) for col, tab in needed.items()):
                     skipped += 1
@@ -2335,14 +2449,18 @@ def create_app(port):
                 for col, tab in optional.items():
                     if col in row and not exists(tab, row[col]):
                         row[col] = None
-                current = db.execute(f"SELECT 1 FROM {t} WHERE id = ?", (i,)).fetchone()
-                if i in rev.get(t, set()) and current:
-                    keep = {k: v for k, v in row.items() if k != "id"}
-                    db.execute(f"UPDATE {t} SET {', '.join(f'{k} = ?' for k in keep)} WHERE id = ?", (*keep.values(), i))
-                else:
-                    if current:
+                target = pairs[t].get(i)  # the current row that is this one (same id, or the same content)
+                if i in rev.get(t, set()) and target is not None:
+                    keep = {k: v for k, v in row.items() if k not in ("id", "created_at")}
+                    db.execute(f"UPDATE {t} SET {', '.join(f'{k} = ?' for k in keep)} WHERE id = ?", (*keep.values(), target))
+                elif target is None:  # deleted since the backup: put back
+                    if db.execute(f"SELECT 1 FROM {t} WHERE id = ?", (i,)).fetchone():
                         row.pop("id")  # the id was reused meanwhile: a new one
-                    db.execute(f"INSERT INTO {t} ({','.join(row)}) VALUES ({','.join('?' * len(row))})", tuple(row.values()))
+                    new_id = db.execute(f"INSERT INTO {t} ({','.join(row)}) VALUES ({','.join('?' * len(row))})",
+                                        tuple(row.values())).lastrowid
+                    pairs[t][i] = new_id
+                else:
+                    continue  # asked to put back a row that is still there: nothing to do
                 done += 1
         db.commit()
         note(i18n.tn("{n} row put back from a backup", "{n} rows put back from a backup", done) + f" · {b.get('backup')}")
@@ -2402,11 +2520,13 @@ def create_app(port):
         keys = ("date", "amount", "kind", "account_id", "to_account_id", "description")
         # the same id is the same transaction only if its type and accounts are the same: SQLite may give the id of a
         # deleted transaction to a new one, which is then "deleted + added", not "changed"
-        same = {i for i in old if i in now and same_row(old[i], now[i])}
+        # (2.6.2) and a transaction recorded again with another id is paired by its content, like in the full comparison
+        same, _ = pair_rows("transactions", old, now, {})
+        taken = set(same.values())
         deleted = [label(t) for i, t in sorted(old.items(), key=lambda x: x[1]["date"]) if i not in same]
-        changed = [{"before": label(old[i]), "after": label(now[i])} for i in sorted(same, key=lambda i: now[i]["date"])
-                   if any(old[i][k] != now[i][k] for k in keys)]
-        added = [label(t) for i, t in sorted(now.items(), key=lambda x: x[1]["date"]) if i not in same]
+        changed = [{"before": label(old[i]), "after": label(now[j])} for i, j in sorted(same.items(), key=lambda p: now[p[1]]["date"])
+                   if any(old[i][k] != now[j][k] for k in keys)]
+        added = [label(t) for j, t in sorted(now.items(), key=lambda x: x[1]["date"]) if j not in taken]
         bal_now = sum(effect(t) for t in now.values())
         bal_old = sum(effect(t) for t in old.values())
         summary = {"backup": name, "deleted": deleted, "changed": changed, "added": added,
@@ -2471,8 +2591,26 @@ def create_app(port):
                           "to_account_name": names.get(dst), "incoming": src not in mine, "estimated": bool(u.get("estimated"))})
         items.sort(key=lambda x: (x["date"], x["estimated"]))
         start = sum(a["balance"] for a in accs if a["id"] in cash)
+        floor = tools.setting(db, "cash_floor", p, None)
         return jsonify(today=today.isoformat(), end=end.isoformat(), months=months, start_liquidity=start, items=items,
-                       history_months=forecast.HISTORY_MONTHS, regular_min=forecast.REGULAR_MIN)
+                       history_months=forecast.HISTORY_MONTHS, regular_min=forecast.REGULAR_MIN,
+                       cash_floor=int(floor) if floor not in (None, "") else None)
+
+    @app.put("/api/calendar/floor")
+    def calendar_floor():
+        """The least cash the user wants to keep in the day-to-day accounts (2.7.0): the Calendar warns when the
+        projection goes below it. Empty = no threshold."""
+        db, p = get_db(), pf()
+        raw = body().get("amount")
+        v = None if raw in (None, "") else as_int(raw, "amount", minimum=0)
+        old = tools.setting(db, "cash_floor", p, "")
+        if str(old) == ("" if v is None else str(v)):
+            g.audit_skip = True  # nothing changed
+        note(f"{audit.eur(int(old)) if old not in (None, '') else '—'} → {audit.eur(v) if v is not None else '—'}")
+        g.audit_merge = ""
+        tools.set_setting(db, "cash_floor", p, "" if v is None else v)
+        db.commit()
+        return jsonify(ok=True, cash_floor=v)
 
     # -------------------------------------------------------- statistics
 
@@ -2605,6 +2743,7 @@ def create_app(port):
         by_month = sorted(months_idx.values(), key=lambda r: r["month"])
 
         return jsonify(
+            first=first,  # the space's first transaction: a comparison with a period before it would be misleading
             from_=d_from, to=d_to, months=months_between(start_d, end_d),
             income=tot["income"], expense=tot["expense"], count=tot["n"],
             by_category=by_cat, by_month=by_month, balance_series=series,
@@ -2936,7 +3075,7 @@ def create_app(port):
         n = max(1, tools.history_months(db, p) - 1) if raw == "all" else tools.months_arg(db, p, raw, 3, cap=120)
         d_from, d_to = tools.complete_months(n)
         rows = [dict(r) for r in db.execute(
-            f"""SELECT c.id, c.name, c.icon, c.color, c.budget,
+            f"""SELECT c.id, c.name, c.icon, c.color, c.budget, c.rollover,
                   COALESCE((SELECT SUM(t.amount) FROM transactions t WHERE t.category_id = c.id AND t.kind = 'expense'
                             AND NOT t.excluded AND substr(t.date, 1, 7) = ?), 0) AS spent,
                   COALESCE((SELECT SUM(t.amount) FROM transactions t WHERE t.category_id = c.id AND t.kind = 'expense'
@@ -2946,7 +3085,45 @@ def create_app(port):
             (month, d_from, d_to, n, p))]
         for r in rows:
             r["avg3"] = r["avg"]  # compatibility
+            r["carry"] = budget_carry(db, r, month)
+            r["available"] = r["budget"] + r["carry"] if r["budget"] else 0
         return jsonify(month=month, avg_from=d_from, avg_to=d_to, avg_months=n, avg_key=raw, categories=rows)
+
+    def budget_carry(db, cat, month):
+        """Budget carry-over (2.7.0): what was not spent in the months from the one it was turned on to the month before
+        `month`, with the current budget (an overspent month takes from it: the sum can be negative). 0 when off."""
+        start = cat.get("rollover") or ""
+        if not start or not cat["budget"] or start >= month:
+            return 0
+        spent = {r[0]: r[1] for r in db.execute(
+            """SELECT substr(date, 1, 7), SUM(amount) FROM transactions WHERE category_id = ? AND kind = 'expense'
+               AND NOT excluded AND date >= ? AND date < ? GROUP BY 1""", (cat["id"], f"{start}-01", f"{month}-01"))}
+        y, m = int(start[:4]), int(start[5:7])
+        carry, months = 0, 0
+        while f"{y}-{m:02d}" < month and months < 240:
+            carry += cat["budget"] - spent.get(f"{y}-{m:02d}", 0)
+            m, months = m % 12 + 1, months + 1
+            y += m == 1
+        return carry
+
+    @app.put("/api/categories/<int:cid>/rollover")
+    def category_rollover(cid):
+        """Turns the budget carry-over of a category on (from the current month) or off."""
+        db = get_db()
+        c = db.execute("SELECT name, rollover FROM categories WHERE id = ? AND portfolio_id = ? AND kind = 'expense'",
+                       (cid, pf())).fetchone()
+        if not c:
+            raise ApiError(i18n.t("Category not found"), 404)
+        on = body().get("on")
+        if not isinstance(on, bool):
+            raise ApiError(i18n.t("Invalid request"))
+        value = (c["rollover"] or dt.date.today().strftime("%Y-%m")) if on else ""
+        if value == (c["rollover"] or ""):
+            g.audit_skip = True  # nothing changed
+        note(f"{c['name']} · {i18n.t('on') if on else i18n.t('off')}")
+        db.execute("UPDATE categories SET rollover = ? WHERE id = ?", (value, cid))
+        db.commit()
+        return jsonify(ok=True, rollover=value)
 
     @app.put("/api/categories/<int:cid>/budget")
     def budget_put(cid):
@@ -3605,6 +3782,12 @@ def create_app(port):
     def portfolio_costs():
         personal_only()
         return jsonify(portfolio.costs(get_db(), pf(), pt_accounts()))
+
+    @app.get("/api/portfolio/income")
+    def portfolio_income():
+        """Income and gains of the investments (2.7.0): total gain and its parts, year by year, per security."""
+        personal_only()
+        return jsonify(portfolio.income_and_gains(get_db(), pf(), account_ids=pt_accounts()))
 
     @app.get("/api/portfolio/correlation")
     def portfolio_correlation():

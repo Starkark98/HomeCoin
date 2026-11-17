@@ -25,7 +25,7 @@ def default_data_dir():
 DATA_DIR = default_data_dir()
 BACKUP_DIR = DATA_DIR / "backups"
 DB_PATH = DATA_DIR / "homecoin.db"
-SCHEMA_VERSION = 18
+SCHEMA_VERSION = 19
 KEEP_BACKUPS = 15
 
 SCHEMA = """
@@ -709,6 +709,9 @@ def migrate(conn):
         conn.execute("ALTER TABLE holdings ADD COLUMN ter REAL")
     if "instrument" not in h_cols:
         conn.execute("ALTER TABLE holdings ADD COLUMN instrument TEXT")
+    # v19 (2.7.0): budget carry-over — the month from which what is not spent passes to the next month ('' = off)
+    if "rollover" not in {r[1] for r in conn.execute("PRAGMA table_info(categories)")}:
+        conn.execute("ALTER TABLE categories ADD COLUMN rollover TEXT NOT NULL DEFAULT ''")
 
 
 def init_db():

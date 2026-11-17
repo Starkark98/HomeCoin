@@ -434,12 +434,56 @@ def emergency(db, pid):
         notes.append({"level": "info", "text": i18n.tn("No expenses in the last {n} complete month: the months covered cannot be calculated.", "No expenses in the last {n} complete months: the months covered cannot be calculated.", months)})
     if liquidity < 0:
         notes.append({"level": "warn", "text": i18n.t("The available reserve is negative: some accounts (e.g. a credit card) are below zero.")})
+    history = reserve_history(db, pid, months)
+    # today: exactly the figure shown above it (same accounts, same rules)
+    history[-1].update(reserve=liquidity, months=liquidity / history[-1]["avg_expenses"] if history[-1]["avg_expenses"] else None)
+    # pace: how much the reserve grew per month over the last 6 months (it can be negative)
+    pace = (history[-1]["reserve"] - history[-7]["reserve"]) / 6 if len(history) >= 7 else None
     return {"notes": notes, "liquidity": liquidity, "operational": operational, "broker_cash": liquidity - operational,
+            "history": history, "pace": round(pace) if pace is not None else None,
             "accounts": [{"id": a["id"], "name": a["name"], "balance": a["balance"], "color": a["color"], "group": a["group"]}
                          for a in accs],
             "avg_expenses": round(exp), "fixed_monthly": round(fixed), "months_basis": months,
             "months_total": liquidity / exp if exp else None, "months_fixed": liquidity / fixed if fixed else None,
             "target_months": target, "target_amount": round(target * exp), "from": d_from, "to": d_to}
+
+
+def reserve_at(db, pid, when):
+    """Available reserve at the end of a day (as in the emergency fund): day-to-day accounts plus, on investment
+    accounts with trades, the uninvested cash and the money market securities. Accounts opened later do not count."""
+    when_s = when.isoformat()
+    total = 0
+    for a in pf_accounts(db, pid, active_only=False):
+        if opening_date(db, a) > when_s:
+            continue
+        if a["type"] != INVEST:
+            total += book_balance(db, a, when_s)
+        elif has_trades(db, a["id"]):
+            pos, _ = positions(db, a["id"], when_s)
+            mon = sum(round(p["quantity"] * (price_at(db, hid, when_s, p) or 0) * 100) for hid, p in pos.items()
+                      if p["quantity"] > 1e-9 and (db.execute("SELECT asset_class FROM holdings WHERE id = ?", (hid,))
+                                                    .fetchone() or [""])[0] == "monetario")
+            total += max(0, book_balance(db, a, when_s) + mon)
+    return total
+
+
+def reserve_history(db, pid, basis=6, count=13):
+    """The emergency fund month by month (2.7.0): reserve at each month end of the last `count` months (the current
+    month: today) and the months of expenses it covered, each against the average spending of the `basis` complete
+    months before it."""
+    today = dt.date.today()
+    out = []
+    for ym in months_back(count):
+        end = min(month_end(ym), today)
+        first = dt.date(int(ym[:4]), int(ym[5:7]), 1)
+        start = add_months(first, -basis)
+        exp = db.execute(
+            """SELECT COALESCE(SUM(t.amount), 0) FROM transactions t JOIN accounts a ON a.id = t.account_id
+               WHERE a.portfolio_id = ? AND t.kind = 'expense' AND NOT t.excluded AND t.date >= ? AND t.date < ?""",
+            (pid, start.isoformat(), first.isoformat())).fetchone()[0] / basis
+        reserve = reserve_at(db, pid, end)
+        out.append({"month": ym, "reserve": reserve, "avg_expenses": round(exp), "months": reserve / exp if exp else None})
+    return out
 
 
 # --------------------------------------------------------------------- goals
@@ -465,6 +509,23 @@ def goals(db, pid, today=None):
         g["missing"] = max(0, g["target"] - g["current"])
         if g["account_id"] and cur < 0:
             g["notes"].append({"level": "warn", "text": i18n.t("{account_name} is below zero: the goal counts as not started.", account_name=g['account_name'])})
+        # 2.7.0: the pace of the last 6 months (goals tied to an account: its balance or market value then and now) and
+        # when the goal is reached at that pace; goals with an amount typed by hand have no history
+        g["pace"] = g["eta"] = None
+        if g["account_id"]:
+            then = add_months(today, -6)
+            mv_then = market_values(db, pid, then)
+            if g["account_id"] in mv_then:
+                before = mv_then[g["account_id"]]["value"]
+            else:
+                acc = db.execute("SELECT * FROM accounts WHERE id = ?", (g["account_id"],)).fetchone()
+                before = book_balance(db, acc, then.isoformat()) if acc and opening_date(db, acc) <= then.isoformat() else 0
+            g["pace"] = round((cur - before) / 6)
+            if g["missing"] and g["pace"] > 0:
+                n = -(-g["missing"] // g["pace"])  # months, rounded up
+                g["eta"] = add_months(today.replace(day=1), n).strftime("%Y-%m") if n <= 600 else None
+                if g["eta"] and g["target_date"]:
+                    g["late"] = g["eta"] > g["target_date"][:7]
         if g["target_date"]:
             td = parse_date(g["target_date"])
             if td < today and g["missing"]:

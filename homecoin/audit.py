@@ -85,6 +85,9 @@ EVENTS = {
     "portfolio_online": ("security", "Download of fund compositions changed"),
     "portfolio_refresh": ("data", "Fund compositions downloaded"),
     "holding_details": ("change", "Security edited"),
+    # 2.7.0
+    "calendar_floor": ("change", "Minimum cash of the Calendar changed"),
+    "category_rollover": ("change", "Budget carry-over changed"),
 }
 # actions written directly (not through EVENTS): listed so that they are translated like the others
 OTHER_ACTIONS = ("HomeCoin closed", "HomeCoin updated")

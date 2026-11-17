@@ -17,6 +17,8 @@ from .util import parse_date
 
 STALE_DAYS = 120  # a composition older than this is flagged: funds change their holdings over time
 TOP_HOLDINGS = 20  # largest underlying securities listed in Composition
+MIN_SHARE = 0.00005  # below this a weight is written 0.00%: not listed, not on the map
+CASH = "cash"  # key of the broker's uninvested cash in the countries, areas and markets: known, it is simply cash
 # countries with a flag in static/vendor/flags (flag-icons, MIT): the page shows a flag only for these
 _FLAG_DIR = __import__("pathlib").Path(__file__).resolve().parent.parent / "static" / "vendor" / "flags"
 FLAGS = sorted(p.stem.upper() for p in _FLAG_DIR.glob("*.svg")) if _FLAG_DIR.is_dir() else []
@@ -164,9 +166,11 @@ def composition(db, pid, account_ids=None, today=None):
         if pos["cash"] and pos["cash"] > 0:
             total += pos["cash"]
             classes["liquidità"] = classes.get("liquidità", 0) + pos["cash"]
+            # broker cash is known: it is cash in the reference currency. In countries, areas and markets it is its own
+            # line ("Cash"), not a gap (2.6.2: before, it was listed under "What is not known")
             add("currency", base, pos["cash"])
-            missing.append({"name": i18n.t("{name} (cash)", name=acc["name"]), "value": pos["cash"], "reason": "cash",
-                            "dims": ["country", "region"]})
+            for dim in ("country", "region", "market"):
+                add(dim, CASH, pos["cash"])
         for h in pos.get("unpriced", []):
             missing.append({"name": h["name"] or h["ticker"], "value": None, "reason": "no_price", "holding_id": h["id"]})
         for h in pos["holdings"]:
@@ -233,8 +237,11 @@ def composition(db, pid, account_ids=None, today=None):
         """Shares of the part whose information is known (as the platforms show them); how much of the total value
         that part is comes in "coverage"."""
         base_ = covered[dim]
+        # a country (or sector, currency…) whose weight shows as 0.00% is not something you hold: lines with a zero or
+        # negative weight in a fund's file (derivatives, short positions, rounding) are left out of the lists and the map
         return [{"key": k, "value": round(v), "share": v / base_ if base_ else 0}
-                for k, v in sorted(agg[dim].items(), key=lambda x: -x[1])]
+                for k, v in sorted(agg[dim].items(), key=lambda x: -x[1])
+                if base_ and v > 0 and v / base_ >= MIN_SHARE]
 
     names = {i["id"]: i["name"] for i in instruments}
     top = sorted(under.values(), key=lambda x: -x["value"])[:TOP_HOLDINGS]
@@ -257,7 +264,7 @@ def composition(db, pid, account_ids=None, today=None):
         "asset_classes": [{"key": k, "value": v, "share": v / total if total else 0}
                           for k, v in sorted(classes.items(), key=lambda x: -x[1])],
         "instruments": sorted([{**x, "share": x["value"] / total if total else 0} for x in instruments], key=lambda x: -x["value"]),
-        "countries": [{**r, "region": funds.region_of(r["key"])} for r in table("country")], "regions": table("region"), "markets": table("market"), "sectors": table("sector"),
+        "countries": [{**r, "region": CASH if r["key"] == CASH else funds.region_of(r["key"])} for r in table("country")], "regions": table("region"), "markets": table("market"), "sectors": table("sector"),
         "currencies": table("currency"), "diversification": diversification,
         "top_holdings": [{"name": u["name"], "isin": u["isin"], "country": u["country"], "value": round(u["value"]),
                           "share": u["value"] / total if total else 0, "funds": [names.get(f, "") for f in u["funds"]]}
@@ -388,7 +395,34 @@ def costs(db, pid, account_ids=None):
     out.sort(key=lambda x: -(x["yearly"] if x["yearly"] is not None else -1))
     return {"items": out, "total": total, "covered": with_ter / total if total else 0,
             "weighted_ter": cost * 100 / with_ter if with_ter else None, "yearly": round(cost),
-            "missing": [x["name"] for x in out if x["ter"] is None]}
+            "missing": [x["name"] for x in out if x["ter"] is None],
+            "commissions": commissions(db, pid, account_ids)}
+
+
+def commissions(db, pid, account_ids=None, today=None):
+    """What the broker took (2.7.0): the commissions of buys and sales (the fees of each trade) and the fees recorded as
+    trades of their own, in total, in the last 12 months, year by year and per account. Positive amounts, in cents."""
+    today = today or dt.date.today()
+    year_ago = (today - dt.timedelta(days=365)).isoformat()
+    accs = [a for a in tools.pf_accounts(db, pid) if a["type"] == tools.INVEST and (account_ids is None or a["id"] in account_ids)]
+    years, per_acc, total, last, count = {}, [], 0, 0, 0
+    for a in accs:
+        acc_total = 0
+        for t in db.execute("SELECT date, kind, fees, amount FROM trades WHERE account_id = ?", (a["id"],)):
+            fee = (t["fees"] or 0) if t["kind"] in ("buy", "sell") else (-t["amount"] if t["kind"] == "fee" else 0)
+            if fee <= 0:
+                continue
+            count += 1
+            acc_total += fee
+            years[t["date"][:4]] = years.get(t["date"][:4], 0) + fee
+            if t["date"] > year_ago:
+                last += fee
+        if acc_total:
+            per_acc.append({"id": a["id"], "name": a["name"], "icon": a["icon"], "total": acc_total})
+        total += acc_total
+    return {"total": total, "last_year": last, "count": count,
+            "years": [{"year": y, "total": v} for y, v in sorted(years.items(), reverse=True)],
+            "accounts": sorted(per_acc, key=lambda x: -x["total"])}
 
 
 def _next_month(ym):
@@ -431,6 +465,102 @@ def correlation(db, pid, months=36, limit=12, account_ids=None):
                            for s in secs],
             "matrix": matrix, "average": sum(vals) / len(vals) if vals else None,
             "months": max((len(s["returns"]) for s in secs), default=0), "without_history": without}
+
+
+# ------------------------------------------------------------------ income and gains (2.7.0)
+
+def income_and_gains(db, pid, account_ids=None, today=None):
+    """What the investments have earned, and how: the total gain (value − money put in) split into gains not yet
+    realized (securities still held, against their average cost), gains realized with the sales, income (dividends,
+    interest) and costs (fees); year by year; per security with its dividend yield. Only the figures: no taxes."""
+    today = today or dt.date.today()
+    inv = tools.investments(db, pid, months=1, account_ids=account_ids)
+    years, per_sec = {}, {}
+    unrealized = realized = dividends = interest = fees = last_year = 0
+    year_ago = (today - dt.timedelta(days=365)).isoformat()
+
+    def yr(y):
+        return years.setdefault(y, {"year": y, "realized": 0, "dividends": 0, "interest": 0, "fees": 0})
+    for a in inv["accounts"]:
+        if not a["has_trades"]:
+            continue
+        hold = {h["id"]: h for h in a["holdings"]}
+        # the sales one by one, at the average cost of the units held at that moment (as in tools.positions). The
+        # commissions of buys and sales are kept out of that cost here and shown as costs (2.7.0): they are what the
+        # broker took, and the parts still add up to the total gain (gains are higher by exactly what fees take)
+        qty, cost = {}, {}
+        for t in db.execute("SELECT * FROM trades WHERE account_id = ? ORDER BY date, id", (a["id"],)):
+            y, hid, k = int(t["date"][:4]), t["holding_id"], t["kind"]
+            s = per_sec.setdefault(hid, {"id": hid, "name": (hold.get(hid) or {}).get("name") or (hold.get(hid) or {}).get("ticker")
+                                        or "", "ticker": (hold.get(hid) or {}).get("ticker") or "", "account": a["name"],
+                                        "realized": 0, "dividends": 0, "interest": 0, "fees": 0, "last_year": 0,
+                                        "value": (hold.get(hid) or {}).get("value") or 0}) if hid else None
+            commission = (t["fees"] or 0) if k in ("buy", "sell") else 0
+            if commission:
+                fees -= commission
+                yr(y)["fees"] -= commission
+                s["fees"] -= commission
+            if k == "buy":
+                qty[hid] = qty.get(hid, 0) + t["quantity"]
+                cost[hid] = cost.get(hid, 0) - t["amount"] - commission
+            elif k == "sell":
+                sold, q = abs(t["quantity"]), qty.get(hid, 0)
+                out = cost.get(hid, 0) * sold / q if q > 1e-9 else 0
+                qty[hid], cost[hid] = q - sold, cost.get(hid, 0) - out
+                gain = t["amount"] + commission - out
+                realized += gain
+                yr(y)["realized"] += gain
+                s["realized"] += gain
+            elif k == "split":
+                qty[hid] = qty.get(hid, 0) + t["quantity"]
+            elif k == "capital":
+                cost[hid] = cost.get(hid, 0) - t["amount"]
+            elif k in ("dividend", "interest"):
+                key = "dividends" if k == "dividend" else "interest"
+                yr(y)[key] += t["amount"]
+                if k == "dividend":
+                    dividends += t["amount"]
+                else:
+                    interest += t["amount"]
+                if t["date"] > year_ago:
+                    last_year += t["amount"]  # also interest on the broker cash, which has no security
+                if s:
+                    s[key] += t["amount"]
+                    if t["date"] > year_ago:
+                        s["last_year"] += t["amount"]
+            elif k == "fee":
+                fees += t["amount"]  # negative
+                yr(y)["fees"] += t["amount"]
+                if s:
+                    s["fees"] += t["amount"]
+            if hid and qty.get(hid, 0) <= 1e-9:
+                qty[hid], cost[hid] = 0, 0
+        # not yet realized: today's value of what is still held against its cost (commissions left out, as above)
+        for hid, h in hold.items():
+            if h.get("value") is not None and (h.get("quantity") or 0) > 1e-9 and qty.get(hid, 0) > 1e-9:
+                unrealized += h["value"] - cost.get(hid, 0)
+    total = inv["total_gain"]
+    out_years = []
+    for y in sorted(years):
+        r = years[y]
+        r = {k: (round(v) if isinstance(v, float) else v) for k, v in r.items()}
+        r["total"] = r["realized"] + r["dividends"] + r["interest"] + r["fees"]
+        out_years.append(r)
+    secs = []
+    for s in per_sec.values():
+        s = {k: (round(v) if isinstance(v, float) else v) for k, v in s.items()}
+        s["yield"] = s["last_year"] / s["value"] if s["value"] > 0 and s["last_year"] else None
+        if s["realized"] or s["dividends"] or s["interest"] or s["fees"]:
+            secs.append(s)
+    secs.sort(key=lambda s: -(s["realized"] + s["dividends"] + s["interest"]))
+    parts = {"unrealized": round(unrealized), "realized": round(realized), "dividends": round(dividends),
+             "interest": round(interest), "fees": round(fees)}
+    # what the parts above do not explain: accounts valued only as a whole, interest or fees recorded as transactions
+    # on the account, rounding. Shown as its own line, never hidden
+    parts["other"] = total - sum(parts.values())
+    return {"value": inv["total_value"], "invested": inv["total_invested"], "total_gain": total,
+            "total_return": inv["total_return"], "xirr": inv["total_xirr"], "parts": parts, "years": out_years,
+            "securities": secs, "income_last_year": round(last_year)}
 
 
 # ------------------------------------------------------------------ comparison with an index
@@ -476,7 +606,26 @@ def benchmark(db, pid, ticker, months=36, account_ids=None):
     n = len(mine)
     yearly = lambda x: (1 + x) ** (12 / n) - 1 if n >= 12 and x > -1 else None  # noqa: E731
     br = [x for x in bench if x is not None]
+    mr = [m["r"] for m in mine]
+    p_year, b_year = yearly(a - 1), yearly(b - 1)
     return {"ticker": ticker.upper(), "currency": cur, "points": points, "months": n,
-            "portfolio": {"total": a - 1, "yearly": yearly(a - 1), "drawdown": max_drawdown([m["r"] for m in mine])},
-            "benchmark": {"total": b - 1, "yearly": yearly(b - 1), "drawdown": max_drawdown(br)},
+            "portfolio": {"total": a - 1, "yearly": p_year, "drawdown": max_drawdown(mr),
+                          **risk(mr, keys, p_year)},
+            "benchmark": {"total": b - 1, "yearly": b_year, "drawdown": max_drawdown(br),
+                          **risk(bench, keys, b_year)},
             "missing_months": sum(1 for x in bench if x is None)}
+
+
+def risk(returns, months, yearly_return):
+    """How bumpy the ride was (2.7.0), from the monthly returns: volatility (standard deviation of the monthly
+    returns × √12, the usual yearly measure), best and worst month, and the return earned per unit of risk (yearly
+    return ÷ volatility: a Sharpe ratio with no risk-free rate subtracted). None where there are too few months."""
+    pairs = [(m, r) for m, r in zip(months, returns) if r is not None]
+    if len(pairs) < 6:
+        return {"volatility": None, "best": None, "worst": None, "ratio": None}
+    vals = [r for _, r in pairs]
+    mean = sum(vals) / len(vals)
+    vol = (sum((r - mean) ** 2 for r in vals) / (len(vals) - 1)) ** 0.5 * 12 ** 0.5
+    best, worst = max(pairs, key=lambda x: x[1]), min(pairs, key=lambda x: x[1])
+    return {"volatility": vol, "best": {"month": best[0], "r": best[1]}, "worst": {"month": worst[0], "r": worst[1]},
+            "ratio": yearly_return / vol if vol and yearly_return is not None else None}

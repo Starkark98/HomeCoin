@@ -2,7 +2,7 @@
 
 # HomeCoin *by Starkark98*
 
-![Version](https://img.shields.io/badge/version-2.6.1-8b5cf6)
+![Version](https://img.shields.io/badge/version-2.7.0-8b5cf6)
 ![Python](https://img.shields.io/badge/Python-3.12%20%7C%203.13%20%7C%203.14-3776AB?logo=python&logoColor=white)
 ![Platform](https://img.shields.io/badge/platform-Windows-0078D6)
 ![Data](https://img.shields.io/badge/data-encrypted%2C%20on%20your%20PC-16a34a)
@@ -61,9 +61,9 @@ Starkark98
 |---|---|
 | 📊 **See where your money goes** | every expense and income in a category, charts by month and by category, a [year in brief](#reports), and a heads-up when a month's [spending is unusual](#dashboard) |
 | ⚙️ **Let it do the boring work** | it [imports bank statements](#importing-bank-statements), records [recurring payments](#recurring-payments) on their due dates, suggests categories from what you did before and tells you when a bill [costs more than before](#recurring-payments) |
-| 🔮 **Look ahead** | a [calendar](#calendar) of the coming payments with the cash left after each one, [budgets](#budgets) that warn you before you overspend |
-| 🎯 **Plan** | [savings goals](#goals) with the amount to put aside each month, an [emergency fund](#emergency-fund) check, [mortgage and loans](#mortgage-and-loans) with early-repayment simulation, a [fair split](#fair-split) of household costs |
-| 📈 **Follow your investments** | value, gains, return and allocation; [what your funds are really made of](#portfolio-analysis) (areas, countries on a world map, sectors, currencies, the companies inside), a diversification score, correlation, costs, rebalancing, a projection and a comparison with an index |
+| 🔮 **Look ahead** | a [calendar](#calendar) of the coming payments with the cash left after each one and its lowest point, [budgets](#budgets) that warn you before you overspend (and can carry over what you did not spend) |
+| 🎯 **Plan** | [savings goals](#goals) with the amount to put aside each month and when you get there at your pace, an [emergency fund](#emergency-fund) check with its trend and a plan, [mortgage and loans](#mortgage-and-loans) with early-repayment simulation, a [fair split](#fair-split) of household costs |
+| 📈 **Follow your investments** | value, gains, return and allocation; [what your funds are really made of](#portfolio-analysis) (areas, countries on a world map, sectors, currencies, the companies inside), a diversification score, correlation, **income and gains** year by year, costs, rebalancing, a projection (also the other way round) and a comparison with an index, risk included |
 | 🔒 **Keep your data yours** | it runs on your PC only, the data is encrypted, and nobody (not even the author) can open it without your password |
 | 🌍 **Speak your language** | Deutsch, English, Español, Français, Italiano, Nederlands, Polski, Português (Brasil), 日本語 (Japanese), 繁體中文 (Traditional Chinese) or 한국어 (Korean), with the number format of your currency |
 
@@ -78,10 +78,12 @@ Every page is shown with a screenshot in the guide below. All screenshots come f
 | set up salary, rent, mortgage, bills | [Recurring](#recurring-payments) |
 | know if there is enough money for the next payments | [Calendar](#calendar) |
 | see a whole year at a glance, or print it | [Reports](#reports) → **📅 Year in brief** |
+| check that an account matches my bank statement | [Accounts](#accounts) → **⋯ → Check against the bank statement** |
 | keep a category under control | [Budgets](#budgets) |
 | save for something | [Goals](#goals) |
 | record a purchase or a **sale** of a security | [Investments](#investments) → **＋ Trade** |
 | know what my funds contain and how diversified I am | [Portfolio analysis](#portfolio-analysis) |
+| see what my investments have earned, year by year | [Portfolio analysis](#portfolio-analysis) → **💰 Income and gains** |
 | split household costs fairly | [Fair split](#fair-split) |
 | keep a copy of everything, or move to a new PC | [Backups](#backups) · [Moving to a new PC](#moving-to-a-new-pc) |
 
@@ -163,13 +165,15 @@ The guide follows the menu of the app: first the basics, then the pages of each 
 | **Left menu** | the pages, grouped by what you do: **Everyday** (Transactions, Accounts, Recurring, Calendar, Reports), **Planning** (Budgets, Goals, Emergency fund, Mortgage, Fair split), **Wealth** (Investments, Portfolio analysis, Savings), **Tools** (Import, Categories, Activity log, Settings) |
 | **Top left** | the space you are in, and the switch to the others |
 | **Bottom left** | the version of HomeCoin you are using |
-| **Top right** | 👁 hides all amounts (when someone is looking at your screen) · 🔒 locks HomeCoin · **⋯** light/dark theme, Settings, *Help* (this guide), *Support HomeCoin* (Ko-fi), *Close HomeCoin* · **＋ New transaction**, always there |
+| **Top right** | 👁 hides all amounts behind a soft veil (when someone is looking at your screen): every figure in any currency, the amount fields while you are not typing in them, chart labels and tooltips; colors stay, so you still see what is income and what is expense · 🔒 locks HomeCoin · **⋯** light/dark theme, Settings, *Help* (this guide), *Support HomeCoin* (Ko-fi), *Close HomeCoin* · **＋ New transaction**, always there |
 | **Keyboard** | <kbd>N</kbd> adds a transaction, <kbd>Esc</kbd> closes windows and menus |
 
 - **Summary boxes.** At the top of most pages, up to four boxes with the key figures, in the color of what they show (see below). Under each figure, short rows with its detail (for example *Income* and *From other spaces*); point at a box to see how it is calculated, and click a row with a link to see the transactions behind it.
 - **Click to dig in** (drill-down). Click a category, a bar of a chart or a cell of a report and you get the list of the transactions behind it.
 - **Warnings.** When something does not add up (a missing price, a date already passed, too little history for an average), HomeCoin tells you with a yellow ⚠️ or a grey ℹ️ note right where it matters.
-- **ℹ️ How it works.** Many pages have this line: click it for the explanation of how the page calculates its figures.
+- **Messages after an action** (bottom right) have the colors of the palette and an icon: green ✓ done, yellow ! done but something to check, red ✕ error, violet i information. Errors and warnings stay on screen a little longer.
+- **The analysis period is one for all.** The period you choose on the Dashboard or in Reports (*Last 12 months*, *This year*…) and the months you choose in Investments, Savings and the index comparison are remembered after you close HomeCoin, and they follow each other where they mean the same thing (last 6 or 12 months, all). A page that does not offer your choice uses the closest one it has. The filters of Transactions and the average of Budgets stay separate.
+- **ℹ️ How it works.** Next to the title of every page, the same small button opens a panel on the right: what the page is for, how its main figures are calculated (in two or three short lines) and a link to its section of this guide. ✕ or <kbd>Esc</kbd> closes it; on a wide screen the page makes room for it instead of being covered, and it follows you when you move to another page.
 - **Optional pages.** Not every space needs every page: in Settings → Spaces you choose which optional pages each space shows (Budgets, Goals, Emergency fund, Calendar, Mortgage, Fair split, Investments, Savings). Hiding a page never deletes its data.
 
 ### Colors that mean something
@@ -264,7 +268,8 @@ You can change the pages of a space at any time in Settings → Spaces.
 *The Dashboard in the dark theme (it follows Windows, or choose it in Settings).*
 
 **What you see**
-- **Total net worth**, **Income** (with what came from other spaces, or the monthly average), **Money out** (spending plus money given to other spaces) and **Savings** with the savings rate;
+- **Total net worth**, **Income** (with what came from other spaces, or the monthly average), **Money out** (spending plus money given to other spaces) and **Savings** with the savings rate. Under income, money out and savings, **Previous period** compares them with the period just before, of the same length and up to the same day (*This month* until the 17th against last month until the 17th): ▲▼ in green when it is good news, red when it is not. Point at it for the dates and the amount;
+- **⏳ Budgets nearly used up**, when there are any: the categories that have used 90% or more of this month's [budget](#budgets) (carry-over included), with a click to their transactions;
 - **Expenses by category** (a doughnut chart) and **Income, money out and savings by month**;
 - **🔎 Unusual spending** of this month, when there is any: categories well above their average of the previous months (×1.5 and at least 50 more) and single expenses well above the usual ones of their category (×3 and at least 100). Click a row to see the transactions. Nothing is shown in a normal month.
 - **Balance over time**, your **budgets** (green within the limit, yellow from 90%, red over it), the **upcoming payments** of the recurring items and the **largest expenses** of the period.
@@ -290,6 +295,7 @@ You can change the pages of a space at any time in Settings → Spaces.
   ![New transaction](docs/images/04-new-transaction.png)
   *A new transaction: account, amount and category filled in from history and rules.*
 
+- **Trades of an investment account:** buys, sales, dividends, interest and fees are not transactions, they are recorded on the investment account. When you filter the list on an investment account (or click its card in Accounts), its **📈 Trades** appear above the list, with ✏️ to correct one and ✕ to delete it.
 - **Find one:** filter by period (preset or your own dates), account, type, category and *included / excluded*, or search the text of description and notes. Account, type and category take several values at once (tick them in the list). **↺ Reset** clears all filters.
 - **Edit several at once** (bulk edit): tick them to assign a category, exclude or include them, or delete them in one go.
 - **⧉ Duplicate** copies a transaction, handy for one that repeats now and then.
@@ -314,7 +320,8 @@ You can change the pages of a space at any time in Settings → Spaces.
 **What you can do**
 - **＋ New account:** name, type, **opening balance** (what it holds on the day you start using HomeCoin), color and icon. HomeCoin suggests the type from the name (for example *Credit card* or *Broker*), and explains below the box how that type counts.
 - **🔄 Transfer** moves money between two accounts.
-- Click a card to see its transactions. Its **⋯** menu has *Check for money recorded twice* (an income and a transfer for the same money, the same import done twice: the most coherent record is kept) and *Compare with an automatic backup*.
+- Click a card to see its transactions. Its **⋯** menu has *Check against the bank statement* (below), *Check for money recorded twice* (an income and a transfer for the same money, the same import done twice: the most coherent record is kept) and *Compare with an automatic backup*.
+- **🧾 Check against the bank statement** (reconciliation): type the balance written on your statement or in your banking app, and its date. HomeCoin compares it with its own balance on that day. When they match, the card shows **Checked with the bank up to** that date. When they don't, it shows the difference and the most likely causes: records dated after that day that the bank may have booked earlier, a record equal to the difference (in HomeCoin but not at the bank, or entered twice), one equal to twice the difference (entered in the wrong direction), two identical records a few days apart. It changes nothing: **✏️ Record the difference** opens a normal new transaction already filled in, if that is what you want.
 - **Archive** an account you closed (✏️ Edit → *Archived account*): it disappears from the lists, but its history stays in the totals of the past.
 
 #### Account types
@@ -341,6 +348,7 @@ The type decides how an account counts. Choose it carefully: changing it later b
 **What you see**
 - At the top, everything as a monthly amount (a yearly bill counts 1/12): **fixed expenses**, **fixed income** (with what comes in from other spaces), **transfers to other spaces** and the **monthly margin**: what is left each month after every fixed item, with its share of income and how much already goes into investment plans. Transfers between accounts of the same space (card top-ups, investment plans) do not lower the margin: the money stays yours.
 - One card per item, grouped (investment plans, loans, expenses, income, transfers): amount, next date, monthly equivalent, start and end, how many payments are **recorded**. Loans show the installment number and the remaining debt. Buttons: 📄 its transactions, 📎 link payments already recorded, ⏸ pause, **✏️ Edit**.
+- **🧾 Subscriptions and services**: every active recurring expense that is not a loan, counted over a year: the total per year and per month, its share of your fixed income, by category, and the largest items (▲ marks those that cost more than before). A good place to look for something to cancel or renegotiate.
 - **📈 Costs more than before**, when a bill or subscription went up: its last payment against the usual one (the median of the previous ones), the increase in % and how much more it costs per year. It is only a signal: HomeCoin **never changes a recurring item by itself**; click ✏️ and update the amount if the new price stays. Variable items and loans are not checked, since their amount changes by nature.
 - On the right, **Next 60 days**: every due date coming up, including the recurring transfers another space sends to this one.
 
@@ -389,9 +397,10 @@ An income with no matching transfer stays as it is. Tick it only if that money r
 
 **What you see**
 - **Cash in accounts today**, what is **coming in** and **going out**, and the **projected cash** at the end of the period, each split into *confirmed* (recurring items) and *estimated* (≈: variable items, and regular income or expenses guessed from your history).
+- **📉 Lowest point**: the least cash the projection reaches in the period, the day it happens and how far it stays above the **minimum to keep**. If it goes below it, HomeCoin tells you the first day it does, so there is time to move money or postpone an expense.
 - A monthly grid with the due dates, and next to it the list of payments with the **balance after each one**.
 
-**What you can do.** Choose the period: this month, the next 3, 6 or 12 months. Point at a day to see its payments; each day shows the net amount, and ≈ marks the estimated ones.
+**What you can do.** Choose the period: this month, the next 3, 6 or 12 months. Point at a day to see its payments; each day shows the net amount, and ≈ marks the estimated ones. Type the **Minimum to keep** in the *Lowest point* box (empty = zero): it is saved for the space.
 
 **Tip.** *Cash* here means your day-to-day accounts (current and savings accounts, cards, cash), where payments actually go through; money on a broker is not counted. The [Emergency fund](#emergency-fund) counts more (see there). Estimates appear only for significant amounts that repeat in your history.
 
@@ -423,6 +432,7 @@ An income with no matching transfer stays as it is. Tick it only if that money r
 
 **What you can do**
 - Type the limit next to a category: it saves by itself. **Use the average** fills it in from the past months.
+- **↪ Carry over** (under the limit): what you don't spend in a month is added to the next one, and what you overspend is taken from it, starting from the month you turn it on. The category then shows how much comes *from the months before*, and its limit for the month is the budget plus that amount. Handy for spending that comes in lumps (clothes, gifts, car maintenance).
 - Choose the month and how the average is calculated (last 3, 6 or 12 months, or all).
 
 **Tip.** Budget only the few categories you can really control (eating out, shopping): fixed costs do not need one.
@@ -434,7 +444,7 @@ An income with no matching transfer stays as it is. Tick it only if that money r
 ![Goals](docs/images/10-goals.png)
 *Goals: progress, amount still to go and how much to put aside each month.*
 
-**What you see.** At the top, the total of all goals, what is already set aside, what to set aside each month for the goals with a date, and how many are reached. Each goal shows its progress, the amount still to go and **how much to put aside each month** to get there on time.
+**What you see.** At the top, the total of all goals, what is already set aside, what to set aside each month for the goals with a date, and how many are reached. Each goal shows its progress, the amount still to go and **how much to put aside each month** to get there on time. A goal tied to an account also shows **when you get there at the pace of the last 6 months** (how much its balance grew per month), and whether that is in time for the date you set.
 
 **What you can do.** **＋ New goal** with an amount and, if you want, a date. Its progress comes either from **the balance of an account** (for example a savings account dedicated to it) or from **an amount you update by hand**.
 
@@ -453,8 +463,13 @@ An income with no matching transfer stays as it is. Tick it only if that money r
 - The **months covered** by your **available reserve** (your liquid assets): your accounts plus uninvested cash and money market funds on your broker (money you can get within days). Stocks, bonds and other funds are not counted.
 - The target, the amount missing, the average monthly spending and, for comparison, the months covered by fixed expenses only.
 - Where the reserve comes from: each account and each broker.
+- **📈 Months covered, month by month**: the last 13 months, each against the average spending of the months before it, with your target as a dashed line (green bars reach it).
+- **🧭 Your plan**: how much the reserve grew (or went down) per month in the last 6 months, and at that pace when you reach the target; once it is reached, how much is **above** it, money that could go to a goal or be invested.
 
-**What you can do.** Set your target in months (often 3 to 6).
+**What you can do**
+- Set your target in months (often 3 to 6).
+- **Reach the target in** a number of months: how much to set aside each month.
+- **An unexpected expense of** an amount (a repair, a medical bill): how many months the reserve would still cover after it. Only a calculation: nothing is recorded.
 
 **Tip.** The average spending uses your last 6 complete months; HomeCoin tells you if you have less history than that.
 
@@ -567,6 +582,8 @@ An income with no matching transfer stays as it is. Tick it only if that money r
 | **Capital return** | the amount | lowers the cost of the security, cash goes up |
 | **Split / reverse split** | the change in units (+/−) | only the quantity changes |
 
+The **total amount** is optional: leave it empty and HomeCoin uses quantity × price ± fees; the empty box shows that figure. Type it only when your statement says something different (rounding, exchange costs). When you correct the quantity, the price or the fees of a recorded trade, a total that came from before is cleared, so the cash follows the new figures. In the list of trades, **⚠️ Total to check** marks a trade whose total is far from quantity × price ± fees (more than 2%): open it and empty the total if it is not the amount on your statement.
+
 You cannot sell units you did not own on that date: HomeCoin stops you and tells you which security and date. A security sold completely leaves the table of holdings, its trades stay. The money of a sale stays as **cash on the broker** until you record a **transfer** to your current account. In [Savings](#savings) a sale lowers *invested* (purchases − sales).
 
 </details>
@@ -580,20 +597,21 @@ You cannot sell units you did not own on that date: HomeCoin stops you and tells
 
 ### Portfolio analysis
 
-**What it is for.** What your investments are really made of, how well they are spread, and the tools investment platforms offer: where your money is in the world, in which areas, countries, sectors and currencies, which companies you own through your funds, how diversified you are compared with the world market and how your securities move together; then rebalancing, costs, a projection and a comparison with an index. It comes with the Investments page (Settings → Spaces). Everything here is a calculation: it never records anything.
+**What it is for.** What your investments are really made of, how well they are spread, and the tools investment platforms offer: where your money is in the world, in which areas, countries, sectors and currencies, which companies you own through your funds, how diversified you are compared with the world market and how your securities move together; what they have earned and how; then rebalancing, costs, a projection and a comparison with an index. It comes with the Investments page (Settings → Spaces). Everything here is a calculation: it never records anything.
 
 ![Portfolio analysis](docs/images/15-portfolio-analysis.png)
 *Portfolio analysis → Composition: the world map of your countries, then areas, countries, markets, currencies and sectors, looking inside the funds (look-through).*
 
 **Accounts analyzed.** At the top, one choice for every tab: tick the investment accounts to analyze (all by default; **All** brings them back). The portfolio is judged as a whole, because accounts are only containers; with fewer accounts you look at one part of it, for example the accounts of one goal. The choice is remembered for the space.
 
-**What you see.** Six tabs. Every weight is shown with two decimals (a company at 0.42% is never rounded to 0%), with a symbol next to it: the **flag** of each country, an icon for each area, market, sector and asset class, the **symbol** of each currency.
-- **🧭 Composition.** Four summary boxes (value analyzed, main area, main country, main currency), then a **world map** of the countries you invest in: the darker the country, the larger its weight; point at one for its weight and value. Below, your investments by **geographic area** (five areas, each one whole: North America, Latin America, Europe, Middle East and Africa, Asia-Pacific), **country**, **developed and emerging markets**, **currency**, **sector** (the 11 GICS sectors, of the shares only), **asset class** and **security**; with two or more accounts, **By account** (value, weight, main asset class, number of securities and the diversification score of each account on its own); the **20 largest underlying securities** (the same company held through several funds is added up; weight = share of the whole value analyzed). A security without a price yet is listed too. Weights are of the part whose data is known (shown under each list); **What is not known** lists the rest and why, and lets you type a missing ISIN right there.
-- **🧩 Diversification.** A **score from 1 to 10** with its level (8–10 high, 5–7 medium, 1–4 low), calculated on the measures used by fund managers, index providers and regulators and shown criterion by criterion, each with its value, the points it gets and when it gets full points: the **effective number of companies** (from the Herfindahl-Hirschman index), the **UCITS 5/10/40 rule** on the largest companies, the **weight of the 10 largest**, the **similarity to the world** equity market by country, the **effective number of sectors**, the **asset classes** you hold and the **average correlation** of your securities. A criterion that cannot be measured yet (for example the correlation without 12 months of prices) is left out and the score is calculated on the others. Then how much of the **world market** your countries cover, your areas and your developed/emerging split **against the world market** (bars side by side), the **overlap between funds** (100% = they hold the same securities with the same weights: high overlap means less diversification than it seems) and the **correlation matrix** of your securities: how they moved together month by month, from +1 (always together: they do not protect each other) through 0 (unrelated) to −1 (opposite), in colors from red to blue, with the average.
+**What you see.** Seven tabs. Every weight is shown with two decimals (a company at 0.42% is never rounded to 0%), with a symbol next to it: the **flag** of each country, an icon for each area, market, sector and asset class, the **symbol** of each currency.
+- **🧭 Composition.** Four summary boxes (value analyzed, main area, main country, main currency), then a **world map** of the countries you invest in: the darker the country, the larger its weight; point at one for its weight and value. Below, your investments by **geographic area** (five areas, each one whole: North America, Latin America, Europe, Middle East and Africa, Asia-Pacific), **country**, **developed and emerging markets**, **currency**, **sector** (the 11 GICS sectors, of the shares only), **asset class** and **security**; with two or more accounts, **By account** (value, weight, main asset class, number of securities and the diversification score of each account on its own); the **20 largest underlying securities** (the same company held through several funds is added up; weight = share of the whole value analyzed). A security without a price yet is listed too. The **cash on the broker** (money not invested yet) is known: it has its own line, *Cash on the broker*, in areas, countries and markets, in the color of cash; it is not on the map. A country whose weight would read 0.00% is left out of the lists and the map. Weights are of the part whose data is known (shown under each list); **What is not known** lists the rest and why, and lets you type a missing ISIN right there.
+- **🧩 Diversification.** A **score from 1 to 10** with its level (8–10 high, 5–7 medium, 1–4 low), calculated on the measures used by fund managers, index providers and regulators and shown criterion by criterion, each with its value, the points it gets and when it gets full points: the **effective number of companies** (from the Herfindahl-Hirschman index), the **UCITS 5/10/40 rule** on the largest companies, the **weight of the 10 largest**, the **similarity to the world** equity market by country, the **effective number of sectors**, the **asset classes** you hold and the **average correlation** of your securities. A criterion that cannot be measured yet (for example the correlation without 12 months of prices) is left out and the score is calculated on the others. Then how much of the **world market** your countries cover, your areas and your developed/emerging split **against the world market** (two bars per row in the row's color: solid = yours, light and striped = the world), the **overlap between funds** (100% = they hold the same securities with the same weights: high overlap means less diversification than it seems) and the **correlation matrix** of your securities: how they moved together month by month, from +1 (always together: they do not protect each other) through 0 (unrelated) to −1 (opposite), in colors from red to light blue, with the average.
+- **💰 Income and gains.** What your investments have earned and how. The **total gain** (value − money put in) with its return and the yearly return (XIRR), and **where it comes from**: gains **not yet realized** (securities you still hold, against their average cost), gains **realized with sales**, **dividends**, **interest** and **fees** (the commissions of buys and sales and the fees recorded as trades: here they are kept out of the cost of the securities and shown as what the broker took, so the gains above are before commissions); *Other* is what these parts do not explain (accounts valued only as a whole, interest or fees recorded as transactions), shown rather than hidden. Then **year by year** (a chart and a table of what was cashed in each year) and **per security**, with the **dividend yield**: the dividends of the last 12 months ÷ today's value of the security. Figures only: HomeCoin does not calculate taxes.
 - **⚖️ Rebalancing:** see [below](#rebalancing).
-- **💸 Costs.** The **TER** (ongoing charges) of each fund, typed **right in the table** (it is saved by itself), the **average TER** weighted by value and what the funds cost you **per year** and per month in money; funds without a TER are flagged.
-- **🔮 Projection.** How much the portfolio could be worth with a regular contribution: you choose the **amount** and **how often** (every month, every 3 or 6 months, every year, or never), the years and three scenarios (prudent, middle, optimistic return, all editable). With an inflation rate, the values and the money put in are both in today's money. A calculator: returns are not guaranteed.
-- **📊 Comparison.** Your investments against an index or ETF of your choice (for example `VWCE.DE`), month by month: total and yearly return, and the **largest fall** from a peak (maximum drawdown). Your return is **time-weighted**: money you add or take out does not count as performance.
+- **💸 Costs.** The **TER** (ongoing charges) of each fund, typed **right in the table** (it is saved by itself), the **average TER** weighted by value and what the funds cost you **per year** and per month in money; funds without a TER are flagged. Below, the **🧾 commissions paid** to the broker: the fees of each buy and sale plus the fees recorded as trades of their own, in total, in the last 12 months, year by year and per account. They come from the *Fees* field of each trade.
+- **🔮 Projection.** How much the portfolio could be worth with a regular contribution: you choose the **amount** and **how often** (every month, every 3 or 6 months, every year, or never), the years and three scenarios (prudent, middle, optimistic return, all editable). With an inflation rate, the values and the money put in are both in today's money. Each scenario has the same color in its box and its line. **The other way round:** type an **amount to reach** and HomeCoin tells you how much to put in each time, in each scenario, to get there in the years chosen. A calculator: returns are not guaranteed.
+- **📊 Comparison.** Your investments against an index or ETF of your choice (for example `VWCE.DE`), month by month: total and yearly return, and the **largest fall** from a peak (maximum drawdown). Your return is **time-weighted**: money you add or take out does not count as performance. The two boxes have the colors of their lines in the chart. Below the chart, the **risk** of both: **volatility** (how much the monthly returns move around their average, per year: standard deviation × √12), the **best** and **worst month**, and the **return per unit of risk** (yearly return ÷ volatility, a Sharpe ratio without the risk-free rate). The period follows the one you chose in the other analyses.
 
 **What you can do**
 - **Compositions from the issuers** (off until you allow it): HomeCoin downloads what is inside each fund from the public files of its issuer (**iShares, Vanguard, Xtrackers, Amundi, SPDR, Invesco**), sending only the **ISIN**; the result is saved, encrypted, with its date. **⟳ Update compositions** does it again when you want (funds change their holdings over time; a composition older than four months is flagged). For **single stocks** the country comes from the ISIN and the sector from Yahoo Finance.
@@ -605,7 +623,7 @@ You cannot sell units you did not own on that date: HomeCoin stops you and tells
 - **Synthetic (swap) funds** publish the basket they hold as collateral, not the index they follow: HomeCoin warns you, because their countries and sectors are not their real exposure.
 - Invesco does not publish countries and sectors (only the securities and their currency), Vanguard not the currency of each security: HomeCoin estimates it from the country and tells you so.
 - Diversification is measured on the **shares** (stocks and equity funds), as the platforms do: bonds, money market, commodities and cash are in the asset classes. The world market weights are approximate (developed and emerging markets, free float) and dated on the page.
-- The broker cash counts in your currency, with no country.
+- The broker cash counts in your currency, with no country: it is its own line, not a gap in what is known.
 
 <details><summary>How the diversification score is calculated</summary>
 
@@ -785,7 +803,7 @@ An encrypted backup of the database is saved before the change; each option can 
   - **how many:** from 3 to 200 (the oldest are deleted; 15 by default);
   - **before which operations:** turning expenses into transfers, reconciling, removing doubles, importing, putting rows back, updating. Each one is the way back if the operation goes wrong, so switch it off only if you have another backup. Before a full restore a copy is always saved;
   - **by hand:** **💾 Save a backup now**.
-- **Compare and restore:** next to each automatic backup, **🔍 Compare and restore** shows what changed since then in all the spaces, for transactions, recurring items, accounts, categories and rules: rows deleted (you can put them back), rows changed (you can take them back to how they were) and rows added. Only the rows you tick change; **Restore everything to this backup** replaces all the data instead. A copy of the current data is saved first. For a single account the same comparison is in its card: **⋯ → Compare with an automatic backup**.
+- **Compare and restore:** next to each automatic backup, **🔍 Compare and restore** shows what changed since then in all the spaces, for transactions, recurring items, accounts, categories and rules: rows deleted (you can put them back), rows changed (you can take them back to how they were) and rows added, plus how many are the same as now. A row is recognized by its content too, not only by its internal number: a transaction deleted and entered again, imported again or brought back by a restore is still the same transaction (same day, amount, account and description), so an older backup shows only what really differs. Only the rows you tick change; **Restore everything to this backup** replaces all the data instead. A copy of the current data is saved first. For a single account the same comparison is in its card: **⋯ → Compare with an automatic backup**.
 - **Restore** (⬆ Restore) replaces all current data with a downloaded backup; HomeCoin saves a copy of the current data first. A backup opens only in HomeCoin, with the password (or recovery key) that was valid when it was made.
 - **Export:** all transactions to CSV or Excel, and the annual report from Reports. Exports are **not encrypted**: HomeCoin reminds you before each one.
 
@@ -801,6 +819,7 @@ An encrypted backup of the database is saved before the change; each option can 
 
 When a new version is published, a small **⬆ HomeCoin x.y.z is available** label appears at the top and a dot on Settings. Open Settings → **Updates**, read what's new and click **Update**:
 
+- While it works, the whole window is covered by a box with the steps (download, signature and SHA-256 check, encrypted backup, installation, restart), a moving bar and the time passed: nothing can be clicked until it is done.
 - **Installed version:** the new installer runs by itself in the background and HomeCoin reopens. The page reloads on its own.
 - **ZIP version:** the program files are replaced in place (a copy of the old ones is kept) and HomeCoin restarts.
 
@@ -860,6 +879,8 @@ Your data is never part of an update, and an encrypted backup is saved first. Ho
 | **Median** | the middle value of a list: half of the values are above it, half below; less affected by one unusual payment than the average |
 | **Cash-flow forecast** | the money you will have in your accounts after the coming payments ([Calendar](#calendar)) |
 | **Budget** | a monthly limit for a category ([Budgets](#budgets)) |
+| **Budget carry-over** (rollover) | what you did not spend in a month added to the next month's budget, and overspending taken from it ([Budgets](#budgets)) |
+| **Reconciliation** | checking that an account in HomeCoin has the same balance as on the bank statement, on the same day ([Accounts](#accounts)) |
 | **Available reserve** | accounts plus uninvested broker cash and money market funds: the money you can use within days ([Emergency fund](#emergency-fund)) |
 | **Amortization schedule** | the list of a loan's installments, each split into principal and interest ([Mortgage and loans](#mortgage-and-loans)) |
 | **Principal / interest** | the part of an installment that repays the debt / the cost of the loan |
@@ -884,6 +905,9 @@ Your data is never part of an update, and an encrypted backup is saved first. Ho
 | **Synthetic (swap) fund** | a fund that follows its index through a swap contract: what it holds is collateral, not the index |
 | **Time-weighted return** | the return of the investments themselves, leaving out the money you add or take out (used to compare with an index) |
 | **Maximum drawdown** | the largest fall from a peak before a new high: how bad the worst period was |
+| **Volatility** | how much the monthly returns move around their average, brought to a year (standard deviation × √12): how bumpy the ride is |
+| **Sharpe ratio** | return earned per unit of risk: yearly return ÷ volatility. HomeCoin does not subtract a risk-free rate ([Portfolio analysis](#portfolio-analysis)) |
+| **Dividend yield** | the dividends of the last 12 months ÷ today's value of the security |
 | **Money market fund** | a very low-risk fund used as parked cash; HomeCoin counts it as cash |
 | **Recovery key** | the second key to your data, for when you forget the password |
 | **Encrypted backup (`.hcbackup`)** | a copy of all your data that opens only in HomeCoin with your password or recovery key |
@@ -1007,4 +1031,4 @@ Any copy or modified version must keep the [LICENSE](LICENSE) file, including th
 
 ---
 
-*HomeCoin by **Starkark98** · v2.6.1 · see the [changelog](CHANGELOG.md)*
+*HomeCoin by **Starkark98** · v2.7.0 · see the [changelog](CHANGELOG.md)*

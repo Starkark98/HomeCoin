@@ -83,6 +83,7 @@ function setCurrency(code) {
   const parts = MONEY.formatToParts(1).map((p) => p.type);
   SYM_FIRST = parts.indexOf('currency') < parts.indexOf('integer');
   _unitFmt = {};
+  try { buildAmountRe(); } catch { /* first call, before the privacy code below is defined: it builds it itself */ }
 }
 const currencySelect = (id, sel) => `<select id="${id}">${Object.entries(CURRENCIES).map(([k, c]) =>
   `<option value="${k}" ${sel === k ? 'selected' : ''}>${esc(c.short)} ${esc(c.name)} (${k})</option>`).join('')}</select>`;
@@ -159,6 +160,8 @@ const MONTHS = I18N.months || ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 
 const datePart = (pattern, y, m, d = '') => pattern.replace(/\{(d|j|mon|m|yy|y)\}/g, (_, k) => ({ d, j: String(+d), mon: MONTHS[m - 1], m, y, yy: y.slice(2) }[k]));
 const fmtDate = (iso) => (iso ? datePart(I18N.date_pattern || '{d} {mon} {y}', iso.slice(0, 4), +iso.slice(5, 7), iso.slice(8, 10)) : '');  // i18n-skip
 const fmtMonth = (ym) => { const [y, m] = ym.split('-'); return datePart(I18N.month_pattern || '{mon} {yy}', y, +m); };  // i18n-skip
+// the same with the year in full, for months far ahead ("Aug 2036", never "Aug 36")
+const fmtMonthYear = (ym) => { const [y, m] = ym.split('-'); return datePart((I18N.month_pattern || '{mon} {yy}').replace('{yy}', '{y}'), y, +m); };  // i18n-skip
 // ---------------------------------------------------------------- date fields
 // A native <input type="date"> is drawn in the browser's language, not in HomeCoin's (Edge and Chrome ignore the page
 // language): every one is turned into a text field in the interface's numeric format (13/11/2026, 13.11.2026,
@@ -333,6 +336,30 @@ function periodRange(key) {
   }
 }
 
+// the period just before, of the same length (2.7.0, Dashboard comparison): the chosen period up to today, moved back
+// by its months. "This month" until the 17th → last month until the 17th; "This year" → last year up to the same day.
+// null for "All"
+const PERIOD_MONTHS = { month: 1, prev: 1, '3m': 3, '6m': 6, '12m': 12, year: 12, lastyear: 12 };
+function prevRange(key) {
+  const n = PERIOD_MONTHS[key];
+  if (!n) return null;
+  const [from, to] = periodRange(key), end = to < todayIso() ? to : todayIso();
+  const back = (iso) => {
+    const [y, m, d] = iso.split('-').map(Number), last = new Date(y, m - 1 - n + 1, 0).getDate();
+    return isoLocal(new Date(y, m - 1 - n, Math.min(d, last)));
+  };
+  return [back(from), back(end)];
+}
+// change against the period before, as a small colored arrow: up is good for income and savings, bad for spending
+function trend(now, before, upIsGood = true) {
+  if (before == null || !Number.isFinite(before) || (!now && !before)) return '';
+  if (!before) return `<span class="muted">—</span>`;
+  const x = (now - before) / Math.abs(before);
+  if (Math.abs(x) < 0.005) return `<span class="muted">＝ ${pct(0)}</span>`;
+  const good = (x > 0) === upIsGood;
+  return `<span class="${good ? 'pos' : 'neg'}">${x > 0 ? '▲' : '▼'} ${fix2(Math.abs(x) * 100)}%</span>`;
+}
+
 // ================================================================ drill-down to Transactions
 // Every element with data-tx (filters as JSON) leads to Transactions already filtered; charts use goTx().
 const goTx = (f) => { location.hash = '#/movimenti?' + qs(f); };
@@ -403,7 +430,7 @@ function pwMeter(input, meter) {
   input.addEventListener('input', upd); upd();
 }
 function wipeView() {  // clear the data off the screen
-  destroyCharts(); closeModal();
+  destroyCharts(); closeModal(); helpPanel(false);
   $('#view').innerHTML = ''; $('#pf-switch').innerHTML = '';
 }
 async function showLock(mode) {
@@ -581,7 +608,7 @@ async function unlocked() {
   document.body.classList.remove('locked');
   $('#lock-body').innerHTML = '';  // the sign-in form (with the password typed) must not stay in the page once unlocked
   AUTH.lastInput = AUTH.lastPing = Date.now();
-  resetPeriods();  // new sign-in: every tab goes back to "Last 12 months"
+  resetPeriods();  // new sign-in: filters start again; the analysis period is the one chosen last (periodPref)
   if (location.hash && location.hash !== '#/') history.replaceState(null, '', '#/');  // always start again from the Dashboard
   try { await loadMeta(); } catch (e) { fail(e); }
   route();
@@ -637,9 +664,44 @@ const qs = (obj) => new URLSearchParams(Object.entries(obj).filter(([, v]) => v 
 
 // ================================================================ state
 const storedPid = () => { try { return +localStorage.getItem('homecoin-portfolio') || null; } catch { return null; } };
-// analysis period: "Last 12 months" on every tab; each tab remembers its own while you work,
-// and every new sign-in (unlock) starts again from the default
+// analysis period (2.6.2): ONE choice for every analysis, remembered in this browser after closing HomeCoin.
+// Two kinds of selector share it: a period (Dashboard, Reports: "This month", "Last 12 months", "Last year"…) and a
+// number of months (Investments, Savings, Portfolio comparison: 6, 12, 24, 36, 60, 120, all). Choosing one sets the
+// other where they mean the same (Last 6 / 12 months, All); a page that does not offer the choice uses the closest
+// one it has. The Transactions filter and the budget average stay apart: they are filters, not analysis periods
 const DEFAULT_PERIOD = '12m';
+const PERIOD_PREF = 'homecoin-period';
+const periodPref = (() => { try { return JSON.parse(localStorage.getItem(PERIOD_PREF) || '{}') || {}; } catch { return {}; } })();
+const savePeriodPref = () => { try { localStorage.setItem(PERIOD_PREF, JSON.stringify(periodPref)); } catch { /* ignore */ } };
+const RANGE_MONTHS = { '6m': '6', '12m': '12', all: 'all' };
+function choosePeriod(key) {
+  periodPref.range = key;
+  if (RANGE_MONTHS[key]) periodPref.months = RANGE_MONTHS[key];
+  savePeriodPref();
+}
+function chooseMonths(m) {
+  periodPref.months = String(m);
+  const r = Object.keys(RANGE_MONTHS).find((k) => RANGE_MONTHS[k] === String(m));
+  if (r) periodPref.range = r;
+  savePeriodPref();
+}
+// the months for a page offering `options` (strings, ascending, maybe ending with 'all')
+function monthsFor(options) {
+  const want = periodPref.months || '12';
+  if (options.includes(want)) return want;
+  const nums = options.filter((o) => o !== 'all').map(Number);
+  if (want === 'all') return String(nums[nums.length - 1]);
+  return String(nums.reduce((best, n) => (Math.abs(n - want) < Math.abs(best - want) ? n : best), nums[0]));
+}
+// the period for a page offering `keys` (Reports also has past years "y:2025")
+function periodFor(keys) {
+  const want = periodPref.range || DEFAULT_PERIOD, lastYear = `y:${new Date().getFullYear() - 1}`;
+  if (keys.includes(want)) return want;
+  if (want === 'lastyear' && keys.includes(lastYear)) return lastYear;
+  if (want === lastYear && keys.includes('lastyear')) return 'lastyear';
+  const byMonths = Object.keys(RANGE_MONTHS).find((k) => RANGE_MONTHS[k] === periodPref.months && keys.includes(k));
+  return byMonths || (keys.includes(DEFAULT_PERIOD) ? DEFAULT_PERIOD : keys[0]);
+}
 const emptyTxFilters = () => {
   const [from, to] = periodRange(DEFAULT_PERIOD);
   return { q: '', from, to, account_id: '', category_id: '', kind: '', excluded: '' };
@@ -652,7 +714,7 @@ const S = {
 };
 function resetPeriods() {
   Object.assign(S, { dash: { period: DEFAULT_PERIOD, account_id: '' }, rep: { period: DEFAULT_PERIOD },
-    invMonths: '12', savMonths: '12', budgetAvg: '12', budgetMonth: null });
+    budgetAvg: '12', budgetMonth: null });
   S.tx.f = emptyTxFilters();
 }
 resetPeriods();
@@ -768,13 +830,19 @@ const categoryOptions = (kind, sel, empty = T('Uncategorized')) =>
   catsOf(kind).map((c) => `<option value="${c.id}" ${+sel === c.id ? 'selected' : ''}>${esc(c.icon)} ${esc(c.name)}</option>`).join('');
 
 // ================================================================ UI helpers
+// type: 'ok' (done, green) · 'warn' (done, but something to check: amber) · 'err' (rose) · 'info' (violet) · 'space'.
+// Errors and warnings stay a little longer, they usually need reading
 function toast(msg, type = 'ok') {
   const el = document.createElement('div');
   el.className = `toast ${type}`;
-  el.textContent = msg;
+  el.setAttribute('role', type === 'err' ? 'alert' : 'status');
+  const icon = { ok: '✓', warn: '!', err: '✕', info: 'i' }[type];
+  if (icon) { const i = document.createElement('span'); i.className = 't-ico'; i.textContent = icon; el.append(i); }
+  const t = document.createElement('span'); t.textContent = msg; el.append(t);
   $('#toasts').append(el);
-  setTimeout(() => el.classList.add('out'), 3000);
-  setTimeout(() => el.remove(), 3400);
+  const ms = type === 'err' || type === 'warn' ? 5000 : 3000;
+  setTimeout(() => el.classList.add('out'), ms);
+  setTimeout(() => el.remove(), ms + 400);
 }
 const fail = (e) => toast(e.message || String(e), 'err');
 
@@ -837,13 +905,46 @@ function chartTheme() {
   Chart.defaults.plugins.tooltip.callbacks.label = masked((ctx) => ` ${ctx.dataset.label || ctx.label}: ${money(ctx.raw)}`);
 }
 // ================================================================ privacy: hidden amounts (eye icon)
-// Every euro amount on the page is wrapped in <span class="m"> (including ones added later, via MutationObserver);
-// with body.privacy the CSS blurs them. In charts (canvas) axes and tooltips show "•••".
-// Symbol after the number (1.234,56 € · 6,91 $) or before it ($1,234.56 · -$1.2K · CHF 1’234.56 · R$ 1.234,56)
-const AMOUNT_NUM = String.raw`\d{1,3}(?:[.,’'  ]\d{2,3})*(?:[.,]\d+)?`;
-const AMOUNT_RE = new RegExp(String.raw`[−+-]?${AMOUNT_NUM}\s?K?\s?(?:€|CHF|\$|£)|[−+-]?(?:€|CHF|US\$|CA\$|A\$|MX\$|R\$|\$|£)\s?[−-]?${AMOUNT_NUM}K?`, 'g');
+// Every amount on the page is wrapped in <span class="m"> (including ones added later, via MutationObserver);
+// with body.privacy the CSS hides them behind a soft veil. Amount fields (inputs filled by moneyInput carry
+// data-money) are veiled too while not being edited; tooltips (title) and chart texts (axes, tooltips, labels drawn
+// on the canvas through cashText) show "•••".
+// Symbol after the number (1.234,56 € · 6,91 $ · 1 234,56 zł) or before it ($1,234.56 · -$1.2K · CHF 1’234.56 ·
+// R$ 1.234,56 · ₹1,23,456). The symbols are those of every currency of HomeCoin, as Intl writes them in the current
+// locale (symbol and narrow symbol, so unit prices of foreign securities are found too) plus util.CURRENCIES'.
+const AMOUNT_NUM = String.raw`\d+(?:[.,’'  ]\d{2,3}(?!\d))*(?:[.,]\d+)?`;
+let AMOUNT_RE = /$^/g;
+function buildAmountRe() {
+  const marks = new Set(['€', '$', '£', '¥', '￥', '円', 'Fr.']);
+  Object.entries(CURRENCIES).forEach(([code, c]) => {
+    [c.symbol, c.short].forEach((s) => s && marks.add(s));
+    ['symbol', 'narrowSymbol'].forEach((currencyDisplay) => {
+      try {
+        const p = new Intl.NumberFormat(LOCALE, { style: 'currency', currency: code, currencyDisplay }).formatToParts(1).find((x) => x.type === 'currency');
+        if (p) marks.add(p.value);
+      } catch { /* currency unknown to this browser */ }
+    });
+  });
+  const alt = [...marks].filter((m) => m && !/^\d/.test(m)).sort((a, b) => b.length - a.length)
+    .map((m) => m.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
+  // a symbol made of letters (kr, zł, R, RM, Kč…) must not be part of a longer word
+  const sym = `(?:${alt})`, gap = String.raw`[\s  ]?`;
+  AMOUNT_RE = new RegExp(String.raw`[−+-]?${AMOUNT_NUM}${gap}K?${gap}${sym}(?![A-Za-zÀ-ÿ])|(?<![A-Za-zÀ-ÿ])[−+-]?${sym}${gap}[−-]?${AMOUNT_NUM}K?`, 'g');
+}
+buildAmountRe();
 const maskAmounts = (v) => (Array.isArray(v) ? v.map(maskAmounts) : typeof v === 'string' ? v.replace(AMOUNT_RE, '•••') : v);
 const privacyOn = () => document.body.classList.contains('privacy');
+// text drawn by hand on a chart canvas: hidden like the rest
+const cashText = (s) => (privacyOn() ? '•••' : s);
+// tooltips (title attribute) with amounts: masked while the pointer is on them
+document.addEventListener('mouseover', (e) => {
+  const el = e.target.closest?.('[title]');
+  if (!el || !privacyOn() || el.dataset.realTitle != null) return;
+  AMOUNT_RE.lastIndex = 0;
+  if (!AMOUNT_RE.test(el.title)) return;
+  el.dataset.realTitle = el.title; el.title = maskAmounts(el.title);
+  el.addEventListener('mouseleave', () => { el.title = el.dataset.realTitle; delete el.dataset.realTitle; }, { once: true });
+});
 function wrapAmounts(root) {
   if (!root || root.nodeType !== 1 && root.nodeType !== 3) return;
   const base = root.nodeType === 3 ? root.parentNode : root;
@@ -957,7 +1058,7 @@ const ROUTES = {
   budget: [T('Budgets'), T('Monthly spending limits per category'), renderBudget],
   mutuo: [T('Mortgage & loans'), T('Amortization schedule, interest and early repayment simulation'), renderMutuo],
   investimenti: [T('Investments'), T('Value, contributions and return of the investment accounts'), renderInvestimenti],
-  portafoglio: [T('Portfolio analysis'), T('What your investments are made of, how diversified they are, rebalancing, costs, projection and comparison'), renderPortafoglio],
+  portafoglio: [T('Portfolio analysis'), T('What your investments are made of, how diversified they are, what they earned, rebalancing, costs, projection and comparison'), renderPortafoglio],
   risparmio: [T('Savings'), T('Savings rate and net worth'), renderRisparmio],
   obiettivi: [T('Goals'), T('Savings targets and how much to set aside each month'), renderObiettivi],
   emergenza: [T('Emergency fund'), T('How many months of expenses your reserve covers'), renderEmergenza],
@@ -966,6 +1067,96 @@ const ROUTES = {
   registro: [T('Activity log'), T('Sign-ins, changes and important deletions over the last 12 months'), renderRegistro],
   impostazioni: [T('Settings'), T('Preferences, spaces, security, backups and updates'), renderImpostazioni],
 };
+// "How it works" (2.7.0): the same button next to the title on every page opens a small panel on the right with what
+// the page is for, at most three short points and the way to its section of the guide. Closed by default, it never
+// covers the page's own content on a wide screen; ✕ or Esc closes it. [guide anchor, intro, points]
+const HELP = {
+  dashboard: ['dashboard', T('Your finances at a glance for the period you choose.'), [
+    T('Savings = income − spending − money given to other spaces in the period.'),
+    T('Previous period: the same length just before, up to the same day; green when it is good news.'),
+    T('Click a category, a bar or a row of a box to see the transactions behind it.')]],
+  movimenti: ['transactions', T('Every income, expense and transfer, with filters and totals.'), [
+    T('A transfer between your accounts is never spending: the money only moves.'),
+    T('Excluded transactions stay in the balance, not in reports, budgets and savings.'),
+    T('Tick several transactions to change or delete them in one go.')]],
+  conti: ['accounts', T('Every place where you keep money, with its balance.'), [
+    T('Balance = opening balance + income − expenses ± transfers.'),
+    T('Investment accounts show their market value: cash plus securities, or the value you type.'),
+    T('⋯ on a card: check against the bank statement, money recorded twice, compare with a backup.')]],
+  ricorrenti: ['recurring-payments', T('Payments that repeat, recorded by themselves on each due date.'), [
+    T('The amounts at the top are per month: a yearly bill counts 1/12.'),
+    T('Monthly margin = fixed income − fixed expenses − transfers to other spaces.'),
+    T('Recurring items never change by themselves: a higher price is only pointed out.')]],
+  calendario: ['calendar', T('Will there be enough money for the coming payments?'), [
+    T('Confirmed = recurring items; ≈ estimated = variable items and regular payments recognized from your history.'),
+    T('Cash = the day-to-day accounts only (current, savings, cards, cash): money on a broker does not count.'),
+    T('Lowest point: the least cash in the period; set a minimum to keep and HomeCoin warns you.')]],
+  report: ['reports', T('Where the money went, by category and by month.'), [
+    T('Darker cells = higher amounts; click a cell to see its transactions.'),
+    T('Other spaces: money given to other spaces, kept apart from spending.'),
+    T('Year in brief compares a year with the one before, and can be printed.')]],
+  budget: ['budgets', T('A monthly limit for the categories you want to watch.'), [
+    T('Ahead = spending faster than the month is passing.'),
+    T('Carry over: what you do not spend is added to the next month, overspending is taken from it.'),
+    T('The average shows what you usually spend, to choose a realistic limit.')]],
+  obiettivi: ['goals', T('Something you are saving for, with a date if you want one.'), [
+    T('Per month = what is still missing ÷ the months left.'),
+    T('Tied to an account, the progress is its balance; otherwise the amount you type.'),
+    T('At your pace: when you get there if the balance keeps growing as in the last 6 months.')]],
+  emergenza: ['emergency-fund', T('How many months of expenses your reserve would cover.'), [
+    T('Available reserve = accounts + uninvested broker cash + money market funds.'),
+    T('Months covered = reserve ÷ average spending of the last 6 complete months.'),
+    T('A target of 3 to 6 months is common.')]],
+  mutuo: ['mortgage-and-loans', T('Every loan in installments, with its amortization schedule.'), [
+    T('Each installment = principal (it repays the debt) + interest (the cost of the loan).'),
+    T('Early repayment: how much interest you save, with a lower installment or a shorter loan.'),
+    T('Loans are the recurring items with a number of installments.')]],
+  ripartizione: ['fair-split', T('How much each person pays in, so that everyone saves the same share of income.'), [
+    T('Fair = the same savings rate for everyone, not the same amount.'),
+    T('Contributions are recognized from the transfers of each person\'s space, or from a keyword.'),
+    T('Nothing changes until you apply the result.')]],
+  investimenti: ['investments', T('How much your investment accounts are worth and how they performed.'), [
+    T('Value = latest valuation (automatic from securities or entered by hand). Invested = net transfers/income into the account.'),
+    T('Gain = value − money put in; XIRR is the yearly return that accounts for when you added money.'),
+    T('Update prices sends only the tickers to Yahoo Finance.')]],
+  portafoglio: ['portfolio-analysis', T('What your investments are made of, how well they are spread and what they earned.'), [
+    T('Weights are of the part whose data is known; the rest is under "What is not known".'),
+    T('Fund compositions come from their issuers, only if you allow it (only the ISIN is sent).'),
+    T('Everything here is a calculation: nothing is recorded.')]],
+  risparmio: ['savings', T('Your habits month by month: how much you save and invest.'), [
+    T('Saved = income − spending − money given to other spaces: the month\'s surplus.'),
+    T('Invested = purchases − sales of securities; money market funds are cash and do not count.'),
+    T('Net worth = cash + investments − debts.')]],
+  import: ['importing-bank-statements', T('Bring in a bank statement in CSV or Excel.'), [
+    T('HomeCoin recognizes columns and dates by itself; you can correct them before importing.'),
+    T('Categories come from your rules and from similar past transactions.'),
+    T('Possible duplicates of transactions already recorded are flagged.')]],
+  categorie: ['categories-and-rules', T('The categories of the space and the rules that assign them.'), [
+    T('A rule gives its category to every transaction whose description contains its words.'),
+    T('A few broad categories are easier to follow: the detail goes in the description.')]],
+  registro: ['activity-log', T('What was done in HomeCoin over the last 12 months: sign-ins, changes, deletions.'), [
+    T('Reads, calculations and single new transactions are not logged.'),
+    T('The log is kept inside the encrypted database.')]],
+  impostazioni: ['settings', T('Language, currency, spaces, security, backups and updates.'), [
+    T('Hiding a page in a space never deletes its data.'),
+    T('Keep a downloaded backup outside your PC.')]],
+};
+function helpPanel(open) {
+  let p = $('#help-panel');
+  if (!open) { p?.remove(); document.body.classList.remove('help-open'); $('#page-help')?.setAttribute('aria-expanded', 'false'); return; }
+  document.body.classList.add('help-open');
+  const { key } = currentRoute(), h = HELP[key];
+  if (!h) return helpPanel(false);
+  if (!p) { p = document.createElement('aside'); p.id = 'help-panel'; p.className = 'help-panel'; p.setAttribute('role', 'complementary'); document.body.append(p); }
+  const [anchor, intro, points] = h;
+  p.setAttribute('aria-label', T('How it works'));
+  p.innerHTML = `<div class="help-head"><b>ℹ️ ${T('How it works')}</b><button type="button" class="icon-btn sm" data-help-close aria-label="${esc(T('Close'))}">✕</button></div>
+    <p class="help-intro">${esc(intro)}</p><ul>${points.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>
+    <a class="help-more" href="https://github.com/Starkark98/HomeCoin#${anchor}" target="_blank" rel="noopener noreferrer">${T('Read more in the guide')} ↗</a>`;
+  $('[data-help-close]', p).onclick = () => helpPanel(false);
+  $('#page-help')?.setAttribute('aria-expanded', 'true');
+}
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && $('#help-panel') && !$('.modal')) helpPanel(false); });
 function currentRoute() {
   const [path, query] = location.hash.replace(/^#\/?/, '').split('?');
   return { key: ROUTES[path] ? path : 'dashboard', params: new URLSearchParams(query || '') };
@@ -980,6 +1171,13 @@ async function route() {
   $$('#nav a').forEach((a) => a.classList.toggle('active', a.dataset.route === key));
   $('#page-title').textContent = title;
   $('#page-sub').textContent = S.portfolio ? `${S.portfolio.name} · ${sub}` : sub;
+  const hb = $('#page-help');
+  if (hb) {
+    hb.classList.toggle('hidden', !HELP[key]);
+    hb.innerHTML = `ℹ️ <span>${T('How it works')}</span>`;
+    hb.onclick = () => helpPanel(!$('#help-panel'));
+    if ($('#help-panel')) helpPanel(true);  // open while moving to another page: it follows the page
+  }
   const view = $('#view');
   const focus = snapFocus(view);
   // each page renders into its own box: if another page is opened before this one has finished loading, this box is
@@ -1026,8 +1224,26 @@ async function unusualCard(el, month) {
 
 async function renderDashboard(v) {
   const d = S.dash;
+  d.period = periodFor(PERIODS.map(([k]) => k));
   const [from, to] = periodRange(d.period);
-  const [st, up] = await Promise.all([api('/stats?' + qs({ from, to, account_id: d.account_id })), api('/upcoming?days=45')]);
+  const prev = prevRange(d.period);
+  const [st, up, pst, bud] = await Promise.all([api('/stats?' + qs({ from, to, account_id: d.account_id })), api('/upcoming?days=45'),
+    // the period before, for the arrows in the boxes; this month's budgets, for the ones nearly used up
+    prev ? api('/stats?' + qs({ from: prev[0], to: prev[1], account_id: d.account_id })).catch(() => null) : null,
+    api('/budget').catch(() => null)]);
+  const pIn = pst ? pst.income + (pst.transfers_in || 0) : null, pOut = pst ? pst.expense + (pst.transfers_out || 0) : null;
+  const pSaved = pst ? (pst.saved ?? pst.income - pst.expense) : null;
+  const vsLabel = prev ? T('vs {from} – {to}', { from: fmtDate(prev[0]), to: fmtDate(prev[1]) }) : '';
+  // the period before starts before the first transaction: its figures are partial, so the arrow would mislead
+  const partial = pst && (!st.first || st.first > prev[0]);
+  const vsRow = (now, before, good) => pst && (partial
+    ? [`↕️ ${T('Previous period')}`, '—', '', `${vsLabel} · ${T('Not enough history: the period before starts before your first transaction')}`]
+    : [`↕️ ${T('Previous period')}`, trend(now, before, good), '', `${vsLabel} · ${money(before)}`]);
+  // budgets of this month at 90% or more: what to watch before the month ends
+  // (the month's limit includes the carry-over, when it is on)
+  const lim = (c) => Math.max(1, c.available ?? c.budget);
+  const nearly = (bud?.categories || []).filter((c) => c.budget > 0 && c.spent / lim(c) >= 0.9).sort((a, b) => b.spent / lim(b) - a.spent / lim(a))
+    .map((c) => ({ ...c, budget: lim(c) }));
   // savings = the month's surplus: income (and transfers from other spaces) − expenses − contributions to other spaces
   const exp = st.by_category.expense, saved = st.saved ?? st.income - st.expense, inflow = st.income + (st.transfers_in || 0);
   // money out = everything that leaves: expenses + contributions/transfers to other spaces (shown separately in the box)
@@ -1058,15 +1274,20 @@ async function renderDashboard(v) {
         <div class="k-value">${money(st.balance_now)}</div>${kRows([`🏦 ${T('Active accounts')}`, activeAccounts().length, 'href="#/conti"'])}</div>
       <div class="kpi g-emerald"><div class="k-label">📥 ${T('Income')}</div><div class="k-value">${money(inTot)}</div>
         ${fromOthers ? kRows([`💼 ${T('Income')}`, money(st.income), `href="#/movimenti?${qs({ kind: 'income', from, to, ...(d.account_id ? { account_id: d.account_id } : {}) })}"`, T('Actual income: salaries, contributions, interest…')],
-          [`↙ ${T('From other spaces')}`, money(fromOthers), `href="#/movimenti?${qs({ kind: 'transfer', from, to })}"`, T('Transfers received from accounts in other spaces: they come in here and count toward savings')])
-          : kRows([`📅 ${T('Per month')}`, money0(inTot / st.months)])}</div>
+          [`↙ ${T('From other spaces')}`, money(fromOthers), `href="#/movimenti?${qs({ kind: 'transfer', from, to })}"`, T('Transfers received from accounts in other spaces: they come in here and count toward savings')], vsRow(inTot, pIn, true))
+          : kRows([`📅 ${T('Per month')}`, money0(inTot / st.months)], vsRow(inTot, pIn, true))}</div>
       <div class="kpi g-rose"><div class="k-label">📤 ${T('Money out')}</div><div class="k-value">${money(outTot)}</div>
         ${toOthers ? kRows([`🛒 ${T('Spending')}`, money(st.expense), `href="#/movimenti?${qs({ kind: 'expense', from, to, ...(d.account_id ? { account_id: d.account_id } : {}) })}"`, T('Actual expenses: spending categories, budgets and chart by category')],
-          [`↗ ${T('To other spaces')}`, money(toOthers), st.other_categories ? 'href="#/report" data-reptab="other"' : `href="#/movimenti?${qs({ kind: 'transfer', from, to })}"`, T('Contributions and transfers to other spaces (e.g. the household account): they leave from here but are not expenses')])
-          : kRows([`📅 ${T('Per month')}`, money0(outTot / st.months)])}</div>
+          [`↗ ${T('To other spaces')}`, money(toOthers), st.other_categories ? 'href="#/report" data-reptab="other"' : `href="#/movimenti?${qs({ kind: 'transfer', from, to })}"`, T('Contributions and transfers to other spaces (e.g. the household account): they leave from here but are not expenses')], vsRow(outTot, pOut, false))
+          : kRows([`📅 ${T('Per month')}`, money0(outTot / st.months)], vsRow(outTot, pOut, false))}</div>
       <div class="kpi g-amber"><div class="k-label">🐷 ${T('Savings')}</div><div class="k-value">${money(saved)}</div>
-        ${kRows(inflow && [`📊 ${T('Savings rate')}`, pct(saved / inflow)])}</div>
+        ${kRows(inflow && [`📊 ${T('Savings rate')}`, pct(saved / inflow)], vsRow(saved, pSaved, true))}</div>
     </div>
+    ${nearly.length ? `<div class="card d-nearly"><div class="card-head"><div><h3>⏳ ${T('Budgets nearly used up')} · ${esc(fmtMonth(bud.month))}</h3>
+      <p class="muted small" style="margin:3px 0 0">${T('Categories at 90% or more of this month\'s budget.')}</p></div><a href="#/budget" class="small">${T('Manage →')}</a></div>
+      <div class="d-nearly-list">${nearly.map((c) => { const r = c.spent / c.budget; return `<a class="d-nearly-item" href="#/movimenti?${qs({ category_id: c.id, kind: 'expense', ...monthBounds(bud.month) })}">
+        <span>${esc(c.icon)} ${esc(c.name)}</span><span class="num ${r > 1 ? 'neg' : ''}"><b>${pct(r)}</b> · ${money0(c.spent)} / ${money0(c.budget)}</span>
+        <div class="bar ${budgetState(r)}"><i style="width:${Math.min(100, r * 100).toFixed(1)}%"></i></div></a>`; }).join('')}</div></div>` : ''}
     <div id="d-unusual"></div>
     <div class="grid-2">
       <div class="card"><div class="card-head"><h3>${T('Expenses by category')}</h3><span class="muted">${T('click for details')}</span></div>
@@ -1095,7 +1316,7 @@ async function renderDashboard(v) {
           <b class="amount expense">−${money(t.amount)}</b></div>`).join('') : `<div class="empty"><div class="big">🧾</div>${T('No expenses')}</div>`}</div></div>
     </div>`;
 
-  $('#d-period').onchange = (e) => { d.period = e.target.value; route(); };
+  $('#d-period').onchange = (e) => { choosePeriod(e.target.value); route(); };
   $('#d-account').onchange = (e) => { d.account_id = e.target.value; route(); };
   if (S.tx_count) unusualCard($('#d-unusual', v));  // after the page: it never slows the dashboard down
   $$('[data-go="add"]', v).forEach((b) => (b.onclick = () => txModal()));
@@ -1130,9 +1351,9 @@ async function renderDashboard(v) {
       datasets: [
         // same colors everywhere: income green, expenses red, transfers between spaces blue (received light, sent
         // dark, each on its side), savings yellow
-        { label: T('Income'), stack: 'in', data: months.map((m) => bm[m]?.income || 0), backgroundColor: C.in, borderRadius: 8, maxBarThickness: 34 },
-        ...(fromOthers ? [{ label: T('From other spaces'), stack: 'in', data: months.map((m) => bm[m]?.from_others || 0), backgroundColor: C.transfer, borderRadius: 8, maxBarThickness: 34 }] : []),
-        { label: T('Expenses'), stack: 'out', data: months.map((m) => bm[m]?.expense || 0), backgroundColor: C.out, borderRadius: 8, maxBarThickness: 34 },
+        { key: 'income', label: T('Income'), stack: 'in', data: months.map((m) => bm[m]?.income || 0), backgroundColor: C.in, borderRadius: 8, maxBarThickness: 34 },
+        ...(fromOthers ? [{ key: 'transfer', label: T('From other spaces'), stack: 'in', data: months.map((m) => bm[m]?.from_others || 0), backgroundColor: C.transfer, borderRadius: 8, maxBarThickness: 34 }] : []),
+        { key: 'expense', label: T('Expenses'), stack: 'out', data: months.map((m) => bm[m]?.expense || 0), backgroundColor: C.out, borderRadius: 8, maxBarThickness: 34 },
         ...(toOthers ? [{ label: T('Other spaces'), stack: 'out', data: months.map((m) => bm[m]?.to_others || 0), backgroundColor: C.transfer, borderRadius: 8, maxBarThickness: 34 }] : []),
         { label: T('Savings'), stack: 'sav', data: months.map((m) => { const x = bm[m]; return x ? x.income + (x.from_others || 0) - x.expense - (x.to_others || 0) : 0; }),
           backgroundColor: C.left, borderRadius: 8, maxBarThickness: 34 },
@@ -1143,8 +1364,10 @@ async function renderDashboard(v) {
       onHover: pointerOnHover,
       onClick: (_, el, ch) => {
         if (!el.length) return;
-        const lbl = ch.data.datasets[el[0].datasetIndex].label;  // income / expenses → that type; other spaces and savings → the whole month
-        goTx({ ...monthBounds(months[el[0].index]), ...({ Income: { kind: 'income' }, 'From other spaces': { kind: 'transfer' }, Expenses: { kind: 'expense' } }[lbl] || {}), account_id: d.account_id });
+        // income / expenses → that type; other spaces and savings → the whole month. By the dataset's key, not its
+        // label: the label is translated (2.7.0: in other languages every click opened the whole month)
+        const key = ch.data.datasets[el[0].datasetIndex].key;
+        goTx({ ...monthBounds(months[el[0].index]), ...(key ? { kind: key } : {}), account_id: d.account_id });
       },
     },
   });
@@ -1198,6 +1421,7 @@ async function renderMovimenti(v, params) {
       <a class="btn btn-sm" id="exp-csv">⬇ CSV</a><a class="btn btn-sm" id="exp-xlsx">⬇ ${T('Excel')}</a>
     </div>
     <div id="bulk"></div>
+    <div id="tx-trades"></div>
     <div class="card" style="padding:6px 8px">
       <div class="table-wrap"><table class="tx-table">
         <thead><tr><th style="width:30px"><input type="checkbox" id="sel-all"></th><th>${T('Date')}</th><th>${T('Description')}</th><th>${T('Category')}</th><th>${T('Account')}</th><th class="right">${T('Amount')}</th><th></th></tr></thead>
@@ -1205,7 +1429,18 @@ async function renderMovimenti(v, params) {
       <div id="tx-more" style="text-align:center;padding:12px"></div>
     </div>`;
 
-  const set = (k, val) => { f[k] = val; load(true); };
+  // an investment account among the accounts filtered: its trades (buys, sales, dividends, fees…) are not
+  // transactions, so they are shown here too, above the list, each with its edit button (2.7.0)
+  const drawTrades = () => {
+    const ids = String(f.account_id || '').split(',').filter(Boolean).map(Number);
+    const inv = S.accounts.filter((a) => ids.includes(a.id) && a.type === 'investimenti');
+    $('#tx-trades', v).innerHTML = inv.map((a) => `<details class="card tx-trades" data-aid="${a.id}" ${inv.length === 1 ? 'open' : ''}>
+      <summary><b>📈 ${T('Trades of {account}', { account: esc(a.name) })}</b> <span class="muted small">${T('Buys, sales, dividends, interest and fees are recorded on the investment account, not as transactions.')}</span></summary>
+      <div class="trades-box"><div class="loading">${T('Loading…')}</div></div></details>`).join('');
+    $$('.tx-trades', v).forEach((d) => loadTrades(d, +d.dataset.aid));
+  };
+  drawTrades();
+  const set = (k, val) => { f[k] = val; load(true); if (k === 'account_id') drawTrades(); };
   $('#f-q').oninput = debounce((e) => set('q', e.target.value.trim()));
   $('#f-from').onchange = (e) => set('from', e.target.value);
   $('#f-to').onchange = (e) => set('to', e.target.value);
@@ -1386,7 +1621,7 @@ function txModal(tx = null, defaults = {}) {
     <div class="seg" id="tx-kind" style="margin-bottom:16px">
       ${Object.entries(KIND_LABEL).map(([k, l]) => `<button type="button" data-kind="${k}" class="${t.kind === k ? 'on' : ''}">${{ expense: '📤', income: '📥', transfer: '🔄' }[k]} ${l}</button>`).join('')}
     </div>
-    <input id="tx-amount" class="amount-input" inputmode="decimal" placeholder="${esc(money(0))}" value="${moneyInput(t.amount)}" autofocus>
+    <input data-money id="tx-amount" class="amount-input" inputmode="decimal" placeholder="${esc(money(0))}" value="${moneyInput(t.amount)}" autofocus>
     <div class="form-grid" style="margin-top:16px">
       <label class="field full">${T('Description')} <input id="tx-desc" maxlength="200" value="${esc(t.description || '')}" placeholder="${esc(T('E.g. Supermarket shopping, electricity bill…'))}">
         <span id="tx-sugg-note" class="sugg-note hidden"></span></label>
@@ -1474,7 +1709,7 @@ function txModal(tx = null, defaults = {}) {
           { ok: T('Record anyway'), danger: false, title: T('Possible duplicate transaction') }))) { txModal({ ...body, id: undefined }); return; }  // reopens the dialog with the data
         res = await api('/transactions', { method: 'POST', body: { ...body, force: true } });
       }
-      if (res.warning) toast(res.warning, 'info');
+      if (res.warning) toast(res.warning, 'warn');
       else toast(editing ? T('Transaction updated') : T('Transaction recorded ✓'));
       if (defaults.afterSave) await defaults.afterSave(res);
       await loadMeta();
@@ -1497,11 +1732,12 @@ async function renderConti(v) {
       <div class="acc-name">${esc(a.name)}</div>
       <div class="acc-bal">${money(worth(a))}</div>
       <div class="acc-sub">${a.market_value != null ? T('market value · cash {amount}', { amount: money(a.balance) }) : tn('{n} transaction · opening balance {amount}', '{n} transactions · opening balance {amount}', a.tx_count, { amount: money(a.initial_balance) })}</div>
+      ${a.checked_until ? `<div class="acc-sub" title="${esc(T('The balance matched the bank statement on this date'))}">🧾 ${T('Checked with the bank up to {date}', { date: esc(fmtDate(a.checked_until)) })}</div>` : ''}
       <div class="acc-actions">
         ${a.archived ? '' : `<button data-acc-transfer="${a.id}">🔄 ${T('Transfer')}</button>`}
         <button data-acc-edit="${a.id}">✏️ ${T('Edit')}</button>
         <span class="acc-menu"><button class="acc-more" data-acc-menu title="${esc(T('More'))}">⋯</button>
-          <span class="acc-pop hidden"><button data-acc-tx="${a.id}">📄 ${T('Transactions')}</button><button data-acc-doubles="${a.id}">🔍 ${T('Check for money recorded twice')}</button>
+          <span class="acc-pop hidden"><button data-acc-tx="${a.id}">📄 ${a.type === 'investimenti' ? T('Transactions and trades') : T('Transactions')}</button><button data-acc-check="${a.id}">🧾 ${T('Check against the bank statement')}</button><button data-acc-doubles="${a.id}">🔍 ${T('Check for money recorded twice')}</button>
             <button data-acc-history="${a.id}">🕘 ${T('Compare with an automatic backup')}</button></span></span>
       </div></div>`;
   const archived = S.accounts.filter((a) => a.archived);
@@ -1544,6 +1780,7 @@ async function renderConti(v) {
     pop.classList.toggle('hidden', !open);
   }));
   document.addEventListener('click', () => $$('.acc-pop').forEach((p) => p.classList.add('hidden')), { once: true });
+  $$('[data-acc-check]').forEach((b) => (b.onclick = (e) => { e.stopPropagation(); $$('.acc-pop').forEach((p) => p.classList.add('hidden')); balanceCheckModal(+b.dataset.accCheck); }));
   $$('[data-acc-doubles]').forEach((b) => (b.onclick = async (e) => { e.stopPropagation(); await doublesModal(+b.dataset.accDoubles); refresh(); }));
   $$('[data-acc-history]').forEach((b) => (b.onclick = async (e) => { e.stopPropagation(); await compareBackupModal(+b.dataset.accHistory); refresh(); }));
   const accs = activeAccounts().filter((a) => worth(a) > 0);
@@ -1624,7 +1861,7 @@ function accountModal(a = null, preset = {}) {
     <div class="form-grid">
       <label class="field full">${T('Name')} <input id="a-name" maxlength="60" value="${esc(x.name)}" placeholder="${esc(T('E.g. Main bank account, Prepaid card, Cash'))}" autofocus></label>
       <label class="field">${T('Type')} <select id="a-type">${Object.entries(ACC_TYPES).map(([k, l]) => `<option value="${k}" ${x.type === k ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
-      <label class="field">${T('Opening balance')} <input id="a-init" inputmode="decimal" value="${moneyInput(x.initial_balance)}" placeholder="${moneyPlaceholder()}"></label>
+      <label class="field">${T('Opening balance')} <input data-money id="a-init" inputmode="decimal" value="${moneyInput(x.initial_balance)}" placeholder="${moneyPlaceholder()}"></label>
       <div class="full acc-type-help" id="a-help"></div>
       <div class="field full">${T('Color')} ${swatchPicker('a-color', x.color)}</div>
       <div class="field full">${T('Icon')} ${emojiPicker('a-icon', x.icon)}</div>
@@ -1690,6 +1927,28 @@ async function renderRicorrenti(v) {
   // margin: what is left each month after every fixed item (income and transfers received − expenses − transfers out)
   const margin = fixedIn + trIn - fixedOut - trOutOther;
   const rises = list.filter((r) => r.increase).sort((a, b) => b.increase.per_year - a.increase.per_year);  // 2.6.0
+  // subscriptions and services (2.7.0): the active recurring expenses that are not loans, per year — what they cost
+  // together, how much of the fixed income they take, by category, the largest first
+  const subsCard = () => {
+    const subs = act.filter((r) => r.kind === 'expense' && !r.installments).map((r) => ({ ...r, year: Math.round(r.monthly_equivalent * 12) }))
+      .sort((a, b) => b.year - a.year);
+    if (!subs.length) return '';
+    const year = subs.reduce((s, r) => s + r.year, 0), income = (fixedIn + trIn) * 12;
+    const byCat = {};
+    subs.forEach((r) => { const k = r.category_name || T('Uncategorized'); (byCat[k] ||= { icon: r.category_icon || '❔', color: r.category_color || C.muted, year: 0 }).year += r.year; });
+    const cats = Object.entries(byCat).sort((a, b) => b[1].year - a[1].year);
+    return `<div class="card"><div class="card-head"><div><h3>🧾 ${T('Subscriptions and services')}</h3>
+        <p class="muted small" style="margin:3px 0 0">${T('Recurring expenses that are not loans, counted over a year. A good place to look for something to cancel or renegotiate.')}</p></div></div>
+      <div class="rec-stats" style="grid-template-columns:repeat(3,minmax(0,1fr))">
+        <div class="rec-stat"><span>${T('Per year')}</span><b>${money0(year)}</b></div>
+        <div class="rec-stat"><span>${T('Per month')}</span><b>${money0(year / 12)}</b></div>
+        <div class="rec-stat" title="${esc(T('Share of the fixed monthly income'))}"><span>${T('Of income')}</span><b>${income ? pct(year / income) : '—'}</b></div></div>
+      <div class="pt-bars" style="margin-top:12px">${cats.map(([name, c]) => `<div class="pt-bar"><span class="pt-l">${esc(c.icon)} ${esc(name)}</span>
+        <span class="pt-track"><i style="width:${(c.year / cats[0][1].year * 100).toFixed(1)}%;background:${esc(c.color)}"></i></span><b class="num">${pct(c.year / year)}</b><span class="muted small num">${money0(c.year)}</span></div>`).join('')}</div>
+      <div class="list" style="margin-top:10px">${subs.slice(0, 8).map((r) => `<div class="list-item"><div class="grow"><b>${esc(r.name)}</b>${r.increase ? ` <span class="tag warn" title="${esc(T('Costs more than before'))}">▲ ${fix2(r.increase.pct * 100)}%</span>` : ''}
+        <div class="muted small">${esc(FREQ[r.frequency] || r.frequency)} · ${money(r.amount)}</div></div><b class="num">${money0(r.year)}<span class="muted small"> / ${T('year')}</span></b></div>`).join('')}
+        ${subs.length > 8 ? `<div class="muted small">${tn('and {n} more', 'and {n} more', subs.length - 8)}</div>` : ''}</div></div>`;
+  };
   const groups = [
     [T('📈 Investment plans'), list.filter(isPac), T('Each contribution automatically buys units of the chosen security at the day\'s estimated price: then verify the actual price in Investments.')],
     [T('🏠 Mortgages & loans'), list.filter((r) => r.installments)],
@@ -1715,7 +1974,7 @@ async function renderRicorrenti(v) {
       <div>${groups.length ? groups.map(([title, l, help]) => `<div class="section-title" style="margin-top:4px">${title}</div>${help ? `<p class="muted small" style="margin:-4px 0 10px">${help}</p>` : ''}<div class="rec-grid">${l.map(recCard).join('')}</div>`).join('')
         : `<div class="card empty"><div class="big">🔁</div><h3>${T('No recurring items')}</h3><p>${T('Set up your mortgage, loans, rent, subscriptions and salary: they will be recorded automatically every time they fall due.')}</p>
           <div class="actions"><button class="btn btn-primary" data-new>＋ ${T('Create the first one')}</button></div></div>`}</div>
-      <div style="align-self:start;display:grid;gap:18px">${rises.length ? `<div class="card ins-card"><div class="card-head"><div><h3>📈 ${T('Costs more than before')}</h3>
+      <div style="align-self:start;display:grid;gap:18px">${subsCard()}${rises.length ? `<div class="card ins-card"><div class="card-head"><div><h3>📈 ${T('Costs more than before')}</h3>
           <p class="muted small" style="margin:3px 0 0">${T('The last payment against the usual one (median of the previous ones). Only a signal: nothing is changed; edit the item if the new price stays.')}</p></div>
           <span class="tag warn">${money0(rises.reduce((s, r) => s + r.increase.per_year, 0))} / ${T('year')}</span></div>
         <div class="list">${rises.map((r) => `<div class="list-item"><div class="cat-ico" style="--c:${esc(r.category_color || C.out)}">${esc(r.category_icon || '🔁')}</div>
@@ -1788,10 +2047,7 @@ async function renderCalendario(v) {
     <div class="right"><b class="${x.effect > 0 ? 'pos' : x.effect < 0 ? 'neg' : 'muted'}">${x.estimated ? '≈ ' : ''}${x.effect ? (x.effect > 0 ? '+' : '−') + money(Math.abs(x.effect)) : '↔ ' + money(x.amount)}</b>
       <div class="muted small">${T('balance {amount}', { amount: money0(x.after) })}</div></div></div>`;
   v.innerHTML = `
-    <div class="toolbar"><select id="cal-months">${[['1', T('This month')], ['3', T('Next 3 months')], ['6', T('Next 6 months')], ['12', T('Next 12 months')]].map(([k, l]) => `<option value="${k}" ${k === S.calMonths ? 'selected' : ''}>${l}</option>`).join('')}</select>
-      <details class="help" style="flex:1 1 300px"><summary>ℹ️ ${T('How it works')}</summary>
-        <p>${T('Due dates of active recurring items (including transfers coming in from other spaces). Cash = only the day-to-day accounts (current, savings, cards, cash), where the payments go through; the Emergency fund also counts broker cash and money market ETFs.')}</p>
-        ${plusEst || minusEst ? `<p>≈ ${T('<b>Estimated</b>, with the same method for income and expenses: variable recurring items (median of recent payments) and regular transactions without a recurring item, recognized from history (same payer or payee in at least {min} of the last {months} months, ignoring month and year in the description; median monthly amount and day). Occasional expenses are not forecast; among estimated income only significant amounts are included (at least {amount} and 5% of the largest, so small account interest is left out). To track an item better, create a "variable amount" recurring item in Recurring.', { min: d.regular_min, months: d.history_months, amount: money0(5000) })}</p>` : ''}</details></div>
+    <div class="toolbar"><select id="cal-months">${[['1', T('This month')], ['3', T('Next 3 months')], ['6', T('Next 6 months')], ['12', T('Next 12 months')]].map(([k, l]) => `<option value="${k}" ${k === S.calMonths ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
     <div class="kpis">
       <div class="kpi g-indigo" title="${esc(T('day-to-day accounts, no broker') + ' · ' + T('The emergency fund adds the uninvested broker cash and money market ETFs'))}"><div class="k-label">💧 ${T('Cash in accounts today')}</div><div class="k-value">${money0(d.start_liquidity)}</div>
         ${kRows([`📅 ${T('Due dates')}`, items.length])}</div>
@@ -1804,12 +2060,33 @@ async function renderCalendario(v) {
       <div class="kpi g-amber"><div class="k-label">${bal < 0 ? '⚠️' : '🔮'} ${T('Projected cash on {date}', { date: esc(fmtDate(d.end)) })}</div><div class="k-value">${plusEst || minusEst ? '≈ ' : ''}${money0(bal)}</div>
         ${kRows(plusEst || minusEst ? [`✔ ${T('Confirmed only')}`, money0(sure)] : null, [`Δ ${T('Difference')}`, (bal >= d.start_liquidity ? '+' : '−') + money0(Math.abs(bal - d.start_liquidity))])}</div>
     </div>
+    ${(() => {
+      // the lowest point of the projection (2.7.0): when cash is at its least, and whether it goes under the minimum
+      // the user wants to keep (or under zero). The first day it does, so there is time to move money
+      const floor = d.cash_floor ?? 0;
+      const low = items.reduce((m, x) => (x.after < m.after ? x : m), { after: d.start_liquidity, date: d.today });
+      const under = items.find((x) => x.after < floor);
+      const bad = low.after < floor;
+      return `<div class="card cal-low ${bad ? 'bad' : ''}"><div class="card-head"><div><h3>${bad ? '⚠️' : '📉'} ${T('Lowest point')}</h3>
+          <p class="muted small" style="margin:3px 0 0">${T('The least cash in the day-to-day accounts in the period shown, with every due date and estimate. Set the minimum you want to keep: HomeCoin tells you when the projection goes below it.')}</p></div>
+          <label class="field" style="flex-direction:row;align-items:center;gap:8px;white-space:nowrap">${T('Minimum to keep')} <input data-money id="cal-floor" inputmode="decimal" style="width:120px" placeholder="${esc(moneyPlaceholder())}" value="${d.cash_floor ? moneyInput(d.cash_floor) : ''}"></label></div>
+        <div class="rec-stats" style="grid-template-columns:repeat(3,minmax(0,1fr))">
+          <div class="rec-stat"><span>${T('Lowest cash')}</span><b class="${bad ? 'neg' : ''}">${items.some((x) => x.estimated) ? '≈ ' : ''}${money0(low.after)}</b></div>
+          <div class="rec-stat"><span>${T('On')}</span><b>${esc(fmtDate(low.date))}</b></div>
+          <div class="rec-stat"><span>${T('Room above the minimum')}</span><b class="${bad ? 'neg' : 'pos'}">${(low.after - floor >= 0 ? '+' : '−') + money0(Math.abs(low.after - floor))}</b></div></div>
+        ${under ? `<p class="small neg" style="margin:10px 0 0">⚠️ ${T('On {date} the projected cash goes below {amount}: move money to the day-to-day accounts before then, or postpone an expense.', { date: esc(fmtDate(under.date)), amount: money0(floor) })}</p>` : ''}</div>`;
+    })()}
     ${months.map((m) => {
       const key = isoLocal(m).slice(0, 7), its = items.filter((x) => x.date.startsWith(key));
       return `<div class="card" style="margin-bottom:18px"><div class="card-head"><h3>${esc(fmtMonth(key))}</h3><span class="muted">${tn('{n} due', '{n} due', its.length)}</span></div>
         <div class="cal-wrap">${grid(m)}<div class="list">${its.length ? its.map(line).join('') : `<div class="empty">${T('Nothing due')}</div>`}</div></div></div>`;
     }).join('')}`;
   $('#cal-months').onchange = (e) => { S.calMonths = e.target.value; route(); };
+  $('#cal-floor').addEventListener('change', async (e) => {
+    const raw = e.target.value.trim(), amount = raw ? parseMoney(raw) : '';
+    if (raw && (amount == null || Number.isNaN(amount) || amount < 0)) { toast(T('Enter a valid amount'), 'err'); return; }
+    try { await api('/calendar/floor', { method: 'PUT', body: { amount } }); route(); } catch (err) { fail(err); }
+  });
 }
 
 function recCard(r) {
@@ -1881,7 +2158,7 @@ function recurringModal(r = null) {
     <div class="seg" id="r-kind" style="margin-bottom:16px">${Object.entries(KIND_LABEL).map(([k, l]) => `<button type="button" data-kind="${k}">${l}</button>`).join('')}</div>
     <div class="form-grid">
       <label class="field">${T('Name')} <input id="r-name" maxlength="80" value="${esc(x.name || '')}" placeholder="${esc(T('E.g. Home mortgage'))}" autofocus>${r ? '' : '<span id="r-sugg-note" class="sugg-note hidden"></span>'}</label>
-      <label class="field">${T('Amount per payment')} <input id="r-amount" inputmode="decimal" value="${moneyInput(x.amount)}" placeholder="0,00"></label>
+      <label class="field">${T('Amount per payment')} <input data-money id="r-amount" inputmode="decimal" value="${moneyInput(x.amount)}" placeholder="0,00"></label>
       <label class="field">${T('Frequency')} <select id="r-freq">${Object.entries(FREQ).map(([k, l]) => `<option value="${k}" ${x.frequency === k ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
       <label class="field">${T('First due date')} <input id="r-start" type="date" value="${esc(x.start_date)}"></label>
       ${r && !r.expected && r.next_date ? `<label class="field">${T('Next due date')} <input id="r-next" type="date" value="${esc(r.next_date)}" min="${todayIso()}">
@@ -1904,7 +2181,7 @@ function recurringModal(r = null) {
         <select id="r-pac"><option value="">— ${T('no automatic purchase (transfer only)')}</option></select>
         <span class="muted small">${T('Units are calculated from the amount and the last known price; the trade can still be edited in Investments. Without a known price the purchase goes among those "to complete".')}</span></label>
       <label class="field">${T('Number of installments')} <input id="r-inst" type="number" min="1" value="${x.installments || ''}" placeholder="${esc(T('Empty = no end'))}"></label>
-      <label class="field">${T('Amount financed')} <input id="r-principal" inputmode="decimal" value="${moneyInput(x.principal)}" placeholder="${esc(T('Optional (for the interest calculation)'))}"></label>
+      <label class="field">${T('Amount financed')} <input data-money id="r-principal" inputmode="decimal" value="${moneyInput(x.principal)}" placeholder="${esc(T('Optional (for the interest calculation)'))}"></label>
       <div class="field full rate-box"><span>${T('Loan interest rate')} <span class="muted small">${T('(for the amortization schedule; excluding APR and additional costs)')}</span></span>
         <div class="rate-grid">
           <label class="field">${T('Repayment')} <select id="r-amort" title="${esc(T('How each installment is made up'))}">${[['french', T('Constant installment (French)')], ['constant', T('Constant principal (Italian, SAC)')]].map(([k, l]) =>
@@ -2240,6 +2517,8 @@ async function renderImport(v) {
 async function renderReport(v) {
   // same periods as the dashboard; plus the previous years ("y:2025")
   const R = (S.rep ||= { period: DEFAULT_PERIOD });
+  R.period = /^y:\d{4}$/.test(periodPref.range || '') ? periodPref.range
+    : periodFor([...REPORT_PERIODS.map(([k]) => k), 'all', `y:${new Date().getFullYear() - 1}`]);
   let query, label;
   if (R.period === 'all') {
     query = { all: 1 }; label = 'all';
@@ -2308,7 +2587,7 @@ async function renderReport(v) {
       <tfoot><tr><td>${T('Total')}</td>${single ? '' : d.months.map((x, i) => x ? `<td ${txLink({ kind: tab === 'income' ? 'income' : 'expense',excluded: 0, ...monthBounds(data.months[i]) }, `${T('All transactions ·')} ${fmtMonth(data.months[i])}`)}>${money0(x)}</td>` : '<td>·</td>').join('')}<td ${txLink({ kind: tab === 'income' ? 'income' : 'expense',excluded: 0, from: data.from, to: data.to })}>${money(d.total)}</td><td></td></tr></tfoot>
     </table></div></div>`;
 
-  $('#r-period').onchange = (e) => { R.period = e.target.value; route(); };
+  $('#r-period').onchange = (e) => { choosePeriod(e.target.value); route(); };
   $$('#r-tab button, .k-split [data-t]', v).forEach((b) => (b.onclick = (e) => { e.preventDefault(); S.reportTab = b.dataset.t; route(); }));
   $('#r-brief').onclick = () => yearBriefModal(R.period.startsWith('y:') ? +R.period.slice(2) : new Date().getFullYear(),
     [...new Set([String(new Date().getFullYear()), ...data.years])].map(Number).sort((a, b) => b - a));
@@ -2392,7 +2671,7 @@ function drawReportChart(data, d, single, tab) {
         id: 'tipLabels',
         afterDatasetsDraw(c) {
           const { ctx } = c; ctx.save(); ctx.font = `600 12px ${font.family}`; ctx.fillStyle = ink; ctx.textBaseline = 'middle';
-          c.getDatasetMeta(0).data.forEach((bar, i) => ctx.fillText(money0(d.rows[i].total), bar.x + 8, bar.y));
+          c.getDatasetMeta(0).data.forEach((bar, i) => ctx.fillText(cashText(money0(d.rows[i].total)), bar.x + 8, bar.y));
           ctx.restore();
         },
       }],
@@ -2461,14 +2740,14 @@ function drawReportChart(data, d, single, tab) {
           ctx.strokeStyle = muted; ctx.lineWidth = 1.5; ctx.setLineDash([5, 4]);
           ctx.beginPath(); ctx.moveTo(area.left, ay); ctx.lineTo(area.right, ay); ctx.stroke(); ctx.setLineDash([]);
           ctx.font = `600 11px ${font.family}`; ctx.fillStyle = muted; ctx.textAlign = 'right'; ctx.textBaseline = 'bottom';
-          ctx.fillText(`avg ${moneyK(avg)}`, area.right, ay - 3);
+          ctx.fillText(T('Average {amount}', { amount: cashText(moneyK(avg)) }), area.right, ay - 3);
         }
         // total above each bar, on a surface-colored background so the average line passes behind it
         ctx.font = `600 11.5px ${font.family}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
         data.months.forEach((_, i) => {
           const tot = visibleTotal(i);
           if (!tot) return;
-          const x = ch.getDatasetMeta(0).data[i].x, ty = y.getPixelForValue(tot) - 11, txt = moneyK(tot);
+          const x = ch.getDatasetMeta(0).data[i].x, ty = y.getPixelForValue(tot) - 11, txt = cashText(moneyK(tot));
           const w = ctx.measureText(txt).width + 8;
           ctx.fillStyle = surface; ctx.fillRect(x - w / 2, ty - 8, w, 16);
           ctx.fillStyle = ink; ctx.fillText(txt, x, ty);
@@ -2547,7 +2826,7 @@ async function renderRipartizione(v) {
   };
   const personRow = (p = {}) => `<div class="sp-person" data-id="${p.id ?? ''}">
       <input data-f="name" maxlength="40" placeholder="${esc(T('Name'))}" value="${esc(p.name ?? '')}">
-      <input data-f="income" inputmode="decimal" placeholder="${esc(T('Net monthly income'))}" value="${p.income ? moneyInput(p.income) : ''}">
+      <input data-money data-f="income" inputmode="decimal" placeholder="${esc(T('Net monthly income'))}" value="${p.income ? moneyInput(p.income) : ''}">
       ${spaceSelect(p)}
       <input data-f="keyword" maxlength="40" placeholder="${esc(p.name || T('Word in contributions'))}" value="${esc(p.keyword ?? '')}" title="${esc(T('Word that recognizes this person\'s contributions in the description of the incomes (e.g. the name as it appears on bank transfers). Empty = their name.'))}">
       <button class="icon-btn sm" data-del-person title="${esc(T('Remove'))}">✕</button></div>`;
@@ -2555,7 +2834,7 @@ async function renderRipartizione(v) {
   const manualRow = (it = {}) => `<div class="sp-mrow">
       <input data-m="name" maxlength="60" placeholder="${esc(T('Item (e.g. Mortgage, Groceries, Unexpected)'))}" value="${esc(it.name ?? '')}">
       <select data-m="account">${state.accounts.map((a) => `<option value="${a.id}" ${+it.account_id === a.id ? 'selected' : ''}>${esc(a.name)}</option>`).join('')}</select>
-      <input data-m="amount" inputmode="decimal" placeholder="${esc(T('{symbol} / month', { symbol: CUR_SYM }))}" value="${it.amount ? moneyInput(it.amount) : ''}">
+      <input data-money data-m="amount" inputmode="decimal" placeholder="${esc(T('{symbol} / month', { symbol: CUR_SYM }))}" value="${it.amount ? moneyInput(it.amount) : ''}">
       <select data-m="rule">${SPLIT_RULES.map(([k, l]) => `<option value="${k}" ${(it.rule || 'prop') === k ? 'selected' : ''}>${l}</option>`).join('')}</select>
       <button class="icon-btn sm" data-m-del title="${esc(T('Remove'))}">✕</button></div>`;
   const parseManual = () => { try { return JSON.parse(state.settings.split_manual || '[]'); } catch { return []; } };
@@ -2765,7 +3044,7 @@ async function renderRipartizione(v) {
       try {
         const res = await api('/split/apply', { method: 'POST', body: { deposits: list.map((d) => ({ account_id: d.account_id, person_id: d.person_id, amount: d.rounded })) } });
         toast(`${T('Recurring items updated:')} ${res.updated}${res.created ? ` · ${T('created')} ${res.created}` : ''}${res.transfers?.length ? ` · ${T('transfers updated in the contributor\'s space:')} ${res.transfers.join(', ')}` : ''}`);
-        (res.warnings || []).forEach((w) => toast(w, 'err'));
+        (res.warnings || []).forEach((w) => toast(w, 'warn'));
       } catch (e) { fail(e); }
     };
   }
@@ -2822,7 +3101,7 @@ function categoryModal(c = null, kind = 'expense') {
   const m = openModal(c ? T('Edit category') : x.kind === 'expense' ? T('New expense category') : T('New income category'), `
     <div class="form-grid">
       <label class="field ${x.kind === 'expense' ? '' : 'full'}">${T('Name')} <input id="c-name" maxlength="60" value="${esc(x.name)}" autofocus></label>
-      ${x.kind === 'expense' ? `<label class="field">${T('Monthly budget')} <input id="c-budget" inputmode="decimal" value="${moneyInput(x.budget)}" placeholder="${esc(T('None'))}"></label>` : ''}
+      ${x.kind === 'expense' ? `<label class="field">${T('Monthly budget')} <input data-money id="c-budget" inputmode="decimal" value="${moneyInput(x.budget)}" placeholder="${esc(T('None'))}"></label>` : ''}
       <div class="field full">${T('Color')} ${swatchPicker('c-color', x.color)}</div>
       <div class="field full">${T('Icon')} ${emojiPicker('c-icon', x.icon)}</div>
       ${x.kind === 'expense' ? `<label class="check full"><input type="checkbox" id="c-flow" ${x.flow === 'other' ? 'checked' : ''}>
@@ -3017,7 +3296,7 @@ function effectTable(r) {
 async function compareBackupModal(aid) {
   let list;
   try { list = await api('/backups/auto'); } catch (e) { fail(e); return; }
-  if (!list.length) { toast(T('There are no automatic backups yet'), 'err'); return; }
+  if (!list.length) { toast(T('There are no automatic backups yet'), 'info'); return; }
   const acc = S.allAccounts.find((a) => a.id === aid);
   const restore = new Set();
   const reason = (x) => ({ startup: T('at start'), 'pre-convert': T('before turning expenses into transfers'), 'pre-reconcile': T('before a reconciliation'),
@@ -3066,6 +3345,50 @@ async function compareBackupModal(aid) {
 // money recorded twice in one account (an income and a transfer for the same money, a generated transfer and the same
 // one entered by hand, an import done twice): pairs to tick, the most coherent record of each pair is kept.
 // Resolves when the window is closed.
+// balance check against the bank statement (2.7.0): the balance on a date in HomeCoin and on the statement, the
+// difference and its likely causes. It records nothing: a difference can be recorded through the usual window
+function balanceCheckModal(aid) {
+  const a = S.accounts.find((x) => x.id === aid);
+  const m = openModal(`🧾 ${T('Check against the bank statement')} · ${esc(a?.name || '')}`, `
+    <p class="muted small" style="margin-top:0">${T('Type the balance written on your bank statement (or in your banking app) and its date: HomeCoin compares it with its own balance on the same day and looks for what explains a difference. Nothing is changed.')}</p>
+    <div class="form-grid"><label class="field">${T('Date')} <input id="bl-date" type="date" value="${todayIso()}"></label>
+      <label class="field">${T('Balance on the statement')} <input data-money id="bl-bal" inputmode="decimal" placeholder="${esc(moneyPlaceholder())}" autofocus></label></div>
+    <div id="bl-res"></div>
+    <div class="modal-foot"><button class="btn" data-cancel>${T('Close')}</button><button class="btn btn-primary" id="bl-go">${T('Check')}</button></div>`);
+  $('[data-cancel]', m).onclick = closeModal;
+  const WHY = {
+    later: T('Recorded in HomeCoin after the date: the bank may have booked them earlier. Check their dates.'),
+    twice: T('In HomeCoin but maybe not at the bank (or recorded twice): exactly the difference.'),
+    sign: T('Maybe recorded in the wrong direction (income instead of expense or the other way round): twice the difference.'),
+    double: T('Two identical records a few days apart: maybe the same one twice.'),
+  };
+  const item = (t) => `<div class="list-item clickable" ${txLink({ q: searchKey(t.description), account_id: aid })}>${dateChip(t.date)}
+    <div class="grow"><div class="title">${esc(t.description || KIND_LABEL[t.kind])}</div><div class="muted small">${esc(KIND_LABEL[t.kind])}${t.to_account_name ? ` · ${esc(t.account_name)} → ${esc(t.to_account_name)}` : ''}</div></div>
+    <b class="${t.effect >= 0 ? 'pos' : 'neg'} num">${t.effect >= 0 ? '+' : '−'}${money(Math.abs(t.effect))}</b></div>`;
+  $('#bl-go', m).onclick = async () => {
+    const bal = parseSignedMoney($('#bl-bal', m).value);
+    if (!$('#bl-bal', m).value.trim() || bal == null || Number.isNaN(bal)) { toast(T('Enter a valid amount'), 'err'); $('#bl-bal', m).focus(); return; }
+    let r;
+    try { r = await api(`/accounts/${aid}/check-balance`, { method: 'POST', body: { date: $('#bl-date', m).value, balance: bal } }); } catch (e) { fail(e); return; }
+    const d = r.difference;
+    $('#bl-res', m).innerHTML = `<div class="rec-stats" style="grid-template-columns:repeat(3,minmax(0,1fr));margin-top:14px">
+        <div class="rec-stat"><span>${T('In HomeCoin')}</span><b>${money(r.book)}</b></div>
+        <div class="rec-stat"><span>${T('On the statement')}</span><b>${money(r.statement)}</b></div>
+        <div class="rec-stat"><span>${T('Difference')}</span><b class="${d ? 'neg' : 'pos'}">${d ? (d > 0 ? '+' : '−') + money(Math.abs(d)) : '✓ 0'}</b></div></div>
+      ${!d ? `<p class="small pos" style="margin:12px 0 0">✅ ${T('The balances match: the account is checked up to {date}.', { date: esc(fmtDate(r.date)) })}</p>`
+        : `<p class="small" style="margin:12px 0 6px">${d > 0 ? T('The bank has more money than HomeCoin: an income or a transfer in is probably missing, or an expense was recorded twice.')
+          : T('The bank has less money than HomeCoin: an expense is probably missing, or an income was recorded twice.')}</p>
+        ${r.causes.length ? r.causes.map((c) => `<div class="small" style="margin-top:10px"><b>🔎 ${WHY[c.type]}</b></div><div class="list">${c.items.map(item).join('')}</div>`).join('')
+          : `<p class="muted small">${T('No single record explains it: look for something missing in the days before the date.')}</p>`}
+        <div class="btn-row" style="margin-top:12px"><button class="btn btn-sm" id="bl-rec">✏️ ${T('Record the difference')}</button></div>`}`;
+    $$('[data-tx]', $('#bl-res', m)).forEach((el) => el.addEventListener('click', closeModal));
+    $('#bl-rec', m)?.addEventListener('click', () => {
+      closeModal();
+      txModal(null, { kind: d > 0 ? 'income' : 'expense', account_id: aid, amount: Math.abs(d), date: r.date, description: T('Balance adjustment') });
+    });
+  };
+}
+
 async function doublesModal(aid) {
   const choices = {};
   let days = 3, tol = 0, r;
@@ -3242,16 +3565,21 @@ async function renderBudget(v) {
   const d = await api('/budget?' + qs({ month: S.budgetMonth, avg: S.budgetAvg }));
   const avgLabel = S.budgetAvg === 'all' ? tn('Average of all ({n} month)', 'Average of all ({n} months)', d.avg_months) : tn('{n}-month average', '{n}-month average', +S.budgetAvg);
   const withB = d.categories.filter((c) => c.budget > 0), noB = d.categories.filter((c) => !c.budget);
-  const totB = withB.reduce((s, c) => s + c.budget, 0), totS = withB.reduce((s, c) => s + c.spent, 0);
-  const over = withB.filter((c) => c.spent > c.budget);
+  // with the carry-over (2.7.0) the month's limit is the budget plus what was left (or minus what was overspent)
+  const lim = (c) => (c.budget ? c.available ?? c.budget : 0);
+  const totB = withB.reduce((s, c) => s + lim(c), 0), totS = withB.reduce((s, c) => s + c.spent, 0);
+  const carried = withB.reduce((s, c) => s + (c.carry || 0), 0);
+  const over = withB.filter((c) => c.spent > lim(c));
   const [y, m] = S.budgetMonth.split('-').map(Number);
   const isCurrent = S.budgetMonth === todayIso().slice(0, 7);
   const elapsed = isCurrent ? new Date().getDate() / new Date(y, m, 0).getDate() : 1;  // share of the month elapsed
   const row = (c) => {
-    const r = c.budget ? c.spent / c.budget : 0;
+    const r = c.budget ? (lim(c) > 0 ? c.spent / lim(c) : c.spent ? 2 : 0) : 0;
     const state = !c.budget ? '' : r > 1 ? `<span class="tag err">${T('over')}</span>` : r > elapsed + 0.1 ? `<span class="tag warn">${T('ahead')}</span>` : `<span class="tag">${T('ok')}</span>`;
     return `<tr><td><span class="pill quick-filter" style="--c:${esc(c.color)}" ${txLink({ category_id: c.id, kind: 'expense', ...monthBounds(S.budgetMonth), excluded: 0 })}>${esc(c.icon)} ${esc(c.name)}</span></td>
-      <td><input class="bd-input" data-cat="${c.id}" inputmode="decimal" value="${c.budget ? moneyInput(c.budget) : ''}" placeholder="—"></td>
+      <td><input data-money class="bd-input" data-cat="${c.id}" inputmode="decimal" value="${c.budget ? moneyInput(c.budget) : ''}" placeholder="—">
+        ${c.budget ? `<label class="check small bd-roll" title="${esc(T('What you do not spend in a month is added to the next one; overspending is taken from it. From the month you turn it on.'))}"><input type="checkbox" data-roll="${c.id}" ${c.rollover ? 'checked' : ''}> ↪ ${T('Carry over')}</label>
+          ${c.carry ? `<div class="small ${c.carry > 0 ? 'pos' : 'neg'}">${T('{amount} from the months before', { amount: (c.carry > 0 ? '+' : '−') + money0(Math.abs(c.carry)) })}</div>` : ''}` : ''}</td>
       <td class="right"><b>${money0(c.spent)}</b></td><td class="right muted">${money0(c.avg)}</td>
       <td style="min-width:160px">${c.budget ? `<div class="bar ${budgetState(r)}"><i style="width:${Math.min(100, r * 100).toFixed(1)}%"></i></div><div class="muted small">${T('{percent} of budget', { percent: pct(r) })}</div>` : c.avg ? `<button class="btn btn-sm btn-ghost" data-suggest="${c.id}" data-v="${Math.ceil(c.avg / 1000) * 1000}">${T('Use the average ({amount})', { amount: money0(Math.ceil(c.avg / 1000) * 1000) })}</button>` : ''}</td>
       <td>${state}</td></tr>`;
@@ -3261,12 +3589,12 @@ async function renderBudget(v) {
       <select id="bd-avg" title="${esc(T('Average to compare against (full months)'))}">${[['3', tn('{n}-month average', '{n}-month average', 3)], ['6', tn('{n}-month average', '{n}-month average', 6)], ['12', tn('{n}-month average', '{n}-month average', 12)], ['all', T('Average of all')]].map(([k, l]) => `<option value="${k}" ${k === S.budgetAvg ? 'selected' : ''}>${l}</option>`).join('')}</select>
       <span class="muted small">${isCurrent ? T('current month: {percent} elapsed', { percent: pct(elapsed) }) : T('month closed')} · ${T('average calculated over {from} → {to}', { from: esc(fmtDate(d.avg_from)), to: esc(fmtDate(d.avg_to)) })}</span></div>
     <div class="kpis">
-      <div class="kpi g-indigo"><div class="k-label">🎯 ${T('Budget for the month')}</div><div class="k-value">${money0(totB)}</div>${kRows([`🏷️ ${T('Categories')}`, withB.length])}</div>
+      <div class="kpi g-indigo"><div class="k-label">🎯 ${T('Budget for the month')}</div><div class="k-value">${money0(totB)}</div>${kRows([`🏷️ ${T('Categories')}`, withB.length], carried && [`↪ ${T('Carried over')}`, (carried > 0 ? '+' : '−') + money0(Math.abs(carried))])}</div>
       <div class="kpi g-rose"><div class="k-label">📤 ${T('Spent (budgeted categories)')}</div><div class="k-value">${money0(totS)}</div>${kRows(totB && [`📊 ${T('Of budget')}`, pct(totS / totB)])}</div>
       <div class="kpi g-amber"><div class="k-label">🟢 ${T('Still available')}</div><div class="k-value">${money0(Math.max(0, totB - totS))}</div>
         ${kRows(isCurrent && [`📅 ${T('Days left')}`, new Date(y, m, 0).getDate() - new Date().getDate()], isCurrent && totB > totS && [`👛 ${T('Per day')}`, money0((totB - totS) / Math.max(1, new Date(y, m, 0).getDate() - new Date().getDate() + 1))])}</div>
       <div class="kpi ${over.length ? 'g-rose' : 'g-indigo'}" title="${esc(over.map((c) => c.name).join(', '))}"><div class="k-label">⚠️ ${T('Categories over budget')}</div><div class="k-value">${over.length}</div>
-        ${kRows([`🔺 ${T('Over by')}`, money0(over.reduce((s, c) => s + c.spent - c.budget, 0))])}</div>
+        ${kRows([`🔺 ${T('Over by')}`, money0(over.reduce((s, c) => s + c.spent - lim(c), 0))])}</div>
     </div>
     <div class="card"><div class="card-head"><div><h3>${T('Budget per category')}</h3><p class="muted small" style="margin:3px 0 0">${T('Type the monthly limit next to the category: it saves by itself. "Ahead" = spending faster than the share of the month that has passed.')}</p></div></div>
       <div class="table-wrap"><table class="sp-table"><thead><tr><th>${T('Category')}</th><th>${T('Budget / month')}</th><th class="right">${T('Spent this month')}</th><th class="right">${esc(avgLabel)}</th><th>${T('Progress')}</th><th></th></tr></thead>
@@ -3278,6 +3606,9 @@ async function renderBudget(v) {
   };
   $$('.bd-input', v).forEach((inp) => inp.addEventListener('change', () => saveBudget(inp.dataset.cat, parseMoney(inp.value) || 0)));
   $$('[data-suggest]', v).forEach((b) => (b.onclick = () => saveBudget(b.dataset.suggest, +b.dataset.v)));
+  $$('[data-roll]', v).forEach((c) => c.addEventListener('change', async () => {
+    try { await api(`/categories/${c.dataset.roll}/rollover`, { method: 'PUT', body: { on: c.checked } }); route(); } catch (e) { fail(e); c.checked = !c.checked; }
+  }));
 }
 
 // ================================================================ mortgage
@@ -3388,10 +3719,51 @@ async function renderEmergenza(v) {
               <div class="muted small">${em.accounts.filter((a) => a.group === 'broker').map((a) => `${esc(a.name)} ${money0(a.balance)}`).join(' · ') || T('none')}</div></div>
             <div class="em-part total"><span>🛟 ${T('Available reserve')}</span><b>${money0(em.liquidity)}</b></div>
           </div>
-        </div></div></div>`;
+        </div></div></div>
+    <div class="grid-2">
+      <div class="card"><div class="card-head"><div><h3>📈 ${T('Months covered, month by month')}</h3><p class="muted small" style="margin:3px 0 0">${T('The reserve at the end of each month, against the average spending of the months before it. Dashed line: your target.')}</p></div></div>
+        <div class="chart-box" style="height:240px"><canvas id="em-chart"></canvas></div></div>
+      <div class="card"><div class="card-head"><h3>🧭 ${T('Your plan')}</h3></div><div id="em-plan"></div>
+        <div class="form-grid" style="margin-top:12px">
+          ${em.target_amount > em.liquidity ? `<label class="field">📅 ${T('Reach the target in (months)')} <input id="em-in" type="number" min="1" max="120" value="${S.emIn || 12}"></label>` : ''}
+          <label class="field">⚡ ${T('An unexpected expense of')} <input data-money id="em-shock" inputmode="decimal" placeholder="${esc(moneyPlaceholder())}" value="${S.emShock ? moneyInput(S.emShock) : ''}"></label>
+        </div><div id="em-calc"></div></div>
+    </div>`;
   $('#em-target').addEventListener('change', async (e) => {
     try { await api('/tools/emergency', { method: 'PUT', body: { target_months: e.target.value } }); route(); } catch (err) { fail(err); }
   });
+  // where the reserve is going: pace of the last 6 months, when it reaches the target, what is above it
+  const missing = Math.max(0, em.target_amount - em.liquidity), surplus = em.liquidity - em.target_amount;
+  const eta = em.pace > 0 && missing ? Math.ceil(missing / em.pace) : null;
+  const etaDate = eta ? fmtMonthYear(isoLocal(new Date(new Date().getFullYear(), new Date().getMonth() + eta, 1)).slice(0, 7)) : '';
+  const planRow = (icon, html) => `<div class="em-plan-row"><span class="pt-ico">${icon}</span><div>${html}</div></div>`;
+  $('#em-plan', v).innerHTML = [
+    em.pace == null ? '' : planRow(em.pace >= 0 ? '📈' : '📉', em.pace >= 0
+      ? T('In the last 6 months the reserve grew by <b>{amount}</b> per month on average.', { amount: money0(em.pace) })
+      : T('In the last 6 months the reserve went down by <b>{amount}</b> per month on average.', { amount: money0(-em.pace) })),
+    !em.target_amount ? '' : missing
+      ? planRow('🎯', eta ? T('At this pace you reach the target in <b>{months}</b> (around {date}).', { months: tn('{n} month', '{n} months', eta), date: esc(etaDate) })
+        : T('At this pace the target is not reached: {amount} are missing.', { amount: money0(missing) }))
+      : planRow('✅', T('Target reached.') + (surplus > 0 ? ` ${T('<b>{amount}</b> are above it: money that could work for you (a goal, or invested), keeping the reserve at the target.', { amount: money0(surplus) })}` : '')),
+  ].join('') || `<div class="muted small">${T('Not enough history yet.')}</div>`;
+  const calc = () => {
+    const n = Math.min(120, Math.max(1, Math.round(+($('#em-in', v)?.value) || S.emIn || 12)));
+    const shock = Math.max(0, parseMoney($('#em-shock', v).value) || 0);
+    S.emIn = n; S.emShock = shock;
+    const after = em.liquidity - shock;
+    $('#em-calc', v).innerHTML = `<div class="rec-stats" style="grid-template-columns:repeat(${missing ? 2 : 1},minmax(0,1fr));margin-top:10px">
+      ${missing ? `<div class="rec-stat"><span>${T('To set aside per month')}</span><b>${money0(Math.ceil(missing / n))}</b></div>` : ''}
+      <div class="rec-stat"><span>${shock ? T('Months covered after it') : T('Months covered')}</span><b class="${em.avg_expenses && after / em.avg_expenses < em.target_months ? 'neg' : ''}">${em.avg_expenses ? num(Math.max(0, after) / em.avg_expenses) : '—'}${shock ? ` · ${money0(after)}` : ''}</b></div></div>`;
+  };
+  $('#em-in', v)?.addEventListener('input', calc);
+  $('#em-shock', v).addEventListener('input', calc);
+  calc();
+  const h = em.history || [];
+  chart($('#em-chart', v), { type: 'bar', data: { labels: h.map((x) => fmtMonth(x.month)), datasets: [
+    { type: 'line', label: T('Target'), data: h.map(() => em.target_months), borderColor: C.total, borderDash: [5, 4], borderWidth: 2, pointRadius: 0 },
+    { label: T('Months covered'), data: h.map((x) => (x.months == null ? null : +x.months.toFixed(2))), backgroundColor: h.map((x) => (x.months != null && x.months >= em.target_months ? C.in : C.left)), borderRadius: 4, maxBarThickness: 30 }] },
+    options: { maintainAspectRatio: false, scales: { y: { beginAtZero: true, ticks: { callback: (x) => num(x, 1) } }, x: { grid: { display: false } } },
+      plugins: { legend: { display: false }, tooltip: { callbacks: { label: (c) => (c.datasetIndex === 0 ? ` ${T('Target')}: ${num(c.raw, 1)}` : ` ${tn('{n} month', '{n} months', c.raw, { n: num(c.raw) })} · ${money0(h[c.dataIndex].reserve)}`) } } } } });
 }
 
 // ================================================================ goals
@@ -3418,6 +3790,9 @@ async function renderObiettivi(v) {
         <div class="bar"><i style="width:${(gl.progress * 100).toFixed(1)}%"></i></div></div>
       <div class="rec-stats">${gl.target_date ? `<div class="rec-stat"><span>${T('Per month')}</span><b>${money0(gl.monthly_needed)}</b></div><div class="rec-stat"><span>${T('Months')}</span><b>${gl.months_left}</b></div>` : `<div class="rec-stat"><span>${T('Deadline')}</span><b>${T('none')}</b></div><div class="rec-stat"><span></span><b></b></div>`}
         <div class="rec-stat"><span>${gl.per_person ? T('Each') : ''}</span><b>${gl.per_person ? gl.per_person.map((p) => `${esc(p.name)} ${money0(p.monthly)}`).join(' · ') : ''}</b></div></div>
+      ${gl.pace != null && gl.progress < 1 ? `<div class="gl-pace small ${gl.late ? 'neg' : gl.eta ? 'pos' : 'muted'}">${gl.pace > 0 && gl.eta
+        ? `${gl.late ? '⚠️' : '📈'} ${T('At the pace of the last 6 months (+{amount} per month) you get there around {date}.', { amount: money0(gl.pace), date: esc(fmtMonthYear(gl.eta)) })}${gl.late ? ` ${T('Later than the date you set.')}` : gl.target_date ? ` ${T('In time.')}` : ''}`
+        : `⏸ ${T('In the last 6 months the balance did not grow: at this pace the goal is not reached.')}`}</div>` : ''}
       ${calcNotes(gl.notes)}
       <div class="rec-actions"><button class="btn btn-sm" data-gl="${gl.id}">✏️ ${T('Edit')}</button></div></div>`).join('')
       || `<div class="card empty"><div class="big">🏁</div><h3>${T('No goals')}</h3><p>${family ? T('Holiday, new car, home improvements…') : T('Trip, car, course, home down payment…')} ${T('Set the amount and the date: HomeCoin calculates how much to set aside each month')}${family ? T(' and each person\'s share based on income') : ''}.</p></div>`}</div>`;
@@ -3431,11 +3806,11 @@ function goalModal(gl = null) {
   const m = openModal(gl ? T('Edit goal') : T('New goal'), `
     <div class="form-grid">
       <label class="field full">${T('Name')} <input id="gl-name" maxlength="60" value="${esc(x.name)}" placeholder="${esc(T('E.g. Summer holiday, New car'))}" autofocus></label>
-      <label class="field">${T('Target amount (')}${CUR_SYM}) <input id="gl-target" inputmode="decimal" value="${moneyInput(x.target)}"></label>
+      <label class="field">${T('Target amount (')}${CUR_SYM}) <input data-money id="gl-target" inputmode="decimal" value="${moneyInput(x.target)}"></label>
       <label class="field">${T('By (optional)')} <input id="gl-date" type="date" value="${esc(x.target_date || '')}"></label>
       <label class="field full">${T('How progress is measured')} <select id="gl-acc"><option value="">${T('Amount set aside, entered by hand')}</option>
         ${accs.map((a) => `<option value="${a.id}" ${a.id === x.account_id ? 'selected' : ''}>${T('Balance of the account')} ${esc(a.name)}</option>`).join('')}</select></label>
-      <label class="field" id="gl-saved-wrap">${T('Set aside so far (')}${CUR_SYM}) <input id="gl-saved" inputmode="decimal" value="${moneyInput(x.saved)}"></label>
+      <label class="field" id="gl-saved-wrap">${T('Set aside so far (')}${CUR_SYM}) <input data-money id="gl-saved" inputmode="decimal" value="${moneyInput(x.saved)}"></label>
       <div class="field full">${T('Color')} ${swatchPicker('gl-color', x.color)}</div>
       <div class="field full">${T('Icon')} ${emojiPicker('gl-icon', x.icon)}</div>
     </div>
@@ -3473,7 +3848,7 @@ const ASSET_COLORS = { azioni: '#8b85f0', obbligazioni: '#3fb8a8', monetario: '#
 const pctSigned = (x) => (x == null ? '—' : `${x > 0 ? '+' : ''}${num(x * 100, 2)}%`);
 
 async function renderInvestimenti(v) {
-  S.invMonths ||= '24';
+  S.invMonths = monthsFor(['12', '24', '36', 'all']);
   const d = await api('/investments?months=' + S.invMonths);
   if (!d.accounts.length) {
     v.innerHTML = `<div class="card empty"><div class="big">📊</div><h3>${T('No investment accounts')}</h3>
@@ -3502,8 +3877,7 @@ async function renderInvestimenti(v) {
       <div class="list">${unverified.map((o, i) => `<div class="list-item"><div class="grow"><b>${esc(o.ticker || '')}</b> <span class="muted small">${esc(o.account_name)}</span><div class="muted small">${esc(fmtDate(o.date))} · ${T('estimated {price}', { price: esc(unitPrice(o.price)) })} · ${tn('{n} unit', '{n} units', o.quantity, { n: qtyFmt(o.quantity) })}</div></div>
         <b>${money(Math.abs(o.amount))}</b><button class="btn btn-sm btn-primary" data-pacv="${i}">✏️ ${T('Verify')}</button></div>`).join('')}</div></div>` : ''}`
     + `
-    <div class="toolbar"><details class="help" style="flex:1 1 260px"><summary>ℹ️ ${T('How it works')}</summary><p>${T('Value = latest valuation (automatic from securities or entered by hand). Invested = net transfers/income into the account.')}</p></details>
-      <span class="btn-row">${hasHoldings ? `<button class="btn" id="iv-refresh" title="${esc(T('Uses the internet: it sends only the tickers to Yahoo Finance'))}">🌐 ${T('Update prices')}</button>` : ''}
+    <div class="toolbar"><span class="spacer"></span><span class="btn-row">${hasHoldings ? `<button class="btn" id="iv-refresh" title="${esc(T('Uses the internet: it sends only the tickers to Yahoo Finance'))}">🌐 ${T('Update prices')}</button>` : ''}
       <button class="btn btn-primary" id="iv-new">＋ ${T('Investment account')}</button></span></div>
     <div class="grid-3-2">
       <div class="card"><div class="card-head"><h3>${T('Value and invested over time')}</h3>
@@ -3532,7 +3906,7 @@ async function renderInvestimenti(v) {
     </div>`).join('')}`;
 
   $('#iv-new').onclick = () => accountModal(null, { type: 'investimenti', icon: '📈', name: '' });
-  $('#iv-months').onchange = (e) => { S.invMonths = e.target.value; route(); };
+  $('#iv-months').onchange = (e) => { chooseMonths(e.target.value); route(); };
   if ($('#iv-refresh')) $('#iv-refresh').onclick = async (e) => {
     e.target.disabled = true; e.target.textContent = T('⏳ Updating…');
     try {
@@ -3628,7 +4002,7 @@ async function rebalanceCard(det, opts = {}) {
       <div class="rb-controls">
         <label class="field">${T('Drift threshold (points)')} <input id="rb-abs" inputmode="decimal" value="${cfg.drift_abs ?? ''}" placeholder="off" title="${esc(T('Rebalance when a weight is this many percentage points away from its target'))}"></label>
         <label class="field">${T('or relative (% of the target)')} <input id="rb-rel" inputmode="decimal" value="${cfg.drift_rel ?? ''}" placeholder="off" title="${esc(T('e.g. 25: a 20% target is off below 15% or above 25%'))}"></label>
-        <label class="field">${T('New money to invest (')}${CUR_SYM}) <input id="rb-new" inputmode="decimal" value="${moneyInput(cfg.contribution)}" placeholder="${moneyPlaceholder()}"></label>
+        <label class="field">${T('New money to invest (')}${CUR_SYM}) <input data-money id="rb-new" inputmode="decimal" value="${moneyInput(cfg.contribution)}" placeholder="${moneyPlaceholder()}"></label>
         <label class="check" title="${esc(T('Without sells, only the new money is used, on the items below target'))}"><input type="checkbox" id="rb-sells" ${cfg.sells ? 'checked' : ''}> ${T('Allow sells (exactly back to the targets)')}</label>
       </div>
       ${calcNotes(res.warnings)}
@@ -3726,10 +4100,12 @@ async function loadTrades(det, aid) {
         <td>${o.ticker ? `<b>${esc(o.ticker)}</b>` : '<span class="muted">—</span>'}</td><td>${esc(TRADE_KINDS[o.kind])}${o.notes ? `<div class="muted small">${esc(o.notes)}</div>` : ''}</td>
         <td class="right num">${o.quantity ? qtyFmt(o.quantity) : ''}</td>
         <td class="right num">${o.price != null ? esc(unitPrice(o.price)) : ''}</td>
-        <td class="right num"><b class="${o.amount >= 0 ? 'pos' : 'neg'}">${o.amount ? (o.amount > 0 ? '+' : '−') + money(Math.abs(o.amount)) : ''}</b>${o.fees ? `<div class="muted small">${T('fees')} ${money(o.fees)}</div>` : ''}</td>
+        <td class="right num"><b class="${o.amount >= 0 ? 'pos' : 'neg'}">${o.amount ? (o.amount > 0 ? '+' : '−') + money(Math.abs(o.amount)) : ''}</b>${o.fees ? `<div class="muted small">${T('fees')} ${money(o.fees)}</div>` : ''}${tradeMismatch(o) ? `<div class="small"><span class="tag warn" title="${esc(T('The total of this trade differs from quantity × price ± fees by {amount}. If it is not the amount on your statement, open the trade, empty "Total amount" and save: the cash will follow quantity, price and fees.', { amount: money(tradeMismatch(o)) }))}">⚠️ ${T('Total to check')}</span></div>` : ''}</td>
         <td><div class="row-actions" style="opacity:1"><button class="icon-btn sm" data-tedit="${o.id}" title="${esc(T('Edit'))}">✏️</button><button class="icon-btn sm" data-tdel="${o.id}" title="${esc(T('Delete'))}">✕</button></div></td></tr>`).join('')}</tbody></table></div>` : `<div class="empty">${T('No trades')}</div>`;
-    $$('[data-tedit]', box).forEach((b) => (b.onclick = () => {
-      const acc = (S.invAccounts || []).find((x) => x.id === aid);
+    $$('[data-tedit]', box).forEach((b) => (b.onclick = async () => {
+      // (also from Transactions, where the Investments page was not opened yet: its accounts are loaded here)
+      let acc = (S.invAccounts || []).find((x) => x.id === aid);
+      if (!acc) { try { S.invAccounts = (await api('/investments')).accounts; } catch (e) { fail(e); return; } acc = S.invAccounts.find((x) => x.id === aid); }
       if (acc) tradeModal(acc, rows.find((x) => x.id === +b.dataset.tedit));
     }));
     $$('[data-tdel]', box).forEach((b) => (b.onclick = async () => {
@@ -3738,12 +4114,26 @@ async function loadTrades(det, aid) {
     }));
   } catch (e) { box.innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
 }
+// a buy or sell whose recorded total is far from quantity × price ± fees (more than 2% and 1 unit of currency): often a
+// total left over from before a correction (fixed in 2.6.2), sometimes a real statement amount. Returns the gap or 0
+function tradeMismatch(o) {
+  if (!['buy', 'sell'].includes(o.kind) || !o.amount || !o.price || String(o.external_id || '').startsWith('pac:')) return 0;
+  const g = Math.round(Math.abs(o.quantity) * o.price * 100), calc = o.kind === 'buy' ? g + (o.fees || 0) : g - (o.fees || 0);
+  const gap = Math.abs(Math.abs(o.amount) - calc);
+  return gap > Math.max(100, calc * 0.02) ? gap : 0;
+}
 // o = existing trade (edit); preset = initial values (e.g. investment plan purchase to complete)
 function tradeModal(a, o = null, preset = {}) {
   const hs = a.holdings;
   const x = { kind: 'buy', date: todayIso(), holding_id: '', quantity: '', price: '', fees: 0, amount: 0, notes: '', ...preset, ...(o || {}) };
   const dec = (v, d = 6) => (v === '' || v == null ? '' : (+v).toLocaleString(LOCALE, { maximumFractionDigits: d, useGrouping: false }));
-  const tradeTotal = ['buy', 'sell'].includes(x.kind) && x.amount ? Math.abs(x.amount) : '';
+  // the total from the statement is shown only when it was typed (it differs from quantity × price ± fees) or for an
+  // investment plan purchase (fixed amount); otherwise it would freeze the old amount, and a corrected quantity, price
+  // or fee would no longer change the cash (2.6.2)
+  const isPac = String(x.external_id || '').startsWith('pac:');
+  const gross0 = Math.round(Math.abs(+x.quantity || 0) * (+x.price || 0) * 100);
+  const computed0 = x.kind === 'buy' ? gross0 + (x.fees || 0) : gross0 - (x.fees || 0);
+  const tradeTotal = ['buy', 'sell'].includes(x.kind) && x.amount && (isPac || Math.abs(x.amount) !== computed0) ? Math.abs(x.amount) : '';
   const m = openModal(`${o ? T('Edit trade') : T('New trade')} · ${a.name}`, `
     <div class="form-grid">
       <label class="field">${T('Type')} <select id="tr-kind">${Object.entries(TRADE_KINDS).map(([k, l]) => `<option value="${k}" ${k === x.kind ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
@@ -3751,9 +4141,9 @@ function tradeModal(a, o = null, preset = {}) {
       <label class="field full" data-f="hold">${T('Security')} <select id="tr-hold"><option value="">—</option>${hs.map((h) => `<option value="${h.id}" ${h.id === +x.holding_id ? 'selected' : ''}>${esc(h.ticker)} · ${esc(h.name)}</option>`).join('')}</select></label>
       <label class="field" data-f="qty"><span id="tr-qty-l">${T('Quantity')}</span> <input id="tr-qty" inputmode="decimal" value="${dec(x.kind === 'sell' ? Math.abs(x.quantity) : x.quantity)}"></label>
       <label class="field" data-f="price">${T('Unit price (')}${CUR_SYM}) <input id="tr-price" inputmode="decimal" value="${dec(x.price, 4)}"></label>
-      <label class="field" data-f="total">${T('Total amount (')}${CUR_SYM}) <input id="tr-total" inputmode="decimal" value="${tradeTotal ? moneyInput(tradeTotal) : ''}" placeholder="${esc(T('optional'))}"></label>
-      <label class="field" data-f="fees">${T('Fees (')}${CUR_SYM}) <input id="tr-fees" inputmode="decimal" value="${x.fees ? moneyInput(x.fees) : ''}"></label>
-      <label class="field" data-f="amount">${T('Amount (')}${CUR_SYM}) <input id="tr-amount" inputmode="decimal" value="${!['buy', 'sell', 'split'].includes(x.kind) && x.amount ? moneyInput(Math.abs(x.amount)) : ''}"></label>
+      <label class="field" data-f="total">${T('Total amount (')}${CUR_SYM}) <input data-money id="tr-total" inputmode="decimal" value="${tradeTotal ? moneyInput(tradeTotal) : ''}" placeholder="${esc(T('optional'))}"></label>
+      <label class="field" data-f="fees">${T('Fees (')}${CUR_SYM}) <input data-money id="tr-fees" inputmode="decimal" value="${x.fees ? moneyInput(x.fees) : ''}"></label>
+      <label class="field" data-f="amount">${T('Amount (')}${CUR_SYM}) <input data-money id="tr-amount" inputmode="decimal" value="${!['buy', 'sell', 'split'].includes(x.kind) && x.amount ? moneyInput(Math.abs(x.amount)) : ''}"></label>
       <label class="field full">${T('Notes')} <input id="tr-notes" maxlength="200" value="${esc(x.notes || '')}"></label>
     </div>
     <p class="muted small" id="tr-hint"></p>
@@ -3774,11 +4164,27 @@ function tradeModal(a, o = null, preset = {}) {
     const total = parseMoney($('#tr-total', m).value), price = +qv('#tr-price'), fees = parseMoney($('#tr-fees', m).value) || 0;
     if (total > 0 && price > 0 && !$('#tr-qty', m).dataset.manual) $('#tr-qty', m).value = dec(((total - fees) / 100) / price);
   };
-  $('#tr-qty', m).oninput = () => { $('#tr-qty', m).dataset.manual = $('#tr-qty', m).value ? '1' : ''; };
+  // the empty total shows what will be debited or credited: quantity × price ± fees
+  const totalHint = () => {
+    const k = $('#tr-kind', m).value, q = Math.abs(+qv('#tr-qty') || 0), p = +qv('#tr-price') || 0, f = parseMoney($('#tr-fees', m).value) || 0;
+    const g = Math.round(q * p * 100), tot = k === 'sell' ? g - f : g + f;
+    $('#tr-total', m).placeholder = q && p ? `${T('optional')} · ${moneyInput(tot) || moneyPlaceholder()}` : T('optional');
+  };
+  // a total kept from the statement, on a trade being corrected (not an investment plan purchase): once quantity,
+  // price or fees change, it no longer matches them, so it is cleared and the cash follows the new figures
+  const dropOldTotal = () => {
+    const t = $('#tr-total', m);
+    if (o && !isPac && t.dataset.kept === '1') { t.value = ''; t.dataset.kept = ''; }
+  };
+  if (tradeTotal && o && !isPac) $('#tr-total', m).dataset.kept = '1';
+  $('#tr-total', m).addEventListener('input', () => { $('#tr-total', m).dataset.kept = ''; });
+  $('#tr-qty', m).oninput = () => { $('#tr-qty', m).dataset.manual = $('#tr-qty', m).value ? '1' : ''; dropOldTotal(); totalHint(); };
   // when editing, the quantity stays the recorded one, except for investment plan purchases (fixed amount: the price changes → the units change)
-  if (o && !String(o.external_id || '').startsWith('pac:')) $('#tr-qty', m).dataset.manual = '1';
-  ['#tr-total', '#tr-price', '#tr-fees'].forEach((id) => ($(id, m).oninput = autoQty));
-  $('#tr-kind', m).onchange = show; show();
+  if (o && !isPac) $('#tr-qty', m).dataset.manual = '1';
+  $('#tr-total', m).oninput = autoQty;
+  ['#tr-price', '#tr-fees'].forEach((id) => ($(id, m).oninput = () => { dropOldTotal(); autoQty(); totalHint(); }));
+  totalHint();
+  $('#tr-kind', m).onchange = () => { show(); totalHint(); }; show();
   if (!hs.length) $('#tr-hint', m).textContent = T('First add a security with "＋ Security".');
   $('[data-cancel]', m).onclick = closeModal;
   $('#tr-save', m).onclick = async () => {
@@ -3862,7 +4268,7 @@ function holdingModal(accountId, h = null) {
 // composition (look-through: regions, countries with a world map, sectors, currencies, underlying securities),
 // diversification (measures, comparison with the world market, overlap, correlation matrix), rebalancing, costs,
 // projection and comparison with an index. Everything here is a calculation: nothing is recorded.
-const PT_TABS = [['composition', '🧭', T('Composition')], ['diversification', '🧩', T('Diversification')], ['rebalance', '⚖️', T('Rebalancing')],
+const PT_TABS = [['composition', '🧭', T('Composition')], ['diversification', '🧩', T('Diversification')], ['income', '💰', T('Income and gains')], ['rebalance', '⚖️', T('Rebalancing')],
   ['costs', '💸', T('Costs')], ['projection', '🔮', T('Projection')], ['benchmark', '📊', T('Comparison')]];
 // [icon, label, color]: the colors are chosen so that no two of the same family look alike (CIEDE2000 distance ≥ 18)
 const SECTOR_INFO = { 'Information Technology': ['💻', T('Information technology'), '#3d6fb8'], Financials: ['🏦', T('Financials'), '#5aa36b'],
@@ -3875,6 +4281,10 @@ const REGION_INFO = { 'North America': ['🌎', T('North America'), '#5b8def'], 
   'Asia-Pacific': ['🌏', T('Asia-Pacific'), '#e07fae'], Other: ['🌐', T('Supranational and other'), '#b4b9c2'] };
 const MARKET_INFO = { Developed: ['🏙️', T('Developed markets'), '#5b8def'], Emerging: ['🌱', T('Emerging markets'), '#f08a5a'],
   'Frontier and other': ['🧭', T('Frontier and other markets'), '#b4b9c2'] };
+// the broker's uninvested cash (portfolio.CASH): its own line in countries, areas and markets, in the color of the
+// "cash" asset class
+REGION_INFO.cash = MARKET_INFO.cash = ['💶', T('Cash on the broker'), ASSET_COLORS['liquidità']];
+const cashRow = () => ({ label: `${ico('💶')}${esc(T('Cash on the broker'))}`, color: ASSET_COLORS['liquidità'], title: T('Uninvested cash on the investment accounts: it is in your currency and has no country') });
 const CLASS_ICON = { azioni: '📈', obbligazioni: '🧾', monetario: '🅿️', 'materie prime': '🪙', immobiliare: '🏠', crypto: '₿', altro: '🔹', liquidità: '💶', 'non specificato': '❔' };
 // weights always with two decimals (0,42%, never a rounded 0%)
 const fix2 = (x) => (x ?? 0).toLocaleString(LOCALE, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -3888,7 +4298,7 @@ const flag = (code) => (code && FLAG_SET.has(code) ? `<img class="flag" src="/st
 const curSymbol = (code) => {
   try { return (0).toLocaleString(LANG, { style: 'currency', currency: code, currencyDisplay: 'narrowSymbol' }).replace(/[\d\s.,  -]/g, '') || code; } catch { return code; }
 };
-const MISSING_REASON = { whole: T('valued only as a whole (no securities inside)'), cash: T('cash: currency known, no country'),
+const MISSING_REASON = { whole: T('valued only as a whole (no securities inside)'),
   no_isin: T('ISIN missing: type it here or in Investments'), not_loaded: T('composition not downloaded yet'),
   not_found: T('not published by a supported issuer'), partial: T('the issuer does not publish everything'),
   no_price: T('no price yet: use "Update prices" in Investments') };
@@ -3943,7 +4353,7 @@ async function renderPortafoglio(v) {
   }));
   if ($('#pt-all', v)) $('#pt-all', v).onclick = () => { ptSaveAccounts(null); route(); };
   const box = $('#pt-body', v);
-  const draw = { composition: ptComposition, diversification: ptDiversification, rebalance: ptRebalance, costs: ptCosts,
+  const draw = { composition: ptComposition, diversification: ptDiversification, income: ptIncome, rebalance: ptRebalance, costs: ptCosts,
     projection: ptProjection, benchmark: ptBenchmark }[S.ptTab];
   await draw(box);
 }
@@ -3984,13 +4394,14 @@ async function ptComposition(box) {
   const regions = d.regions.map((r) => ({ ...r, color: (REGION_INFO[r.key] || [])[2], label: `${ico((REGION_INFO[r.key] || ['🌐'])[0])}${esc((REGION_INFO[r.key] || [0, r.key])[1])}` }));
   const markets = d.markets.map((r) => ({ ...r, color: (MARKET_INFO[r.key] || [])[2], label: `${ico((MARKET_INFO[r.key] || ['🌐'])[0])}${esc((MARKET_INFO[r.key] || [0, r.key])[1])}` }));
   const sectors = d.sectors.map((r) => ({ ...r, color: (SECTOR_INFO[r.key] || [])[2], label: `${ico((SECTOR_INFO[r.key] || ['🔹'])[0])}${esc((SECTOR_INFO[r.key] || [0, r.key])[1])}` }));
-  const countries = d.countries.map((r) => ({ ...r, label: `${flag(r.key)}${esc(countryName(r.key))}` }));
+  const countries = d.countries.map((r) => (r.key === 'cash' ? { ...r, ...cashRow() } : { ...r, label: `${flag(r.key)}${esc(countryName(r.key))}` }));
+  const places = d.countries.filter((c) => c.key !== 'cash');  // the map and the "main country" are about real countries
   const currencies = d.currencies.map((r) => ({ ...r, label: `<span class="pt-cur">${esc(curSymbol(r.key))}</span>${esc(r.key)}` }));
   const classes = d.asset_classes.map((r) => ({ ...r, label: `${ico(CLASS_ICON[r.key] || '🔹')}${esc(assetLabel(r.key))}`, color: ASSET_COLORS[r.key] }));
   const instr = d.instruments.map((r) => ({ ...r, color: ASSET_COLORS[r.asset_class], label: `${ico(CLASS_ICON[r.asset_class] || '🔹')}${esc(r.name)}`, title: `${r.name} · ${r.ticker} · ${r.account}` }));
   const top1 = (rows, info) => (rows[0] ? [(info[rows[0].key] || [0, rows[0].key])[1], pct2(rows[0].share)] : ['—', '—']);
   const fundsWithIsin = d.instruments.filter((x) => x.isin).length;
-  const ctop = d.countries[0];
+  const ctop = places[0], rtop = d.regions.filter((r) => r.key !== 'cash');
   box.innerHTML = `
     <div class="card pt-online"><div class="card-head"><div><h3>🌐 ${T('Compositions from the issuers')}</h3>
       <p class="muted small" style="margin:3px 0 0">${T('HomeCoin can download what is inside your funds from the public files of their issuers (iShares, Vanguard, Xtrackers, Amundi, SPDR, Invesco). Only the ISIN is sent; the result is saved encrypted with its date. Single stocks: country from the ISIN, sector from Yahoo Finance.')}</p></div>
@@ -3999,8 +4410,8 @@ async function ptComposition(box) {
       ${calcNotes(d.notes)}<div id="pt-report"></div></div>
     <div class="kpis">
       <div class="kpi g-indigo"><div class="k-label">💼 ${T('Value analyzed')}</div><div class="k-value">${money0(d.total)}</div>${kRows([`📄 ${T('Securities')}`, d.instruments.length], [`🔍 ${T('Read inside')}`, d.funds_loaded])}</div>
-      <div class="kpi" ${kColor((REGION_INFO[d.regions[0]?.key] || [])[2])}><div class="k-label">🌍 ${T('Main area')}</div><div class="k-value">${esc(top1(d.regions, REGION_INFO)[0])}</div>${kRows([`📊 ${T('Weight')}`, top1(d.regions, REGION_INFO)[1]], [`ℹ️ ${T('Known')}`, pct2(d.coverage.region)])}</div>
-      <div class="kpi" ${kColor(ctop && (REGION_INFO[ctop.region] || [])[2])}><div class="k-label">🚩 ${T('Main country')}</div><div class="k-value">${ctop ? esc(countryName(ctop.key)) : '—'}</div>${kRows([`📊 ${T('Weight')}`, ctop ? pct2(ctop.share) : '—'], [`🗺️ ${T('Countries')}`, d.countries.length])}</div>
+      <div class="kpi" ${kColor((REGION_INFO[rtop[0]?.key] || [])[2])}><div class="k-label">🌍 ${T('Main area')}</div><div class="k-value">${esc(top1(rtop, REGION_INFO)[0])}</div>${kRows([`📊 ${T('Weight')}`, top1(rtop, REGION_INFO)[1]], [`ℹ️ ${T('Known')}`, pct2(d.coverage.region)])}</div>
+      <div class="kpi" ${kColor(ctop && (REGION_INFO[ctop.region] || [])[2])}><div class="k-label">🚩 ${T('Main country')}</div><div class="k-value">${ctop ? esc(countryName(ctop.key)) : '—'}</div>${kRows([`📊 ${T('Weight')}`, ctop ? pct2(ctop.share) : '—'], [`🗺️ ${T('Countries')}`, places.length])}</div>
       <div class="kpi g-indigo"><div class="k-label">💱 ${T('Main currency')}</div><div class="k-value">${esc(d.currencies[0]?.key || '—')}</div>${kRows([`📊 ${T('Weight')}`, d.currencies[0] ? pct2(d.currencies[0].share) : '—'], [`ℹ️ ${T('Known')}`, pct2(d.coverage.currency)])}</div>
     </div>
     <div class="card"><div class="card-head"><div><h3>🗺️ ${T('Where your money is in the world')}</h3><p class="muted small" style="margin:3px 0 0">${T('Darker = larger weight. Point at a country for its weight and value.')}</p></div></div>
@@ -4032,7 +4443,7 @@ async function ptComposition(box) {
       ${d.missing.length ? `<div class="list">${d.missing.map((x) => `<div class="list-item"><span class="grow">${esc(x.name)} <span class="muted small">· ${esc(MISSING_REASON[x.reason] || x.reason)}${x.issuer ? ` (${esc(x.issuer)})` : ''}</span></span>
         ${x.reason === 'no_isin' ? `<input class="pt-isin" data-isin="${x.holding_id}" maxlength="14" placeholder="ISIN" title="${esc(T('12 characters: on the broker statement or the fund\'s factsheet'))}">` : ''}<b class="num">${x.value == null ? '—' : money0(x.value)}</b></div>`).join('')}</div>`
         : `<div class="empty small">✅ ${T('Everything is known')}</div>`}</div>`;
-  worldMap($('#pt-map', box), d.countries, d.total).catch(() => { $('#pt-map', box).innerHTML = `<div class="empty small">${T('Not available')}</div>`; });
+  worldMap($('#pt-map', box), places, d.total).catch(() => { $('#pt-map', box).innerHTML = `<div class="empty small">${T('Not available')}</div>`; });
   $('#pt-on', box).onchange = async (e) => {
     try { await api('/portfolio/online', { method: 'PUT', body: { on: e.target.checked } }); route(); } catch (err) { fail(err); e.target.checked = !e.target.checked; }
   };
@@ -4041,7 +4452,7 @@ async function ptComposition(box) {
     try {
       const r = await api('/portfolio/refresh', { method: 'POST' });
       const bad = r.report.filter((x) => x.status !== 'ok');
-      toast(tn('{n} security updated', '{n} securities updated', r.report.length - bad.length), bad.length ? 'err' : 'ok');
+      toast(tn('{n} security updated', '{n} securities updated', r.report.length - bad.length), bad.length ? 'warn' : 'ok');
       if (bad.length) S.ptReport = bad;
       route();
     } catch (err) { fail(err); e.target.disabled = false; }
@@ -4056,9 +4467,9 @@ async function ptComposition(box) {
   }
 }
 
-// correlation colour: blue (−1) · grey (0) · red (+1)
+// correlation colour, from the palette (the same as the legend under the matrix): sky (−1) · grey (0) · rose (+1)
 const corrColor = (c) => (c == null ? 'var(--surface-3)' : c >= 0 ? `color-mix(in srgb, ${C.out} ${Math.round(Math.abs(c) * 85)}%, var(--surface-3))`
-  : `color-mix(in srgb, #5b8def ${Math.round(Math.abs(c) * 85)}%, var(--surface-3))`);
+  : `color-mix(in srgb, ${C.transfer} ${Math.round(Math.abs(c) * 85)}%, var(--surface-3))`);
 
 async function ptDiversification(box) {
   const [d, cor] = await Promise.all([api('/portfolio/composition' + ptQuery()), api('/portfolio/correlation' + ptQuery())]);
@@ -4067,7 +4478,7 @@ async function ptDiversification(box) {
   const dv = d.diversification;
   const LV = { high: [T('High'), 'g-emerald', '🟢'], medium: [T('Medium'), 'g-amber', '🟡'], low: [T('Low'), 'g-rose', '🔴'] };
   const vs = (rows, info) => `<div class="pt-vs">${rows.filter((r) => r.portfolio >= 0.005 || r.world >= 0.005).map((r) => `<div class="pt-vs-row"><span class="pt-l">${ico((info[r.key] || ['🌐'])[0])}${esc((info[r.key] || [0, r.key])[1])}</span>
-      <div class="pt-vs-bars"><span class="pt-track"><i style="width:${Math.min(100, r.portfolio).toFixed(1)}%;background:${(info[r.key] || [])[2] || C.total}"></i></span><span class="pt-track world"><i style="width:${Math.min(100, r.world).toFixed(1)}%"></i></span></div>
+      <div class="pt-vs-bars" style="--vs:${(info[r.key] || [])[2] || C.total}"><span class="pt-track"><i style="width:${Math.min(100, r.portfolio).toFixed(1)}%"></i></span><span class="pt-track world"><i style="width:${Math.min(100, r.world).toFixed(1)}%"></i></span></div>
       <b class="num">${fix2(r.portfolio)}%</b><span class="muted small num">${fix2(r.world)}%</span></div>`).join('')}
       <div class="pt-vs-legend muted small"><span><i class="you"></i>${T('Your shares')}</span><span><i class="wld"></i>${T('World market')}</span></div></div>`;
   const m = (icon, label, value, tip) => `<div class="pt-metric" title="${esc(tip)}"><span>${icon} ${label}</span><b class="num">${value}</b></div>`;
@@ -4128,6 +4539,54 @@ async function ptDiversification(box) {
     </div>`;
 }
 
+// income and gains (2.7.0): the total gain and what it is made of, year by year, per security. Figures only: no taxes
+async function ptIncome(box) {
+  const d = await api('/portfolio/income' + ptQuery());
+  if (!d.value && !d.invested) return ptEmpty(box);
+  const p = d.parts, sgn = (x) => `${x > 0 ? '+' : x < 0 ? '−' : ''}${money0(Math.abs(x))}`;
+  const cls = (x) => (x > 0 ? 'pos' : x < 0 ? 'neg' : 'muted');
+  // the parts of the total gain, each in the color of its meaning: gains green, income sky, costs rose
+  const PARTS = [['unrealized', '📈', T('Not yet realized'), T('Securities you still hold: today\'s value against what they cost you (average cost).'), C.in],
+    ['realized', '✅', T('Realized with sales'), T('The gain or loss of each sale against the average cost of the units sold.'), C.left],
+    ['dividends', '💵', T('Dividends'), T('Dividends recorded as trades.'), C.transfer],
+    ['interest', '🏦', T('Interest'), T('Interest recorded as trades (for example on the broker cash).'), C.total],
+    ['fees', '💸', T('Fees'), T('What the broker took: the commissions of buys and sales, and the fees recorded as trades. They lower the gain.'), C.out],
+    ['other', '➕', T('Other'), T('What the parts above do not explain: accounts valued only as a whole, interest or fees recorded as transactions, rounding.'), C.muted]];
+  const shown = PARTS.filter(([k]) => p[k]);
+  const top = Math.max(1, ...shown.map(([k]) => Math.abs(p[k])));
+  box.innerHTML = `<div class="kpis">
+      <div class="kpi ${d.total_gain >= 0 ? 'g-emerald' : 'g-rose'}"><div class="k-label">💰 ${T('Total gain')}</div><div class="k-value">${sgn(d.total_gain)}</div>${kRows([`📊 ${T('Return')}`, d.total_return == null ? '—' : pctS2(d.total_return)], d.xirr != null && [`📅 ${T('Per year')}`, pctS2(d.xirr), '', T('the annual return that accounts for when you added money: XIRR, a money-weighted return')])}</div>
+      <div class="kpi g-indigo"><div class="k-label">💼 ${T('Value')}</div><div class="k-value">${money0(d.value)}</div>${kRows([`💶 ${T('Money put in')}`, money0(d.invested)])}</div>
+      <div class="kpi" ${kColor(C.transfer)}><div class="k-label">💵 ${T('Income in the last 12 months')}</div><div class="k-value">${money0(d.income_last_year)}</div>${kRows(d.value > 0 && [`📊 ${T('Of the value')}`, pct2(d.income_last_year / d.value)])}</div>
+      <div class="kpi" ${kColor(C.left)}><div class="k-label">✅ ${T('Realized with sales')}</div><div class="k-value ${cls(p.realized)}">${sgn(p.realized)}</div>${kRows([`📈 ${T('Not yet realized')}`, sgn(p.unrealized)])}</div>
+    </div>
+    <div class="grid-2">
+      <div class="card"><div class="card-head"><div><h3>🧮 ${T('Where the gain comes from')}</h3><p class="muted small" style="margin:3px 0 0">${T('Total gain = value − money put in. These parts add up to it.')}</p></div></div>
+        <div class="pt-bars">${shown.map(([k, i, l, tip, col]) => `<div class="pt-bar" title="${esc(tip)}"><span class="pt-l">${ico(i)}${esc(l)}</span>
+          <span class="pt-track"><i style="width:${(Math.abs(p[k]) / top * 100).toFixed(1)}%;background:${col}"></i></span><b class="num ${cls(p[k])}">${sgn(p[k])}</b><span></span></div>`).join('')}
+          <div class="pt-bar total"><span class="pt-l">${ico('💰')}<b>${T('Total gain')}</b></span><span></span><b class="num ${cls(d.total_gain)}">${sgn(d.total_gain)}</b><span></span></div></div></div>
+      <div class="card"><div class="card-head"><div><h3>📅 ${T('Year by year')}</h3><p class="muted small" style="margin:3px 0 0">${T('What was cashed in each year: gains and losses of the sales, dividends, interest and fees. Figures only: no taxes are calculated.')}</p></div></div>
+        ${d.years.length ? `<div class="chart-box" style="height:220px"><canvas id="pi-years"></canvas></div>
+        <div class="table-wrap"><table class="sp-table"><thead><tr><th>${T('Year')}</th><th class="right">${T('Realized')}</th><th class="right">${T('Dividends')}</th><th class="right">${T('Interest')}</th><th class="right">${T('Fees')}</th><th class="right">${T('Total')}</th></tr></thead><tbody>
+          ${d.years.slice().reverse().map((y) => `<tr><td>${y.year}</td><td class="right ${cls(y.realized)}">${sgn(y.realized)}</td><td class="right">${sgn(y.dividends)}</td><td class="right">${sgn(y.interest)}</td><td class="right ${cls(y.fees)}">${sgn(y.fees)}</td><td class="right"><b class="${cls(y.total)}">${sgn(y.total)}</b></td></tr>`).join('')}
+        </tbody></table></div>` : `<div class="empty small">${T('No sales, dividends or interest recorded as trades yet.')}</div>`}</div>
+    </div>
+    <div class="card"><div class="card-head"><div><h3>📄 ${T('Per security')}</h3><p class="muted small" style="margin:3px 0 0">${T('Dividend yield = dividends of the last 12 months ÷ today\'s value of the security.')}</p></div></div>
+      ${d.securities.length ? `<div class="table-wrap"><table class="sp-table"><thead><tr><th>${T('Security')}</th><th class="right">${T('Realized')}</th><th class="right">${T('Dividends')}</th><th class="right">${T('Interest')}</th><th class="right">${T('Fees')}</th><th class="right">${T('Last 12 months')}</th><th class="right">${T('Dividend yield')}</th></tr></thead><tbody>
+        ${d.securities.map((s) => `<tr><td>${esc(s.name)} <span class="muted small">${esc(s.ticker)} · ${esc(s.account)}</span></td><td class="right ${cls(s.realized)}">${sgn(s.realized)}</td><td class="right">${sgn(s.dividends)}</td><td class="right">${sgn(s.interest)}</td><td class="right ${cls(s.fees)}">${sgn(s.fees)}</td><td class="right">${sgn(s.last_year)}</td><td class="right">${s.yield == null ? '—' : pct2(s.yield)}</td></tr>`).join('')}
+      </tbody></table></div>` : `<div class="empty small">${T('No sales, dividends or interest recorded as trades yet.')}</div>`}</div>`;
+  if (d.years.length) {
+    const ys = d.years;
+    chart($('#pi-years', box), { type: 'bar', data: { labels: ys.map((y) => String(y.year)), datasets: [
+      { label: T('Realized'), data: ys.map((y) => y.realized), backgroundColor: C.left, stack: 's' },
+      { label: T('Dividends'), data: ys.map((y) => y.dividends), backgroundColor: C.transfer, stack: 's' },
+      { label: T('Interest'), data: ys.map((y) => y.interest), backgroundColor: C.total, stack: 's' },
+      { label: T('Fees'), data: ys.map((y) => y.fees), backgroundColor: C.out, stack: 's' }] },
+      options: { maintainAspectRatio: false, scales: { x: { stacked: true, grid: { display: false } }, y: { stacked: true, ticks: { callback: (x) => moneyK(x) } } },
+        plugins: { legend: { position: 'bottom', labels: { usePointStyle: true, boxWidth: 8 } }, tooltip: { callbacks: { label: (c) => ` ${c.dataset.label}: ${money0(c.raw)}` } } } } });
+  }
+}
+
 async function ptRebalance(box) {
   box.innerHTML = `<div class="card rb-card" id="rb"><div class="card-head"><div><h3>⚖️ ${T('Rebalancing')}</h3>
     <p class="muted small" style="margin:3px 0 0">${T('Target allocation, drift and what to buy or sell to get back to it. A calculator: it records nothing.')}</p></div>
@@ -4137,17 +4596,29 @@ async function ptRebalance(box) {
 
 async function ptCosts(box) {
   const d = await api('/portfolio/costs' + ptQuery());
+  const cm = d.commissions || { total: 0, years: [], accounts: [] };
+  // commissions paid (2.7.0): what the broker took on buys and sales and as fees, next to the TER of the funds
+  const commCard = `<div class="card"><div class="card-head"><div><h3>🧾 ${T('Commissions paid')}</h3><p class="muted small" style="margin:3px 0 0">${T('The fees of each buy and sale, plus the fees recorded as trades of their own. Type them in the trade window (Fees): they are part of what each trade cost.')}</p></div></div>
+      ${cm.total ? `<div class="rec-stats" style="grid-template-columns:repeat(3,minmax(0,1fr))">
+        <div class="rec-stat"><span>${T('In total')}</span><b class="neg">${money(cm.total)}</b></div>
+        <div class="rec-stat"><span>${T('Last 12 months')}</span><b>${money(cm.last_year)}</b></div>
+        <div class="rec-stat"><span>${T('Trades with a fee')}</span><b>${cm.count}</b></div></div>
+      <div class="grid-2" style="margin-top:12px"><div class="table-wrap"><table class="sp-table"><thead><tr><th>${T('Year')}</th><th class="right">${T('Commissions')}</th></tr></thead><tbody>
+        ${cm.years.map((y) => `<tr><td>${esc(y.year)}</td><td class="right num">${money(y.total)}</td></tr>`).join('')}</tbody></table></div>
+      ${cm.accounts.length > 1 ? `<div class="table-wrap"><table class="sp-table"><thead><tr><th>${T('Account')}</th><th class="right">${T('Commissions')}</th></tr></thead><tbody>
+        ${cm.accounts.map((a) => `<tr><td>${esc(a.icon)} ${esc(a.name)}</td><td class="right num">${money(a.total)}</td></tr>`).join('')}</tbody></table></div>` : ''}</div>`
+      : `<div class="empty small">${T('No commissions recorded: type them in the Fees field of each buy or sale.')}</div>`}</div>`;
   box.innerHTML = `<div class="kpis">
       <div class="kpi g-rose"><div class="k-label">💸 ${T('Yearly cost of the funds')}</div><div class="k-value">${money(d.yearly)}</div>${kRows([`📅 ${T('Per month')}`, money(d.yearly / 12)])}</div>
       <div class="kpi g-rose" title="${esc(T('TER of each fund weighted by its value'))}"><div class="k-label">📊 ${T('Average TER')}</div><div class="k-value">${d.weighted_ter == null ? '—' : fix2(d.weighted_ter) + '%'}</div>${kRows([`ℹ️ ${T('Known')}`, pct2(d.covered)])}</div>
-      <div class="kpi g-indigo"><div class="k-label">💼 ${T('Value')}</div><div class="k-value">${money0(d.total)}</div>${kRows([`📄 ${T('Securities')}`, d.items.length])}</div>
+      <div class="kpi g-rose"><div class="k-label">🧾 ${T('Commissions paid')}</div><div class="k-value">${money(cm.total)}</div>${kRows([`📅 ${T('Last 12 months')}`, money(cm.last_year)])}</div>
       <div class="kpi ${d.missing.length ? 'g-rose' : 'g-indigo'}"><div class="k-label">❔ ${T('TER missing')}</div><div class="k-value">${d.missing.length}</div>${kRows([`📄 ${T('Securities')}`, d.items.length])}</div>
     </div>
     <div class="card"><div class="card-head"><div><h3>💸 ${T('Cost per security')}</h3><p class="muted small" style="margin:3px 0 0">${T('Type the TER (ongoing charges, % per year) of each fund here: it is on the fund\'s factsheet or KID and it is saved by itself. Single stocks have no TER: type 0.')}</p></div></div>
       ${d.items.length ? `<div class="table-wrap"><table class="sp-table"><thead><tr><th>${T('Security')}</th><th class="right">${T('Value')}</th><th class="right">TER %</th><th class="right">${T('Per year')}</th></tr></thead><tbody>
       ${d.items.map((x) => `<tr><td>${esc(x.name)} <span class="muted small">${esc(x.ticker)}</span></td><td class="right num">${money0(x.value)}</td>
         <td class="right"><input class="pt-ter ${x.ter == null ? 'warn' : ''}" data-ter="${x.id}" inputmode="decimal" value="${x.ter == null ? '' : decInput(x.ter)}" placeholder="${esc(T('missing'))}"></td><td class="right num">${x.yearly == null ? '—' : money(x.yearly)}</td></tr>`).join('')}
-      </tbody></table></div>` : `<div class="empty small">${T('No securities')}</div>`}</div>`;
+      </tbody></table></div>` : `<div class="empty small">${T('No securities')}</div>`}</div>${commCard}`;
   $$('[data-ter]', box).forEach((inp) => inp.addEventListener('change', async () => {
     try { await api(`/holdings/${inp.dataset.ter}/details`, { method: 'PUT', body: { ter: inp.value } }); route(); } catch (err) { fail(err); }
   }));
@@ -4158,23 +4629,36 @@ async function ptProjection(box) {
   const P = (S.ptProj ||= { amount: 20000, every: 1, years: 20, rates: [2, 5, 8], inflation: 2 });
   const sel = String(S.ptAccounts || 'all');
   if (P.sel !== sel) { P.start = comp.total; P.sel = sel; }  // other accounts chosen: start from their value
+  const LINES = [C.left, C.terracotta, C.in];  // prudent, middle, optimistic: the same color in the boxes and the chart
   const EVERY = [[1, T('Every month')], [3, T('Every 3 months')], [6, T('Every 6 months')], [12, T('Every year')], [0, T('Never (no contributions)')]];
   box.innerHTML = `<div class="card"><div class="card-head"><div><h3>🔮 ${T('Projection')}</h3><p class="muted small" style="margin:3px 0 0">${T('How much the portfolio could be worth with regular contributions, in three scenarios of yearly return. A calculator: returns are not guaranteed and past results do not predict future ones.')}</p></div></div>
       <div class="form-grid pt-proj">
-        <label class="field">💼 ${T('Starting value')} <input id="pp-start" inputmode="decimal" value="${moneyInput(P.start)}"></label>
-        <label class="field">💶 ${T('Contribution')} <input id="pp-amount" inputmode="decimal" value="${moneyInput(P.amount)}"></label>
+        <label class="field">💼 ${T('Starting value')} <input data-money id="pp-start" inputmode="decimal" value="${moneyInput(P.start)}"></label>
+        <label class="field">💶 ${T('Contribution')} <input data-money id="pp-amount" inputmode="decimal" value="${moneyInput(P.amount)}"></label>
         <label class="field">📅 ${T('How often')} <select id="pp-every">${EVERY.map(([k, l]) => `<option value="${k}" ${k === P.every ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
         <label class="field">⏳ ${T('Years')} <input id="pp-years" type="number" min="1" max="50" value="${P.years}"></label>
         <label class="field">🐢 ${T('Prudent return (%)')} <input id="pp-r0" inputmode="decimal" value="${decInput(P.rates[0])}"></label>
         <label class="field">🚶 ${T('Middle return (%)')} <input id="pp-r1" inputmode="decimal" value="${decInput(P.rates[1])}"></label>
         <label class="field">🚀 ${T('Optimistic return (%)')} <input id="pp-r2" inputmode="decimal" value="${decInput(P.rates[2])}"></label>
         <label class="field">📉 ${T('Inflation (% per year)')} <input id="pp-infl" inputmode="decimal" value="${decInput(P.inflation)}"></label>
+        <label class="field" title="${esc(T('The projection the other way round: how much to put in to reach this amount in the years chosen'))}">🎯 ${T('Amount to reach (optional)')} <input data-money id="pp-goal" inputmode="decimal" placeholder="${esc(moneyPlaceholder())}" value="${P.goal ? moneyInput(P.goal) : ''}"></label>
       </div><div id="pp-out"></div></div>`;
   const read = () => {
     const n = (id, d) => { const x = parseFloat(String($(id, box).value).replace(',', '.')); return Number.isFinite(x) ? x : d; };
     P.start = Math.max(0, parseMoney($('#pp-start', box).value) || 0); P.amount = Math.max(0, parseMoney($('#pp-amount', box).value) || 0);
     P.every = +$('#pp-every', box).value; P.years = Math.min(50, Math.max(1, Math.round(n('#pp-years', 20)))); P.inflation = Math.min(20, Math.max(0, n('#pp-infl', 0)));
     P.rates = ['#pp-r0', '#pp-r1', '#pp-r2'].map((id, i) => Math.min(30, Math.max(-20, n(id, P.rates[i]))));
+    P.goal = Math.max(0, parseMoney($('#pp-goal', box).value) || 0);
+  };
+  // the other way round (2.7.0): the contribution that reaches P.goal (today's money when inflation is set) after
+  // P.years, for each yearly return. Same compounding as the projection: monthly growth, a contribution every
+  // `every` months (every month when "never" is chosen, since a contribution is what is being solved for)
+  const needed = (rate) => {
+    const months = P.years * 12, every = P.every || 1, g = (1 + rate / 100) ** (1 / 12), defl = (1 + P.inflation / 100) ** (1 / 12);
+    let f = 0;
+    for (let m = 1; m <= months; m++) if (m % every === 0) f += g ** (months - m);
+    const target = P.goal * defl ** months, fromStart = P.start * g ** months;
+    return { every, amount: f ? (target - fromStart) / f : null };
   };
   const drawOut = () => {
     read();
@@ -4191,12 +4675,16 @@ async function ptProjection(box) {
     const end = series.map((s) => s[months]);
     const perYear = P.every ? P.amount * (12 / P.every) : 0;
     $('#pp-out', box).innerHTML = `<div class="kpis" style="margin-top:14px">
-        <div class="kpi g-sky"><div class="k-label">💶 ${T('Money put in')}</div><div class="k-value">${money0(paid[months])}</div>${kRows([`📅 ${T('Per year')}`, money0(perYear)], [`⏳ ${T('Years')}`, P.years])}</div>
-        ${end.map((x, i) => `<div class="kpi ${x >= paid[months] - 50 ? 'g-emerald' : 'g-rose'}"><div class="k-label">${['🐢', '🚶', '🚀'][i]} ${[T('Prudent'), T('Middle'), T('Optimistic')][i]} · ${num(P.rates[i], 1)}%</div><div class="k-value">${money0(x)}</div>${kRows([`📈 ${T('Growth')}`, money0(Math.abs(x - paid[months]) < 50 ? 0 : x - paid[months])])}</div>`).join('')}
+        <div class="kpi g-sky"><div class="k-label"><i class="k-swatch dashed" style="--sw:${C.transfer}"></i>💶 ${T('Money put in')}</div><div class="k-value">${money0(paid[months])}</div>${kRows([`📅 ${T('Per year')}`, money0(perYear)], [`⏳ ${T('Years')}`, P.years])}</div>
+        ${end.map((x, i) => `<div class="kpi" ${kColor(LINES[i])}><div class="k-label"><i class="k-swatch" style="background:${LINES[i]}"></i>${['🐢', '🚶', '🚀'][i]} ${[T('Prudent'), T('Middle'), T('Optimistic')][i]} · ${num(P.rates[i], 1)}%</div><div class="k-value">${money0(x)}</div>${kRows([`📈 ${T('Growth')}`, money0(Math.abs(x - paid[months]) < 50 ? 0 : x - paid[months])])}</div>`).join('')}
       </div>${P.inflation ? `<p class="muted small">ℹ️ ${T('Values in today\'s money: inflation of {percent} per year taken out.', { percent: num(P.inflation, 1) + '%' })}</p>` : ''}
+      ${P.goal ? `<div class="card-head" style="margin-top:14px"><div><h3>🎯 ${T('To reach {amount} in {years}', { amount: money0(P.goal), years: tn('{n} year', '{n} years', P.years) })}</h3>
+        <p class="muted small" style="margin:3px 0 0">${T('How much to put in each time, in each scenario, starting from the starting value.')}</p></div></div>
+        <div class="kpis">${P.rates.map((r, i) => { const x = needed(r); return `<div class="kpi" ${kColor(LINES[i])}><div class="k-label"><i class="k-swatch" style="background:${LINES[i]}"></i>${['🐢', '🚶', '🚀'][i]} ${[T('Prudent'), T('Middle'), T('Optimistic')][i]} · ${num(r, 1)}%</div>
+          <div class="k-value">${x.amount == null ? '—' : x.amount <= 0 ? '✅' : money0(x.amount)}</div>${kRows(x.amount != null && x.amount > 0 ? [`📅 ${T('How often')}`, (EVERY.find(([k]) => k === x.every) || EVERY[0])[1]] : x.amount != null && [`✅ ${T('Already enough')}`, T('the starting value gets there')])}</div>`; }).join('')}</div>` : ''}
       <div class="chart-box" style="height:280px"><canvas id="pp-chart"></canvas></div>`;
     chart($('#pp-chart', box), { type: 'line', data: { labels: at(paid).map((_, i) => i), datasets: [
-      ...series.map((s, i) => ({ label: [T('Prudent'), T('Middle'), T('Optimistic')][i], data: at(s), borderColor: [C.left, C.terracotta, C.in][i], borderWidth: 2, pointRadius: 0, tension: .3 })),
+      ...series.map((s, i) => ({ label: [T('Prudent'), T('Middle'), T('Optimistic')][i], data: at(s), borderColor: LINES[i], borderWidth: 2, pointRadius: 0, tension: .3 })),
       { label: T('Money put in'), data: at(paid), borderColor: C.transfer, borderDash: [5, 4], borderWidth: 2, pointRadius: 0 }] },
       options: { maintainAspectRatio: false, interaction: { mode: 'index', intersect: false }, scales: { y: { ticks: { callback: (x) => moneyK(x) } }, x: { title: { display: true, text: T('Years') }, grid: { display: false } } },
         plugins: { legend: { position: 'bottom', labels: { usePointStyle: true, boxWidth: 8 } }, tooltip: { callbacks: { label: (c) => ` ${c.dataset.label}: ${money0(c.raw)}` } } } } });
@@ -4206,25 +4694,42 @@ async function ptProjection(box) {
 }
 
 async function ptBenchmark(box) {
-  S.ptBench ||= { ticker: 'VWCE.DE', months: '36' };
+  S.ptBench ||= { ticker: 'VWCE.DE' };
   const B = S.ptBench;
+  B.months = monthsFor(['12', '24', '36', '60', '120']);
   box.innerHTML = `<div class="card"><div class="card-head"><div><h3>📊 ${T('Comparison with an index')}</h3><p class="muted small" style="margin:3px 0 0">${T('Your investments against an index or ETF, month by month. Your return is time-weighted: money you add or take out does not count as performance. Only the ticker is sent to Yahoo Finance.')}</p></div></div>
     <div class="inline-form"><input id="pb-t" maxlength="30" value="${esc(B.ticker)}" placeholder="VWCE.DE">
-      <select id="pb-m">${[['12', T('Last 12 months')], ['36', T('Last 36 months')], ['60', T('Last 5 years')], ['120', T('Last 10 years')]].map(([k, l]) => `<option value="${k}" ${k === B.months ? 'selected' : ''}>${l}</option>`).join('')}</select>
+      <select id="pb-m">${[['12', T('Last 12 months')], ['24', T('Last 24 months')], ['36', T('Last 36 months')], ['60', T('Last 5 years')], ['120', T('Last 10 years')]].map(([k, l]) => `<option value="${k}" ${k === B.months ? 'selected' : ''}>${l}</option>`).join('')}</select>
       <button class="btn btn-primary" id="pb-go">📊 ${T('Compare')}</button></div><div id="pb-out"></div></div>`;
   const go = async () => {
-    B.ticker = $('#pb-t', box).value.trim().toUpperCase(); B.months = $('#pb-m', box).value;
+    B.ticker = $('#pb-t', box).value.trim().toUpperCase(); B.months = $('#pb-m', box).value; chooseMonths(B.months);
     const out = $('#pb-out', box);
     out.innerHTML = `<div class="loading">${T('Loading…')}</div>`;
     try {
       const d = await api('/portfolio/benchmark' + ptQuery({ ticker: B.ticker, months: B.months }));
       const sign = (x) => (x >= 0 ? 'g-emerald' : 'g-rose');
+      // the two boxes take the colors of their lines in the chart below (same legend), the value says up or down
+      const signed = (x) => `<span class="${x >= 0 ? 'pos' : 'neg'}">${pctS2(x)}</span>`;
       out.innerHTML = `<div class="kpis" style="margin-top:14px">
-          <div class="kpi ${sign(d.portfolio.total)}"><div class="k-label">💼 ${T('Your investments')}</div><div class="k-value">${pctS2(d.portfolio.total)}</div>${kRows(d.portfolio.yearly != null && [`📅 ${T('Per year')}`, pctS2(d.portfolio.yearly)], [`📉 ${T('Largest fall')}`, pctS2(d.portfolio.drawdown)])}</div>
-          <div class="kpi ${sign(d.benchmark.total)}"><div class="k-label">📊 ${esc(d.ticker)}</div><div class="k-value">${pctS2(d.benchmark.total)}</div>${kRows(d.benchmark.yearly != null && [`📅 ${T('Per year')}`, pctS2(d.benchmark.yearly)], [`📉 ${T('Largest fall')}`, pctS2(d.benchmark.drawdown)])}</div>
+          <div class="kpi" ${kColor(C.total)}><div class="k-label"><i class="k-swatch" style="background:${C.total}"></i>💼 ${T('Your investments')}</div><div class="k-value">${signed(d.portfolio.total)}</div>${kRows(d.portfolio.yearly != null && [`📅 ${T('Per year')}`, pctS2(d.portfolio.yearly)], [`📉 ${T('Largest fall')}`, pctS2(d.portfolio.drawdown)])}</div>
+          <div class="kpi" ${kColor(C.bench)}><div class="k-label"><i class="k-swatch dashed" style="--sw:${C.bench}"></i>📊 ${esc(d.ticker)}</div><div class="k-value">${signed(d.benchmark.total)}</div>${kRows(d.benchmark.yearly != null && [`📅 ${T('Per year')}`, pctS2(d.benchmark.yearly)], [`📉 ${T('Largest fall')}`, pctS2(d.benchmark.drawdown)])}</div>
           <div class="kpi ${sign(d.portfolio.total - d.benchmark.total)}"><div class="k-label">⚖️ ${T('Difference')}</div><div class="k-value">${pctS2(d.portfolio.total - d.benchmark.total)}</div>${kRows([`📅 ${T('Months')}`, d.months])}</div>
         </div>${d.missing_months ? `<p class="muted small">ℹ️ ${tn('{n} month without a price of the index', '{n} months without a price of the index', d.missing_months)}</p>` : ''}
-        <div class="chart-box" style="height:280px"><canvas id="pb-chart"></canvas></div>`;
+        <div class="chart-box" style="height:280px"><canvas id="pb-chart"></canvas></div>
+        ${d.portfolio.volatility != null || d.benchmark.volatility != null ? (() => {
+          // risk (2.7.0): how bumpy the ride was, yours and the index's, side by side
+          const P = d.portfolio, Bm = d.benchmark;
+          const mo = (x) => (x ? `<span class="${x.r >= 0 ? 'pos' : 'neg'}">${pctS2(x.r)}</span> <span class="muted small">${esc(fmtMonth(x.month))}</span>` : '—');
+          const rows = [
+            ['🌊', T('Volatility (per year)'), T('How much the monthly returns move around their average: standard deviation × √12. Higher = a bumpier ride.'), (x) => (x.volatility == null ? '—' : pct2(x.volatility))],
+            ['☀️', T('Best month'), T('The largest monthly gain in the period.'), (x) => mo(x.best)],
+            ['🌧️', T('Worst month'), T('The largest monthly loss in the period.'), (x) => mo(x.worst)],
+            ['⚖️', T('Return per unit of risk'), T('Yearly return ÷ volatility (a Sharpe ratio without the risk-free rate): higher = more return for the same ups and downs. Needs at least 12 months.'), (x) => (x.ratio == null ? '—' : fix2(x.ratio))],
+          ];
+          return `<div class="table-wrap" style="margin-top:14px"><table class="sp-table pb-risk"><thead><tr><th>${T('Risk')}</th>
+            <th class="right"><i class="k-swatch" style="background:${C.total}"></i>${T('Your investments')}</th><th class="right"><i class="k-swatch dashed" style="--sw:${C.bench}"></i>${esc(d.ticker)}</th></tr></thead><tbody>
+            ${rows.map(([i, l, tip, f]) => `<tr title="${esc(tip)}"><td>${i} ${l}</td><td class="right num">${f(P)}</td><td class="right num">${f(Bm)}</td></tr>`).join('')}</tbody></table></div>`;
+        })() : ''}`;
       chart($('#pb-chart', box), { type: 'line', data: { labels: d.points.map((p) => fmtMonth(p.month)), datasets: [
         { label: T('Your investments'), data: d.points.map((p) => p.portfolio * 100), borderColor: C.total, borderWidth: 2.5, pointRadius: 0, tension: .25 },
         { label: d.ticker, data: d.points.map((p) => (p.benchmark == null ? null : p.benchmark * 100)), borderColor: C.bench, borderDash: [5, 4], borderWidth: 2, pointRadius: 0, tension: .25 }] },
@@ -4233,18 +4738,18 @@ async function ptBenchmark(box) {
     } catch (e) { out.innerHTML = calcNotes([{ level: 'warn', text: e.message }]); }
   };
   $('#pb-go', box).onclick = go;
+  $('#pb-m', box).onchange = go;  // a new period: compared again at once (and remembered for the other analyses)
 }
 
 // ================================================================ savings and net worth
 async function renderRisparmio(v) {
-  S.savMonths ||= '12';
+  S.savMonths = monthsFor(['6', '12', '24', '36', 'all']);
   const d = await api('/tools/savings?months=' + S.savMonths);
   const t = d.savings.total, rows = d.savings.months, nw = d.net_worth;
   const n = rows.filter((r) => r.income || r.expense || r.from_others).length || 1;
   const signed = (c) => (c ? (c > 0 ? '' : '−') + money0(Math.abs(c)) : '—');
   v.innerHTML = `
-    <div class="toolbar"><select id="sv-months">${[['6', T('Last 6 months')], ['12', T('Last 12 months')], ['24', T('Last 24 months')], ['36', T('Last 36 months')], ['all', T('All')]].map(([k, l]) => `<option value="${k}" ${k === String(S.savMonths) ? 'selected' : ''}>${l}</option>`).join('')}</select>
-      <details class="help" style="flex:1 1 260px"><summary>ℹ️ ${T('How it works')}</summary><p>${T('Every month: income = spent + other spaces + saved (the month\'s surplus). Next to it, invested: purchases − sales of securities in investment accounts (money market ETFs are cash and do not count), even if paid with earlier savings · other spaces = transfers and contributions to other spaces.')}</p></details></div>
+    <div class="toolbar"><select id="sv-months">${[['6', T('Last 6 months')], ['12', T('Last 12 months')], ['24', T('Last 24 months')], ['36', T('Last 36 months')], ['all', T('All')]].map(([k, l]) => `<option value="${k}" ${k === String(S.savMonths) ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
     <div class="kpis">
       <div class="kpi g-amber"><div class="k-label">🐷 ${T('Savings rate')}</div><div class="k-value">${t.rate == null ? '—' : pct(t.rate)}</div>${kRows([`📅 ${T('Saved per month')}`, money0(t.saved / n)])}</div>
       <div class="kpi g-indigo" title="${esc(T('purchases − sales of securities'))}"><div class="k-label">📈 ${T('Invested per month')}</div><div class="k-value">${money0(t.invested / n)}</div>${kRows(t.invest_rate != null && [`📊 ${T('Of income')}`, pct(t.invest_rate)],
@@ -4265,7 +4770,7 @@ async function renderRisparmio(v) {
         <td class="right">${signed(r.to_others)}</td><td class="right ${now ? '' : r.saved >= 0 ? 'pos' : 'neg'}"><b>${signed(r.saved)}</b></td>
         <td class="right">${r.rate == null || now ? '—' : pct(r.rate)}</td><td class="right ${r.invested < 0 ? 'neg' : ''}">${signed(r.invested)}</td></tr>`;
       }).join('')}</tbody></table></div></div>`;
-  $('#sv-months').onchange = (e) => { S.savMonths = e.target.value; route(); };
+  $('#sv-months').onchange = (e) => { chooseMonths(e.target.value); route(); };
   const labels = rows.map((r) => fmtMonth(r.month));
   const bar = (label, key, color) => ({ type: 'bar', label, data: rows.map((r) => r[key]), backgroundColor: color, stack: 's', maxBarThickness: 34 });
   chart($('#sv-bar'), {
@@ -4684,7 +5189,8 @@ async function backupCompareModal(name) {
       const card = (x, box, set) => `<div class="ri"><span class="ri-date">${x.date ? fmtDate(String(x.date).slice(0, 10)) : ''}</span><span class="ri-desc">${esc(x.label)}</span>
         <span class="ri-amt">${amount(x)}</span><div class="ri-act">${box ? `<label><input type="checkbox" data-${box}="${x.id}" ${set.has(x.id) ? 'checked' : ''}> ${box === 'put' ? T('Put back') : T('Take back to how it was')}</label>` : ''}<span class="muted">${desc(x)}</span></div></div>`;
       const sec = (title, html) => (html ? `<div class="small" style="margin-top:12px"><b>${title}</b></div><div class="ri-list">${html}</div>` : '');
-      $('#bc-out', m).innerHTML = sec(`🗑 ${T('Deleted since then')}`, d.deleted.map((x) => card(x, 'put', put[tab])).join(''))
+      $('#bc-out', m).innerHTML = (d.same ? `<div class="muted small">✅ ${tn('{n} row is the same as now', '{n} rows are the same as now', d.same)}</div>` : '')
+        + sec(`🗑 ${T('Deleted since then')}`, d.deleted.map((x) => card(x, 'put', put[tab])).join(''))
         + sec(`✏️ ${T('Changed since then')}`, d.changed.map((c) => card({ ...c.before }, 'rev', rev[tab])
           .replace('</div></div>', `</div><div class="ri-note muted">${T('now')}: ${esc(c.after.label)} · ${amount(c.after)} · ${desc(c.after)}</div></div>`)).join(''))
         + sec(`＋ ${T('Added since then')}`, d.added.map((x) => card(x)).join(''))
@@ -4758,28 +5264,61 @@ async function applyUpdate() {
   if (!(await confirmDialog(T('HomeCoin will download version {version} from GitHub, verify its signature and SHA-256, save an encrypted backup of the database and install it. Then it restarts by itself (about a minute). Your data is not touched.', { version: u.latest }),
     { ok: `⬆ ${T('Update to {version}', { version: esc(u.latest) })}`, danger: false, title: T('🔄 Update HomeCoin') }))) return;
   if (btn) { btn.disabled = true; btn.textContent = T('⏳ Downloading and verifying…'); }
+  // from here the whole window is covered: nothing can be clicked while the update runs, and the steps say what is
+  // happening (download, checks and backup are one request; then install and restart)
+  const steps = [T('Download from GitHub'), T('Signature and SHA-256 check'), T('Encrypted backup of the database'), T('Installation'), T('Restart')];
+  const busy = busyScreen(`🔄 ${T('Updating to {version}', { version: u.latest })}`, steps,
+    T('Do not close this window: it reloads by itself when HomeCoin is back.'));
+  busy.step(0);
   let r;
   try { r = await api('/update/apply', { method: 'POST' }); } catch (e) {
+    busy.close();
     fail(e);
     if (btn) { btn.disabled = false; btn.textContent = `⬆ ${T('Update to {version}', { version: u.latest })}`; }
     return;
   }
+  busy.step(3);
   document.body.classList.add('locked');
   wipeView();
-  $('#lock-body').innerHTML = `<h2>${T('Updating to {version}', { version: esc(r.version) })} ⏳</h2>
-    <p class="muted small" id="upd-msg">${T('The new version was verified and is being installed. This page reloads by itself when HomeCoin is back.')}</p>`;
+  $('#lock-body').innerHTML = '';
   const started = Date.now();
+  let down = false;
   const poll = async () => {
     try {
       const st = await fetch('/api/auth/status', { headers: { 'X-HomeCoin': '1' } }).then((x) => x.json());
-      if (st.version === r.version) { location.replace('/'); return; }
-    } catch { /* restarting */ }
-    if (Date.now() - started > 180000 && $('#upd-msg')) {
-      $('#upd-msg').textContent = T('This is taking longer than expected. If HomeCoin does not come back, open it again from its shortcut (or with HomeCoin.cmd in the ZIP version).');
+      if (st.version === r.version) { busy.step(steps.length); location.replace('/'); return; }
+    } catch { if (!down) { down = true; busy.step(4); } }  // the old version has stopped: restarting
+    if (Date.now() - started > 180000) {
+      busy.note(T('This is taking longer than expected. If HomeCoin does not come back, open it again from its shortcut (or with HomeCoin.cmd in the ZIP version).'), true);
     }
     setTimeout(poll, 2000);
   };
   setTimeout(poll, 3000);
+}
+
+// a screen over the whole window for a long operation that must not be interrupted: title, the steps (done ✓,
+// running, waiting), a moving bar, the time passed and a note. step(i) = steps before i done, i running
+function busyScreen(title, steps, note = '') {
+  const el = document.createElement('div');
+  el.className = 'busy-screen';
+  el.setAttribute('role', 'alertdialog'); el.setAttribute('aria-busy', 'true'); el.setAttribute('aria-label', title);
+  el.innerHTML = `<div class="busy-card"><div class="busy-spin" aria-hidden="true"></div><h2>${esc(title)}</h2>
+    <ol class="busy-steps">${steps.map((s) => `<li><span class="b-dot"></span>${esc(s)}</li>`).join('')}</ol>
+    <div class="busy-bar"><i></i></div><p class="muted small busy-time"></p><p class="small busy-note">${esc(note)}</p></div>`;
+  document.body.append(el);
+  document.activeElement?.blur?.();
+  const t0 = Date.now();
+  const tick = setInterval(() => {
+    const s = Math.round((Date.now() - t0) / 1000);
+    $('.busy-time', el).textContent = T('Time passed: {time}', { time: `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}` });
+  }, 1000);
+  const block = (e) => { e.preventDefault(); e.stopPropagation(); };
+  window.addEventListener('keydown', block, true);
+  return {
+    step(i) { $$('.busy-steps li', el).forEach((li, j) => { li.classList.toggle('done', j < i); li.classList.toggle('run', j === i); }); },
+    note(text, warn = false) { const n = $('.busy-note', el); n.textContent = text; n.classList.toggle('warn', warn); },
+    close() { clearInterval(tick); window.removeEventListener('keydown', block, true); el.remove(); },
+  };
 }
 
 // ================================================================ security check

@@ -2,6 +2,35 @@
 
 All notable changes to HomeCoin are listed here, newest first.
 
+## 2.7.0 — 2026-11-17
+
+**New**
+- **Portfolio analysis → Income and gains**, a new tab: the total gain of your investments (value − money put in) with its return and XIRR, split into gains not yet realized, gains realized with sales, dividends, interest and fees (and *Other*, what those parts do not explain, shown rather than hidden); year by year as a chart and a table; per security, with the dividend yield of the last 12 months. Figures only: no taxes.
+- **Commissions paid** in Portfolio analysis → Costs: the fees of every buy and sale plus the fees recorded as trades, in total, in the last 12 months, by year and by account. In *Income and gains* the commissions are now a cost of their own instead of being hidden in the average cost.
+- **Trades from Transactions:** filtering on an investment account (or clicking its card) shows its trades above the list, to see and correct past buys, sales, dividends and fees.
+- **Comparison with an index: risk.** Volatility per year, best and worst month, and return per unit of risk (a Sharpe ratio without the risk-free rate), yours and the index's side by side.
+- **Projection the other way round:** type the amount to reach and see how much to put in each time, in each scenario.
+- **Accounts → Check against the bank statement** (reconciliation): type the statement balance and its date; HomeCoin shows the difference and its likely causes (records dated after it, one equal to the difference, one in the wrong direction, two identical records). It records nothing; *Record the difference* opens a normal transaction already filled in. A matching check shows *Checked with the bank up to* on the account card.
+- **Dashboard:** under income, money out and savings, the change against the previous period of the same length (▲▼, green when it is good news); and **Budgets nearly used up**, the categories at 90% or more of this month's budget.
+- **Recurring → Subscriptions and services:** every recurring expense that is not a loan, per year and per month, its share of the fixed income, by category, with the largest items.
+- **Calendar → Lowest point:** the least cash of the projection, when it happens, and a **minimum to keep** of your choice, with a warning on the first day the projection goes below it.
+- **Budgets → Carry over:** per category, what is not spent in a month passes to the next one (and overspending is taken from it), from the month you turn it on.
+- **Goals:** for goals tied to an account, when you get there at the pace of the last 6 months, and whether that is in time.
+- **Emergency fund:** the months covered month by month for the last year against your target, your plan (the pace of the last 6 months, when you reach the target, what is above it), how much to set aside to reach it in a number of months, and how an unexpected expense would change the months covered.
+- **The analysis period is one for all and is remembered** after closing HomeCoin: Dashboard and Reports share the period, Investments, Savings and the index comparison share the months, and the two follow each other where they mean the same thing.
+- **ℹ️ How it works on every page:** the same small button next to the page title opens a panel on the right with what the page is for, its main figures in two or three short lines and a link to its section of the guide. On a wide screen the page makes room for it. The longer explanations that were inside a few pages (Calendar, Investments, Savings) moved there.
+- **Updating** now covers the whole window with the steps (download, checks, backup, installation, restart), a moving bar and the time passed: nothing can be clicked meanwhile.
+
+**Fixed and improved**
+- **Uninvested cash did not follow corrected trades.** Editing a buy or a sale kept its old total, so changing quantity, price or fees did not change the cash. The total from the statement is now shown only when it differs from quantity × price ± fees, and it is cleared when you correct those; the empty box shows the calculated total. Trades already saved with a total far from the calculation are marked *Total to check*.
+- **Portfolio analysis:** the broker cash is known: it is its own line, *Cash on the broker*, in areas, countries and markets, no longer under *What is not known*. Countries with a weight that would read 0.00% are no longer listed or highlighted on the map.
+- **Comparing with an older backup** after a restore (or after transactions were deleted and recorded again) showed almost everything as changed: rows are now recognized by their content too, and *take back to how it was* changes the matching current row. The comparison says how many rows are the same as now. The same in the comparison of a single account.
+- **Hidden amounts** (👁): a soft veil instead of a blocky blur, and every amount is covered: all 27 currencies, unit prices of foreign securities, amount fields while not being edited, chart labels drawn on the chart and tooltips.
+- **Colors:** the boxes of the index comparison and of the projection have the colors of their lines in the chart; in *Your areas against the world market* both bars have the row's color (solid = yours, striped = the world) and the legend says so; the correlation matrix uses the palette.
+- **Messages after an action** in the palette colors with an icon: green done, yellow done with something to check, red error, violet information.
+- **Dashboard:** clicking the income or the expenses bar of a month opened the whole month in languages other than English; it now opens that type. The average line of the Reports chart was written in English in every language.
+- Database schema 19 (budget carry-over); older backups restore as before.
+
 ## 2.6.1 — 2026-11-17
 
 - **New logo** in the colors of the app: a house in front of a gold coin, on the violet of the totals, with the door cut out so the coin shows through. The program icon, the browser tab, the *HomeCoin* name in the menu and the welcome banner follow the same colors.
